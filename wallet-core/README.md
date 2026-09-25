@@ -196,7 +196,7 @@ Fluxo de branches, convenção de commits e processo de release estão em [`CONT
 
 - **Trunk-based**: `main` sempre testável/publicável; branches curtas `feature/*`, `fix/*`, `chore/*`.
 - **Conventional Commits** nos títulos de PR (`feat:`, `fix:`, `docs:`, …) — vira a mensagem de commit em `main` via squash merge.
-- **Release por tag**: `git tag vX.Y.Z && git push origin vX.Y.Z` dispara `.github/workflows/release.yml`, que builda, testa de novo, publica a imagem no GHCR (`ghcr.io/<repo>:vX.Y.Z`) e cria a GitHub Release com notas automáticas.
+- **Release por tag**: `git tag wallet-core-vX.Y.Z && git push origin wallet-core-vX.Y.Z` dispara `.github/workflows/release.yml`, que builda, testa de novo, publica a imagem no GHCR (`ghcr.io/erikmatioli/wallet/wallet-core:vX.Y.Z`) e cria a GitHub Release com notas automáticas. O prefixo `wallet-core-` existe porque o repositório é um monorepo (`wallet/`) — ver ADR-009.
 - **CI em todo PR/push** (`.github/workflows/ci.yml`): `mvn verify` completo, build + scan de vulnerabilidades (Trivy) da imagem Docker, validação do título do PR.
 
 Pipeline (`ci.yml` + `release.yml` + `build-test.yml` reutilizável) assume **GitHub Actions** e **GHCR** — não foi executado neste ambiente (sem acesso à API do GitHub); a sintaxe YAML foi validada, mas vale revisar o primeiro run real, sobretudo os passos de permissão do `GITHUB_TOKEN` (documentados no CONTRIBUTING).

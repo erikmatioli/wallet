@@ -1,0 +1,20 @@
+# Requisita revisão automaticamente quando um PR toca esses caminhos.
+# Ajuste os times/usuários abaixo para os reais antes de habilitar branch protection
+# com "Require review from Code Owners" (ver wallet-core/CONTRIBUTING.md).
+#
+# Repositório monorepo: caminhos abaixo são relativos à raiz do repo (onde este arquivo mora),
+# não à raiz de cada projeto individual.
+
+# Fallback: qualquer coisa não coberta abaixo
+* @erikmatioli
+
+# Pipeline e infraestrutura de release, compartilhados entre projetos deste repo
+/.github/                  @erikmatioli
+
+# --- wallet-core ---
+# Núcleo financeiro: mudanças aqui merecem revisão extra
+/wallet-core/wallet-domain/            @erikmatioli
+/wallet-core/wallet-application/       @erikmatioli
+/wallet-core/wallet-adapter-out-persistence/db/migration/  @erikmatioli
+/wallet-core/Dockerfile                @erikmatioli
+/wallet-core/docker-compose.yml        @erikmatioli
