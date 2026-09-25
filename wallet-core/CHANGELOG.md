@@ -13,3 +13,4 @@ Formato geral: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/). Vers
 - Observabilidade: métricas de negócio, tracing OpenTelemetry, auditoria contínua com alertas de
   inconsistência (ver `docs/adr/007-observabilidade.md`).
 - Fluxo de controle de versão e pipeline de CI/CD (ver `CONTRIBUTING.md` e `docs/adr/008-versionamento-e-cicd.md`).
+- inicio do código em 20/09/2026
