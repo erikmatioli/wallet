@@ -42,7 +42,7 @@ class SecurityConfig {
     @Order(2)
     SecurityFilterChain apiChain(HttpSecurity http) throws Exception {
         http.authorizeHttpRequests(a -> a
-                        .requestMatchers("/.well-known/jwks.json", "/actuator/health/**", "/actuator/info").permitAll()
+                        .requestMatchers("/.well-known/jwks.json", "/actuator/health/**", "/actuator/info", "/actuator/prometheus", "/actuator/metrics").permitAll()
                         .requestMatchers(HttpMethod.POST, "/v1/customers").hasAuthority("SCOPE_customers:write")
                         .requestMatchers(HttpMethod.GET, "/v1/accounts/*/audit").hasAuthority("SCOPE_ledger:audit")
                         .requestMatchers(HttpMethod.GET, "/v1/accounts/**").hasAuthority("SCOPE_accounts:read")

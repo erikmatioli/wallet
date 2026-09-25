@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   build-test:
-    uses: ./.github/workflows/build-test.yml
+    uses: ./wallet-core/.github/workflows/build-test.yml
 
   pr-title:
     name: Conventional PR title

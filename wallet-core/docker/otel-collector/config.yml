@@ -10,7 +10,7 @@ receivers:
         endpoint: 0.0.0.0:4317
 
 exporters:
-  otlp/jaeger:
+  otlp:
     endpoint: jaeger:4317
     tls:
       insecure: true
@@ -25,4 +25,4 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/jaeger, debug]
+      exporters: [otlp, debug]
