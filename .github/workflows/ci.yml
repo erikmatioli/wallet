@@ -1,16 +1,27 @@
-name: CI
+name: CI - wallet-core
 
-# Trunk-based flow (see CONTRIBUTING.md): every PR into main, and every push to main once a
-# PR merges, goes through the same checks. There is no separate "develop" branch pipeline.
+# Trunk-based flow (see wallet-core/CONTRIBUTING.md): every PR into main, and every push to main
+# once a PR merges, goes through the same checks. There is no separate "develop" branch pipeline.
+#
+# Scoped to wallet-core/ with path filters: this is a monorepo, and a change to a future sibling
+# project should not trigger (or block on) wallet-core's own CI.
 on:
   pull_request:
     branches: [main]
+    paths:
+      - "wallet-core/**"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/build-test.yml"
   push:
     branches: [main]
+    paths:
+      - "wallet-core/**"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/build-test.yml"
 
 concurrency:
   # A new push to the same PR/branch cancels the previous run - no point finishing an outdated build.
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-wallet-core-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -19,6 +30,8 @@ permissions:
 jobs:
   build-test:
     uses: ./.github/workflows/build-test.yml
+    with:
+      project-dir: wallet-core
 
   pr-title:
     name: Conventional PR title
@@ -54,7 +67,7 @@ jobs:
       - name: Build image (local, for scanning)
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: wallet-core
           push: false
           load: true
           tags: wallet-core:ci
@@ -84,7 +97,7 @@ jobs:
 
       - name: Compute image name (lowercase, GHCR requires it)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: echo "IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+        run: echo "IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')/wallet-core" >> "$GITHUB_ENV"
 
       # main always publishes a rolling ":edge" image - handy for staging/manual testing between
       # releases, without it ever being mistaken for a versioned, released artifact (see release.yml).
@@ -92,7 +105,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: wallet-core
           push: true
           tags: |
             ${{ env.IMAGE }}:edge

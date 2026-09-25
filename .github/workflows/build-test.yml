@@ -3,8 +3,17 @@ name: Build & test (reusable)
 # Reusable workflow: the single source of truth for "does this codebase build and pass its
 # tests". Called by both ci.yml (every push/PR) and release.yml (every tag) so the two never
 # drift apart - a release is never built from a path that CI didn't already verify.
+#
+# Takes project-dir so the same workflow can be reused by other projects that may join this
+# repo later (a monorepo) - each project's own caller workflow just passes its own subfolder.
 on:
   workflow_call:
+    inputs:
+      project-dir:
+        description: "Subfolder containing this project's pom.xml (repo root if empty)"
+        required: false
+        type: string
+        default: wallet-core
 
 permissions:
   contents: read
@@ -13,6 +22,9 @@ jobs:
   verify:
     name: mvn verify
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-dir }}
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +34,7 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
+          cache-dependency-path: ${{ inputs.project-dir }}/**/pom.xml
 
       # ubuntu-latest ships Docker pre-installed and running, which is what
       # WalletCoreConcurrencyTest needs (Testcontainers starts a throwaway PostgreSQL).
@@ -38,9 +51,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
+          name: test-reports-${{ inputs.project-dir }}
           path: |
-            **/target/surefire-reports/**
-            **/target/failsafe-reports/**
+            ${{ inputs.project-dir }}/**/target/surefire-reports/**
+            ${{ inputs.project-dir }}/**/target/failsafe-reports/**
           if-no-files-found: ignore
           retention-days: 14

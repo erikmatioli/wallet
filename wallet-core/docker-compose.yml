@@ -28,14 +28,8 @@ services:
       DB_PASSWORD: wallet_app
       DB_MIGRATION_USER: wallet_owner
       DB_MIGRATION_PASSWORD: wallet_owner
-
-      # Configurações explícitas do OpenTelemetry para HTTP:
-      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-      OTEL_SERVICE_NAME: wallet-core
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
-      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"   # trace every request locally; lower this in production
-      OTEL_LOG_LEVEL: debug
-
+      TRACING_SAMPLING_PROBABILITY: "1.0"   # trace every request locally; lower this in production
     ports:
       - "8080:8080"
 
@@ -48,7 +42,7 @@ services:
   # ---------------------------------------------------------------------------------
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.113.0
     command: ["--config=/etc/otel-collector-config.yml"]
     volumes:
       - ./docker/otel-collector/config.yml:/etc/otel-collector-config.yml:ro
@@ -58,14 +52,14 @@ services:
       - jaeger
 
   jaeger:
-    image: jaegertracing/all-in-one:latest
+    image: jaegertracing/all-in-one:1.62
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
       - "16686:16686"   # Jaeger UI: http://localhost:16686
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.0.1
     volumes:
       - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./docker/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro

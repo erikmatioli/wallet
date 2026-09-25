@@ -66,14 +66,16 @@ O `pom.xml` em `main` permanece com uma versão `-SNAPSHOT` fixa (não é increm
 ```bash
 git checkout main
 git pull
-git tag v0.2.0          # escolha o número seguindo a seção 4
-git push origin v0.2.0
+git tag wallet-core-v0.2.0          # escolha o número seguindo a seção 4
+git push origin wallet-core-v0.2.0
 ```
+
+O prefixo `wallet-core-` existe porque este é um repositório monorepo (`wallet/`): quando um segundo projeto entrar no mesmo repo, ele terá seu próprio prefixo de tag (ex.: `outro-projeto-v1.0.0`) e seu próprio workflow de release, sem ambiguidade sobre qual projeto uma tag `v1.2.3` isolada estaria se referindo.
 
 Isso dispara `.github/workflows/release.yml`, que sozinho:
 1. Roda `mvn verify` de novo (rede de segurança — nunca confie apenas no CI que rodou dias atrás no PR).
 2. Define a versão Maven a partir da tag e empacota o jar.
-3. Builda e publica a imagem Docker no GHCR com três tags: `vX.Y.Z` completo, `X.Y` (major.minor) e `latest`.
+3. Builda e publica a imagem Docker no GHCR com três tags: `vX.Y.Z` completo, `X.Y` (major.minor) e `latest`, sob `ghcr.io/erikmatioli/wallet/wallet-core`.
 4. Cria uma GitHub Release com notas geradas automaticamente (agrupadas pelos labels dos PRs, ver `.github/release.yml`) e o jar anexado.
 
 Não existe passo manual de "aprovar a release" — a tag *é* a aprovação. Se algo der errado depois de já ter dado tag, a correção é uma nova tag de patch, nunca mover ou apagar uma tag já publicada.
@@ -82,10 +84,10 @@ Não existe passo manual de "aprovar a release" — a tag *é* a aprovação. Se
 
 Se `main` já tem mudanças incompatíveis com a versão que precisa do hotfix:
 ```bash
-git checkout -b fix/algo-critico v1.4.2   # nasce da tag, não de main
+git checkout -b fix/algo-critico wallet-core-v1.4.2   # nasce da tag, não de main
 # ... corrige, PR, merge nessa branch (não em main) ...
-git tag v1.4.3
-git push origin v1.4.3
+git tag wallet-core-v1.4.3
+git push origin wallet-core-v1.4.3
 ```
 Depois, considere se a correção também precisa ser portada para `main` via um PR normal.
 
@@ -93,11 +95,11 @@ Depois, considere se a correção também precisa ser portada para `main` via um
 
 | Tag | Quando é publicada | Uso pretendido |
 |---|---|---|
-| `ghcr.io/<repo>:edge` | A cada push em `main` | Testar o que está em `main` agora, antes da próxima release |
-| `ghcr.io/<repo>:sha-<commit>` | A cada push em `main` | Referenciar um commit exato (rollback preciso, debugging) |
-| `ghcr.io/<repo>:vX.Y.Z` | A cada tag de release | Deploy em produção — sempre uma versão exata, nunca `latest` |
-| `ghcr.io/<repo>:X.Y` | A cada tag de release | Aponta para o patch mais recente daquela minor, se você quiser receber patches automaticamente |
-| `ghcr.io/<repo>:latest` | A cada tag de release | Conveniência para testar localmente; não use em produção |
+| `ghcr.io/erikmatioli/wallet/wallet-core:edge` | A cada push em `main` | Testar o que está em `main` agora, antes da próxima release |
+| `ghcr.io/erikmatioli/wallet/wallet-core:sha-<commit>` | A cada push em `main` | Referenciar um commit exato (rollback preciso, debugging) |
+| `ghcr.io/erikmatioli/wallet/wallet-core:vX.Y.Z` | A cada tag de release | Deploy em produção — sempre uma versão exata, nunca `latest` |
+| `ghcr.io/erikmatioli/wallet/wallet-core:X.Y` | A cada tag de release | Aponta para o patch mais recente daquela minor, se você quiser receber patches automaticamente |
+| `ghcr.io/erikmatioli/wallet/wallet-core:latest` | A cada tag de release | Conveniência para testar localmente; não use em produção |
 
 ## 7. O que ainda não está automatizado (próximos passos)
 
