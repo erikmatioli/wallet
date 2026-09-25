@@ -65,7 +65,7 @@ jobs:
       # build" check that would have caught the transient dependency issue found while testing
       # this project manually, before it reaches main.
       - name: Build image (local, for scanning)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: wallet-core
           push: false
@@ -103,7 +103,7 @@ jobs:
       # releases, without it ever being mistaken for a versioned, released artifact (see release.yml).
       - name: Build & push :edge (main only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: wallet-core
           push: true
