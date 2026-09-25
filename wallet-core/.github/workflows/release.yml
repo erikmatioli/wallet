@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   build-test:
-    uses: ./wallet-core/.github/workflows/build-test.yml
+    uses: ./.github/workflows/build-test.yml
 
   release:
     name: Build, publish image, create release
