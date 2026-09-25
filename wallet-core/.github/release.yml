@@ -1,0 +1,23 @@
+# Native GitHub "generate release notes" categorisation (used by release.yml via
+# generate_release_notes: true) - no external action or token needed. Groups merged PRs by
+# label; label your PRs to keep this useful. A PR with no matching label lands in "Other Changes".
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+      - dependencies   # surfaced in its own category below instead
+  categories:
+    - title: "⚠️ Breaking Changes"
+      labels: [breaking-change]
+    - title: "✨ Features"
+      labels: [feature, enhancement]
+    - title: "🐛 Fixes"
+      labels: [fix, bug]
+    - title: "📈 Observability"
+      labels: [observability]
+    - title: "📚 Documentation"
+      labels: [docs]
+    - title: "🔧 Dependencies"
+      labels: [dependencies]
+    - title: "🧹 Other Changes"
+      labels: ["*"]

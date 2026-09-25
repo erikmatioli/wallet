@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: wallet
+      POSTGRES_USER: wallet_owner        # schema owner: used only by Flyway migrations
+      POSTGRES_PASSWORD: wallet_owner
+    volumes:
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro   # creates the runtime role wallet_app
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wallet_owner -d wallet"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  wallet-core:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: dev        # creates the demo tenant; remove outside development
+      DB_URL: jdbc:postgresql://postgres:5432/wallet
+      DB_USER: wallet_app
+      DB_PASSWORD: wallet_app
+      DB_MIGRATION_USER: wallet_owner
+      DB_MIGRATION_PASSWORD: wallet_owner
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+      TRACING_SAMPLING_PROBABILITY: "1.0"   # trace every request locally; lower this in production
+    ports:
+      - "8080:8080"
+
+  # ---------------------------------------------------------------------------------
+  # Local observability stack. None of this is required to run the application itself
+  # (metrics/tracing degrade gracefully to "nowhere to send it" without these services) -
+  # it exists so `docker compose up` gives you working dashboards, traces and alerts
+  # out of the box. In production, point wallet-core at your real Prometheus/OTel/Alertmanager
+  # setup instead of running these containers.
+  # ---------------------------------------------------------------------------------
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.113.0
+    command: ["--config=/etc/otel-collector-config.yml"]
+    volumes:
+      - ./docker/otel-collector/config.yml:/etc/otel-collector-config.yml:ro
+    ports:
+      - "4318:4318"   # OTLP/HTTP, used by wallet-core
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # Jaeger UI: http://localhost:16686
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "9090:9090"     # Prometheus UI, incl. Alerts tab: http://localhost:9090/alerts
+    depends_on:
+      - wallet-core
+
+volumes:
+  pgdata:
+  promdata:

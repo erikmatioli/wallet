@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.1</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>br.com.walletcore</groupId>
+    <artifactId>wallet-core</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>Wallet Core</name>
+    <description>White-label multi-tenant digital wallet core: payment accounts, double-entry ledger, secure REST APIs</description>
+
+    <properties>
+        <java.version>25</java.version>
+        <archunit.version>1.4.1</archunit.version>
+    </properties>
+
+    <modules>
+        <module>wallet-domain</module>
+        <module>wallet-application</module>
+        <module>wallet-adapter-out-persistence</module>
+        <module>wallet-adapter-out-messaging</module>
+        <module>wallet-adapter-in-rest</module>
+        <module>wallet-bootstrap</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>br.com.walletcore</groupId>
+                <artifactId>wallet-domain</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>br.com.walletcore</groupId>
+                <artifactId>wallet-application</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>br.com.walletcore</groupId>
+                <artifactId>wallet-adapter-out-persistence</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>br.com.walletcore</groupId>
+                <artifactId>wallet-adapter-out-messaging</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>br.com.walletcore</groupId>
+                <artifactId>wallet-adapter-in-rest</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.tngtech.archunit</groupId>
+                <artifactId>archunit-junit5</artifactId>
+                <version>${archunit.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>

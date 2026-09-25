@@ -1,0 +1,83 @@
+name: Release
+
+# Tag-driven release (see CONTRIBUTING.md#release e ADR-008): pushing a vX.Y.Z tag on main is
+# the ONLY way a release happens. Nothing here bumps pom.xml or commits back to main - the git
+# tag is the single source of truth for "what version is this", and the Maven version is set
+# on-the-fly, only inside this ephemeral build.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write   # to create the GitHub Release
+  packages: write    # to push to GHCR
+
+jobs:
+  build-test:
+    uses: ./.github/workflows/build-test.yml
+
+  release:
+    name: Build, publish image, create release
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Derive version from tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Set Maven version to the release version (build-only, not committed)
+        run: mvn -B versions:set -DnewVersion="$VERSION" -DprocessAllModules=true -DgenerateBackupPoms=false
+
+      - name: Package
+        run: mvn -B -DskipTests package
+
+      - name: Upload the runnable jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: wallet-bootstrap-jar
+          path: wallet-bootstrap/target/wallet-bootstrap-*.jar
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name and tags
+        run: |
+          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          MAJOR_MINOR="${VERSION%.*}"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "TAGS=$IMAGE:$VERSION,$IMAGE:$MAJOR_MINOR,$IMAGE:latest" >> "$GITHUB_ENV"
+
+      - name: Build & push release image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.TAGS }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Categorised by PR labels per .github/release.yml (feature/fix/chore/docs/dependencies).
+          # PRs without a matching label fall into the default "Other Changes" bucket -
+          # labelling PRs is how you keep release notes readable, see CONTRIBUTING.md.
+          generate_release_notes: true
+          files: wallet-bootstrap/target/wallet-bootstrap-*.jar

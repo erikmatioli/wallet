@@ -1,0 +1,99 @@
+name: CI
+
+# Trunk-based flow (see CONTRIBUTING.md): every PR into main, and every push to main once a
+# PR merges, goes through the same checks. There is no separate "develop" branch pipeline.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  # A new push to the same PR/branch cancels the previous run - no point finishing an outdated build.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    uses: ./.github/workflows/build-test.yml
+
+  pr-title:
+    name: Conventional PR title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      # Enforces "type(scope): description" (see CONTRIBUTING.md#commits). Squash-merging a PR
+      # uses its title as the commit message, so a conventional PR title is what actually lands
+      # in main's history - which is what makes SemVer bump decisions at release time legible.
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Docker build & scan
+    needs: build-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # only used on the push-to-main path below
+      security-events: write # to upload the Trivy SARIF report
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build the image on every PR too - this is exactly the "does the Dockerfile actually
+      # build" check that would have caught the transient dependency issue found while testing
+      # this project manually, before it reaches main.
+      - name: Build image (local, for scanning)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: wallet-core:ci
+
+      - name: Scan image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: wallet-core:ci
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "0"   # report, don't fail the build - review findings via the Security tab
+
+      - name: Upload Trivy results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name (lowercase, GHCR requires it)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: echo "IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      # main always publishes a rolling ":edge" image - handy for staging/manual testing between
+      # releases, without it ever being mistaken for a versioned, released artifact (see release.yml).
+      - name: Build & push :edge (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:edge
+            ${{ env.IMAGE }}:sha-${{ github.sha }}

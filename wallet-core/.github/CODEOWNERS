@@ -1,0 +1,16 @@
+# Requisita revisão automaticamente quando um PR toca esses caminhos.
+# Ajuste os times/usuários abaixo para os reais antes de habilitar branch protection
+# com "Require review from Code Owners" (ver CONTRIBUTING.md).
+
+# Fallback: qualquer coisa não coberta abaixo
+* @erikmatioli
+
+# Núcleo financeiro: mudanças aqui merecem revisão extra
+/wallet-domain/            @erikmatioli
+/wallet-application/       @erikmatioli
+/wallet-adapter-out-persistence/db/migration/  @erikmatioli
+
+# Pipeline e infraestrutura de release
+/.github/                  @erikmatioli
+/Dockerfile                @erikmatioli
+/docker-compose.yml        @erikmatioli

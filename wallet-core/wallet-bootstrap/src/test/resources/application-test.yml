@@ -1,0 +1,8 @@
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 20
+      connection-timeout: 60000
+wallet:
+  outbox:
+    poll-interval-ms: 100

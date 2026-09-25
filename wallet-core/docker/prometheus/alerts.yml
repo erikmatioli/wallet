@@ -1,0 +1,104 @@
+# Alerting rules for the Wallet Core. Load these into Prometheus (see docker-compose.yml) or,
+# in a managed setup, translate them into your alerting platform's native rule format - the
+# PromQL expressions and thresholds are what matters, not the YAML shape.
+groups:
+  - name: wallet-core-ledger-integrity
+    rules:
+      # The one alert that must never be muted: the ledger replay found a stored balance,
+      # sequence or sum-of-legs that does not match the events. This means either a bug slipped
+      # past the database-level safeguards, or something wrote to the database outside the
+      # application (e.g. a manual UPDATE). Page immediately; do not wait for a batch window.
+      - alert: WalletAuditInconsistencyDetected
+        expr: increase(wallet_audit_inconsistencies_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ledger audit found an inconsistency (tenant {{ $labels.tenant }})"
+          description: >-
+            The audit replay for tenant {{ $labels.tenant }} found at least one finding
+            (sequence gap or balance mismatch) in the last 5 minutes. Call
+            GET /v1/accounts/{id}/audit for the affected account(s) to see the details,
+            and treat this as a data-integrity incident until proven otherwise.
+
+      # If this fires, the audit sweep itself stopped running (crashed, deadlocked, or the
+      # scheduler died) - silence elsewhere does not mean "all good", it may mean "not checked".
+      - alert: WalletAuditSweepStale
+        expr: time() - wallet_audit_sweep_last_success_epoch_seconds > 900
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Audit sweep has not completed successfully in over 15 minutes"
+          description: >-
+            wallet.observability.audit-sweep should run every
+            wallet.observability.audit-sweep.interval-ms (default 5m). No successful run has
+            been recorded recently - check application logs for "audit sweep failed".
+
+  - name: wallet-core-transactions
+    rules:
+      - alert: WalletHighInsufficientFundsRate
+        expr: |
+          sum by (tenant) (rate(wallet_transactions_rejected_total{reason="INSUFFICIENT_FUNDS"}[5m]))
+            / clamp_min(sum by (tenant) (rate(wallet_transactions_total[5m])), 1)
+          > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 20% of transaction attempts are failing on insufficient funds (tenant {{ $labels.tenant }})"
+          description: >-
+            This is usually benign client behaviour, but a sudden shift can also indicate a
+            client-side bug (e.g. retrying without checking the balance first) or, if paired
+            with WalletAuditInconsistencyDetected, an actual balance problem.
+
+      - alert: WalletHighTransactionRejectionRate
+        expr: |
+          sum by (tenant) (rate(wallet_transactions_rejected_total[5m]))
+            / clamp_min(sum by (tenant) (rate(wallet_transactions_total[5m])), 1)
+          > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 30% of transaction attempts are being rejected (tenant {{ $labels.tenant }})"
+
+  - name: wallet-core-infrastructure
+    rules:
+      - alert: WalletOutboxBacklogGrowing
+        expr: wallet_outbox_pending > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox has over 1000 unpublished events for 10+ minutes"
+          description: >-
+            OutboxRelay (wallet-adapter-out-persistence) is either falling behind or its
+            EventPublisher is failing. Check logs for "Outbox relay failed" and confirm the
+            configured publisher (Kafka/SNS/etc. once plugged in - logging-only by default,
+            see LoggingEventPublisher) is reachable.
+
+      - alert: WalletDbTransactionRetryStormOrDeadlocks
+        expr: sum(rate(wallet_db_transaction_seconds_count{error!="none"}[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database transactions are erroring out (retries exhausted, deadlocks, or connection issues)"
+          description: >-
+            wallet.db.transaction (emitted by JdbcTransactionRunner's Observation) is tagged
+            error=<exception class> whenever a unit of work throws - including after retries are
+            exhausted. Check the application logs for "Transient database failure" to see whether
+            retries are just slow or genuinely failing, and break down by the `error` label to see
+            which exception is involved.
+
+      - alert: WalletHighApiErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{uri=~"/v1/.*", status=~"5.."}[5m]))
+            / clamp_min(sum(rate(http_server_requests_seconds_count{uri=~"/v1/.*"}[5m])), 1)
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 5% of API requests are returning 5xx"

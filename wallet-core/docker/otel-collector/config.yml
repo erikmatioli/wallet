@@ -1,0 +1,28 @@
+# Minimal collector: receives OTLP from the app and forwards spans to Jaeger for local viewing.
+# In production, point wallet-core's OTEL_EXPORTER_OTLP_TRACES_ENDPOINT at your own collector
+# (or vendor OTLP endpoint) and this file/service is not needed at all.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+  debug:
+    verbosity: basic
+
+processors:
+  batch: {}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/jaeger, debug]

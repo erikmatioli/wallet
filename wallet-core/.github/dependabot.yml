@@ -1,0 +1,26 @@
+version: 2
+updates:
+  # Multi-module Maven reactor: a single entry at "/" covers the root pom and every child module.
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels: [dependencies]
+    groups:
+      spring-boot:
+        patterns: ["org.springframework.boot:*", "org.springframework:*", "org.springframework.security:*"]
+      micrometer-and-otel:
+        patterns: ["io.micrometer:*", "io.opentelemetry:*"]
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: [dependencies]

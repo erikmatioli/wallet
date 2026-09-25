@@ -1,0 +1,46 @@
+name: Build & test (reusable)
+
+# Reusable workflow: the single source of truth for "does this codebase build and pass its
+# tests". Called by both ci.yml (every push/PR) and release.yml (every tag) so the two never
+# drift apart - a release is never built from a path that CI didn't already verify.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: mvn verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      # ubuntu-latest ships Docker pre-installed and running, which is what
+      # WalletCoreConcurrencyTest needs (Testcontainers starts a throwaway PostgreSQL).
+      - name: Verify Docker is available (required by Testcontainers)
+        run: docker info
+
+      # -B: batch mode (no interactive prompts/ANSI art in logs).
+      # Runs every module: wallet-domain/wallet-application unit tests, ArchUnit rules,
+      # and wallet-bootstrap's WalletCoreConcurrencyTest (real PostgreSQL via Testcontainers).
+      - name: mvn verify
+        run: mvn -B verify
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+          if-no-files-found: ignore
+          retention-days: 14

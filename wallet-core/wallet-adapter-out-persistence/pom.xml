@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>br.com.walletcore</groupId>
+        <artifactId>wallet-core</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>wallet-adapter-out-persistence</artifactId>
+    <name>wallet-adapter-out-persistence</name>
+    <description>PostgreSQL adapter: ledger, accounts, idempotency journal, outbox, Flyway migrations</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>br.com.walletcore</groupId>
+            <artifactId>wallet-application</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <!-- Observation API (DB-transaction spans + timers, see JdbcTransactionRunner) and
+                 MeterRegistry (outbox backlog gauge, see OutboxRelay). The concrete registry and
+                 tracer implementations are chosen in wallet-bootstrap, not here. -->
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>
