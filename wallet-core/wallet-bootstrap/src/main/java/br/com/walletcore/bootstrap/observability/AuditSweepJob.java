@@ -3,6 +3,7 @@ package br.com.walletcore.bootstrap.observability;
 import br.com.walletcore.application.port.in.AuditLedgerUseCase;
 import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.TenantRepository;
+import br.com.walletcore.application.port.out.TransactionRunner;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.TenantId;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -37,15 +38,17 @@ class AuditSweepJob {
     private final TenantRepository tenants;
     private final AccountRepository accounts;
     private final AuditLedgerUseCase auditLedger;
+    private final TransactionRunner tx;
     private final AuditSweepProperties properties;
     private final MeterRegistry registry;
     private final AtomicLong lastSweepEpochSeconds = new AtomicLong();
 
     AuditSweepJob(TenantRepository tenants, AccountRepository accounts, AuditLedgerUseCase auditLedger,
-                  AuditSweepProperties properties, MeterRegistry registry) {
+                  TransactionRunner tx, AuditSweepProperties properties, MeterRegistry registry) {
         this.tenants = tenants;
         this.accounts = accounts;
         this.auditLedger = auditLedger;
+        this.tx = tx;
         this.properties = properties;
         this.registry = registry;
         // A staleness alert ("the sweep itself stopped running") is only possible if the gauge
@@ -82,7 +85,12 @@ class AuditSweepJob {
     }
 
     private int sweepTenant(TenantId tenantId) {
-        List<AccountId> candidates = accounts.findRecentlyActiveCustomerAccountIds(tenantId, properties.accountsPerTenant());
+        // Every repository call must run inside TransactionRunner: it is the only place that
+        // binds app.tenant_id for Row Level Security. Calling the repository directly here (as
+        // an earlier version of this method did) silently returns zero rows on every run - no
+        // error, just RLS treating an unbound session as "no tenant", which matches nothing.
+        List<AccountId> candidates = tx.readOnly(tenantId,
+                () -> accounts.findRecentlyActiveCustomerAccountIds(tenantId, properties.accountsPerTenant()));
         for (AccountId accountId : candidates) {
             AuditLedgerUseCase.AuditReport report = auditLedger.audit(tenantId, accountId);
             if (!report.consistent()) {
