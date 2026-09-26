@@ -59,9 +59,15 @@ management:
     # that 100% sampling would cost more in collector/storage than the visibility is worth.
     sampling:
       probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
-  otlp:
+  # Spring Boot 4.1 renamed the OTLP tracing property from the Spring Boot 3.x
+  # "management.otlp.tracing.endpoint" (which is now silently ignored - no error, it just
+  # never binds) to the key below. If traces stop reaching the collector after a Spring Boot
+  # upgrade, check this property name against the version's OtlpTracingProperties Javadoc first.
+  opentelemetry:
     tracing:
-      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
 
 wallet:
   security:

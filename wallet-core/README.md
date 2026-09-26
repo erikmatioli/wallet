@@ -10,6 +10,8 @@ Core bancário de uma **digital wallet** multi-tenant: onboarding de clientes, e
 | Arquitetura | Hexagonal (ports & adapters), módulos Maven, regras verificadas com ArchUnit |
 | Autenticação | HTTP Basic (client credentials do tenant) → JWT RS256 de vida curta + JWKS |
 
+**Novo no projeto?** Antes de mexer no código, leia o [Guia do Desenvolvedor](docs/guia-do-desenvolvedor.md) — explica cada classe, cada método e como uma requisição percorre o sistema, pensado para quem nunca viu este código.
+
 ---
 
 ## 1. Visão geral da arquitetura
@@ -161,7 +163,7 @@ A ideia central (ADR-007): instrumentação nasce junto do caso de uso, não é 
 
   Tudo isso fica exposto em `GET /actuator/prometheus`.
 
-- **Tracing (OpenTelemetry)** — cada requisição HTTP já gera um span automaticamente (Spring MVC + Micrometer Tracing); `JdbcTransactionRunner` cria um span filho por transação de banco, usando a mesma instrumentação (`Observation`) que já alimenta as métricas acima — um único ponto de código produz span **e** timer. Os spans saem por OTLP (`management.otlp.tracing.endpoint`, variável `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) para qualquer coletor compatível; localmente, o `docker-compose.yml` já encaminha para o **Jaeger** (`http://localhost:16686`).
+- **Tracing (OpenTelemetry)** — cada requisição HTTP já gera um span automaticamente (Spring MVC + Micrometer Tracing); `JdbcTransactionRunner` cria um span filho por transação de banco, usando a mesma instrumentação (`Observation`) que já alimenta as métricas acima — um único ponto de código produz span **e** timer. Os spans saem por OTLP (`management.opentelemetry.tracing.export.otlp.endpoint`, variável `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) para qualquer coletor compatível; localmente, o `docker-compose.yml` já encaminha para o **Jaeger** (`http://localhost:16686`). **Atenção:** essa é a propriedade do Spring Boot 4.1 — no 3.x era `management.otlp.tracing.endpoint`, e Spring Boot ignora silenciosamente uma propriedade que não reconhece, então usar o nome errado não dá erro nenhum, só faz o span nunca sair.
 
 - **Correlação nos logs** — `TenantLoggingInterceptor` grava `tenant_id` no MDC a cada requisição (depois que o JWT já foi validado); `traceId`/`spanId` chegam automaticamente via Micrometer Tracing. Toda linha de log, inclusive as escritas fundo na camada de persistência, sai como `[tenant_id=…,traceId=…,spanId=…]` — dá para filtrar por tenant ou pular direto para o trace correspondente.
 

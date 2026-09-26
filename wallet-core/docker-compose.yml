@@ -30,6 +30,9 @@ services:
       DB_MIGRATION_PASSWORD: wallet_owner
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
       TRACING_SAMPLING_PROBABILITY: "1.0"   # trace every request locally; lower this in production
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+      MANAGEMENT_OBSERVABILITY_HTTP_SERVER_REQUESTS_ENABLED: "true"
+      OTEL_LOG_LEVEL: debug
     ports:
       - "8080:8080"
 
@@ -42,7 +45,7 @@ services:
   # ---------------------------------------------------------------------------------
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.113.0
+    image: otel/opentelemetry-collector-contrib:latest
     command: ["--config=/etc/otel-collector-config.yml"]
     volumes:
       - ./docker/otel-collector/config.yml:/etc/otel-collector-config.yml:ro
@@ -52,7 +55,7 @@ services:
       - jaeger
 
   jaeger:
-    image: jaegertracing/all-in-one:1.62
+    image: jaegertracing/all-in-one:latest
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
