@@ -33,29 +33,24 @@ services:
 
       JAVA_TOOL_OPTIONS: "-javaagent:/app/opentelemetry-javaagent.jar"
       OTEL_SERVICE_NAME: wallet-core
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
-      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
 
-      # Desativa explicitamente a exportação de logs e métricas pelo agent para não dar conflito no coletor atual
-      OTEL_LOGS_EXPORTER: "none"
-      OTEL_METRICS_EXPORTER: "none"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+
+      OTEL_TRACES_EXPORTER: "otlp"
+      OTEL_METRICS_EXPORTER: "otlp"
+      OTEL_LOGS_EXPORTER: "otlp"
 
       TRACING_SAMPLING_PROBABILITY: "1.0"   # trace every request locally; lower this in production
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_OBSERVABILITY_HTTP_SERVER_REQUESTS_ENABLED: "true"
-      OTEL_LOG_LEVEL: debug
       OTEL_RESOURCE_ATTRIBUTES: "service.name=wallet-core,deployment.environment=dev"
       OTEL_TRACES_SAMPLER: "always_on"
     ports:
       - "8080:8080"
 
   # ---------------------------------------------------------------------------------
-  # Local observability stack. None of this is required to run the application itself
-  # (metrics/tracing degrade gracefully to "nowhere to send it" without these services) -
-  # it exists so `docker compose up` gives you working dashboards, traces and alerts
-  # out of the box. In production, point wallet-core at your real Prometheus/OTel/Alertmanager
-  # setup instead of running these containers.
+  # Local observability stack (Prometheus, Jaeger, Loki, Grafana, OTel Collector)
   # ---------------------------------------------------------------------------------
 
   otel-collector:
@@ -67,6 +62,7 @@ services:
       - "4318:4318"   # OTLP/HTTP, used by wallet-core
     depends_on:
       - jaeger
+      - loki
 
   jaeger:
     image: jaegertracing/all-in-one:latest
@@ -86,6 +82,29 @@ services:
     depends_on:
       - wallet-core
 
+  # Novo: Loki para centralização de logs
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+
+  # Novo: Grafana para unificar visualização de Logs, Métricas e Traces
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+    volumes:
+      - grafandata:/var/lib/grafana
+
 volumes:
   pgdata:
   promdata:
+  grafandata:
