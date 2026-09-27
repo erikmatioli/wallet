@@ -21,6 +21,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     environment:
       SPRING_PROFILES_ACTIVE: dev        # creates the demo tenant; remove outside development
       DB_URL: jdbc:postgresql://postgres:5432/wallet
@@ -28,11 +30,23 @@ services:
       DB_PASSWORD: wallet_app
       DB_MIGRATION_USER: wallet_owner
       DB_MIGRATION_PASSWORD: wallet_owner
+
+      JAVA_TOOL_OPTIONS: "-javaagent:/app/opentelemetry-javaagent.jar"
+      OTEL_SERVICE_NAME: wallet-core
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+
+      # Desativa explicitamente a exportação de logs e métricas pelo agent para não dar conflito no coletor atual
+      OTEL_LOGS_EXPORTER: "none"
+      OTEL_METRICS_EXPORTER: "none"
+
       TRACING_SAMPLING_PROBABILITY: "1.0"   # trace every request locally; lower this in production
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_OBSERVABILITY_HTTP_SERVER_REQUESTS_ENABLED: "true"
       OTEL_LOG_LEVEL: debug
+      OTEL_RESOURCE_ATTRIBUTES: "service.name=wallet-core,deployment.environment=dev"
+      OTEL_TRACES_SAMPLER: "always_on"
     ports:
       - "8080:8080"
 
