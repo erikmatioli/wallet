@@ -31,10 +31,10 @@ jobs:
       run:
         working-directory: wallet-core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
@@ -54,7 +54,7 @@ jobs:
         run: mvn -B -DskipTests package
 
       - name: Upload the runnable jar
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: wallet-bootstrap-jar
           path: wallet-core/wallet-bootstrap/target/wallet-bootstrap-*.jar
