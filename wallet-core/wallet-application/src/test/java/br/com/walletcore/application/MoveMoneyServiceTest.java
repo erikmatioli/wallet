@@ -122,8 +122,15 @@ class MoveMoneyServiceTest {
         f.moveMoney.deposit(deposit(a, 1_000, "d1"));
         var settlementId = f.accountRepository.findSettlementAccountIds(f.tenant).get(0);
 
-        assertThatThrownBy(() -> f.moveMoney.deposit(
-                new DepositCommand(f.tenant, settlementId, Money.ofCents(100), "", "x1")))
+        // Uses transfer (not deposit/withdraw) on purpose: those two pick their settlement
+        // counterparty via SettlementRouter's hash-based routing, which - with 3 shards in this
+        // fixture - has a ~1/3 chance of coincidentally routing to this very settlementId. When
+        // that happens, both legs of the transaction become the same account, and the domain
+        // rejects it as SAME_ACCOUNT before ever reaching the account-kind check below, making
+        // the test flaky. transfer's two legs are exactly source/destination as given - no
+        // random routing - so the account-kind check below is exercised deterministically.
+        assertThatThrownBy(() -> f.moveMoney.transfer(new TransferCommand(f.tenant, settlementId,
+                new Destination.ById(a.id()), Money.ofCents(100), "", "x1")))
                 .isInstanceOf(NotFoundException.class);
         assertThatThrownBy(() -> f.query.getAccount(f.tenant, settlementId)).isInstanceOf(NotFoundException.class);
     }
