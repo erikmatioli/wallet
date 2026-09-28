@@ -1,0 +1,39 @@
+<section class="page">
+  <h1>Onboarding de cliente</h1>
+  <p class="hint">Cadastra o cliente e abre a conta de pagamento (TRAN) automaticamente.</p>
+
+  <app-problem-banner [message]="error()" />
+
+  <form class="card" (ngSubmit)="submit()">
+    <label>
+      Nome
+      <input name="name" [(ngModel)]="name" required maxlength="140" />
+    </label>
+    <label>
+      CPF ou CNPJ
+      <input name="taxId" [(ngModel)]="taxId" required placeholder="000.000.000-00" />
+    </label>
+    <label>
+      Referência externa (opcional)
+      <input name="externalRef" [(ngModel)]="externalRef" maxlength="64" />
+    </label>
+    <button type="submit" [disabled]="loading()">
+      {{ loading() ? 'Enviando...' : 'Cadastrar cliente' }}
+    </button>
+  </form>
+
+  @if (result(); as r) {
+    <div class="card result">
+      <h2>Conta aberta com sucesso</h2>
+      <dl>
+        <dt>Cliente</dt>
+        <dd>{{ r.customer.name }} ({{ r.customer.documentType }})</dd>
+        <dt>Conta</dt>
+        <dd>{{ r.account.formatted }} · {{ r.account.type }}</dd>
+        <dt>Saldo</dt>
+        <dd>{{ r.account.balance | number: '1.2-2' }} {{ r.account.currency }}</dd>
+      </dl>
+      <button type="button" (click)="openAccount(r.account.id)">Abrir conta</button>
+    </div>
+  }
+</section>

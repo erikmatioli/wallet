@@ -1,0 +1,21 @@
+<div class="login-page">
+  <form class="card" (ngSubmit)="submit()">
+    <h1>Wallet Console</h1>
+    <p class="subtitle">Entre com as credenciais do tenant (client id / client secret)</p>
+
+    <app-problem-banner [message]="error()" />
+
+    <label>
+      Client ID
+      <input name="clientId" [(ngModel)]="clientId" autocomplete="username" required />
+    </label>
+    <label>
+      Client Secret
+      <input name="clientSecret" type="password" [(ngModel)]="clientSecret" autocomplete="current-password" required />
+    </label>
+
+    <button type="submit" [disabled]="loading()">
+      {{ loading() ? 'Entrando...' : 'Entrar' }}
+    </button>
+  </form>
+</div>
