@@ -102,6 +102,8 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 
 ## 4. API
 
+http://localhost:8080/swagger-ui/index.html
+
 | Método e rota | Escopo | Descrição |
 |---|---|---|
 | `POST /v1/auth/token` | Basic | Troca client id/secret por JWT (10 min) |
@@ -180,6 +182,31 @@ A ideia central (ADR-007): instrumentação nasce junto do caso de uso, não é 
 | Métricas cruas | `curl http://localhost:8080/actuator/prometheus` |
 | Prometheus (consultas + aba *Alerts*) | http://localhost:9090 |
 | Traces | http://localhost:16686 (Jaeger) |
+| Logs | http://localhost:3000/ (loki) admin / admin |
+
+
+Ver todos os logs da aplicação
+Para listar todos os logs do serviço wallet-core em tempo real:
+
+Snippet de código
+{service_name="wallet-core"}
+2. Filtrar apenas logs de Erro (ERROR)
+   Para debugar falhas ou exceções rapidamente:
+
+Snippet de código
+{service_name="wallet-core"} |= "ERROR"
+(O operador |= faz uma busca por substring na mensagem do log).
+
+3. Pesquisar por uma palavra-chave específica (ex: transações ou pix)
+   Se você quiser achar logs que mencionam um termo específico de negócio:
+
+Snippet de código
+{service_name="wallet-core"} |= "DEPOSIT"
+4. Correlação Mágica: Achar o log de um Trace Específico
+   Se você pegou um traceId no Jaeger (ou no console) e quer ver exatamente o log impresso pela aplicação naquele mesmo instante, você pode filtrar pelo ID do trace (se o agente injetar o span/trace nos atributos do log):
+
+Snippet de código
+{service_name="wallet-core"} |= "seu_trace_id_aqui"
 
 Nenhum desses três serviços é necessário para a aplicação funcionar — métricas e traces só não têm para onde ir sem eles. Em produção, aponte `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` para o seu próprio coletor/vendor e configure seu Prometheus (ou equivalente) para fazer scrape de `/actuator/prometheus`; os containers locais não fazem parte do deploy de produção.
 
