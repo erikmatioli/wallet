@@ -1,0 +1,10 @@
+services:
+  k6:
+    image: grafana/k6:latest
+    volumes:
+      - ./load-tests/scripts:/scripts
+    command: run /scripts/stress-test.js
+    environment:
+      - BASE_URL=http://wallet-core:8080
+    networks:
+      - default # Garanta que a rede bate com a do seu docker-compose principal

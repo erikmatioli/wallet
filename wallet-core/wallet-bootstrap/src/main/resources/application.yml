@@ -30,6 +30,14 @@ logging:
     # tenant_id comes from TenantLoggingInterceptor; traceId/spanId from Micrometer Tracing.
     # Together they let you grep one tenant's logs, or jump from a log line straight to its trace.
     level: "%5p [tenant_id=%X{tenant_id:-},traceId=%X{traceId:-},spanId=%X{spanId:-}]"
+  level:
+    root: INFO
+    # Força o Spring a logar quando um argumento de DTO falha na validação (@Valid)
+    org.springframework.web.servlet.mvc.support: DEBUG
+    org.springframework.web.method.annotation.MethodArgumentValidationException: DEBUG
+    org.springframework.validation.beanvalidation: DEBUG
+    # Opcional: para ver se o tenant chegou a ser extraído antes da rejeição
+    br.com.walletcore.adapter.in.rest: DEBUG
 
 management:
   endpoints:
