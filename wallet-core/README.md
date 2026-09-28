@@ -102,6 +102,8 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 
 ## 4. API
 
+http://localhost:8080/swagger-ui/index.html
+
 | Método e rota | Escopo | Descrição |
 |---|---|---|
 | `POST /v1/auth/token` | Basic | Troca client id/secret por JWT (10 min) |
