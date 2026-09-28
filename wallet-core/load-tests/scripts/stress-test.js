@@ -20,12 +20,34 @@ export const options = {
 
 const BASE_URL = __ENV.BASE_URL || 'http://wallet-core:8080';
 
-// Credenciais de teste configuradas no seu ambiente de dev
+// Credenciais de teste configuradas no ambiente
 const CLIENT_ID = 'demo-tenant';
 const CLIENT_SECRET = 'demo-secret-change-me-please';
 
+// Função para gerar um CPF matematicamente válido e único por VU/Iteração
+function generateValidCPF(vu, iter) {
+    let base = String((vu * 10000 + iter) % 900000000 + 100000000);
+    let n = base.split('').map(Number);
+
+    let d1 = 0;
+    for (let i = 0; i < 9; i++) {
+        d1 += n[i] * (10 - i);
+    }
+    d1 = 11 - (d1 % 11);
+    if (d1 >= 10) d1 = 0;
+
+    let d2 = d1 * 2;
+    for (let i = 0; i < 9; i++) {
+        d2 += n[i] * (11 - i);
+    }
+    d2 = 11 - (d2 % 11);
+    if (d2 >= 10) d2 = 0;
+
+    return n.join('') + d1 + d2;
+}
+
 export function setup() {
-    // Etapa de Setup: Obtém o Token JWT via Basic Auth antes de iniciar o teste de carga
+    // Etapa de Setup: Obtém o Token JWT via Basic Auth antes de iniciar o teste
     const credentials = encoding.b64encode(`${CLIENT_ID}:${CLIENT_SECRET}`);
     const res = http.post(`${BASE_URL}/v1/auth/token`, null, {
         headers: {
@@ -48,17 +70,18 @@ export default function (data) {
 
     // 1. Grupo de Onboard (Criação de Cliente e Conta)
     group('01. Onboard Customer & Account', () => {
+        const validTaxId = generateValidCPF(__VU, __ITER);
         const payload = JSON.stringify({
             name: `Load Test User ${uuidv4().substring(0, 8)}`,
-            taxId: Math.floor(10000000000 + Math.random() * 90000000000).toString(),
+            taxId: validTaxId,
             externalRef: uuidv4(),
         });
 
         const res = http.post(`${BASE_URL}/v1/customers`, payload, { headers });
 
-        // ADICIONE ESTE BLOCO PARA VER O MOTIVO DO 400 NO TERMINAL:
+        // Loga no console se houver erro para facilitar o debug
         if (res.status !== 201) {
-            console.log(`[ERRO ${res.status}] Payload enviado: ${payload} | Resposta da API: ${res.body}`);
+            console.log(`[ERRO ${res.status}] Onboard falhou: ${res.body}`);
         }
 
         check(res, {
