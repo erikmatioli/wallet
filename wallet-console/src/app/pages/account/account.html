@@ -1,0 +1,158 @@
+<section class="page">
+  <p><a routerLink="/onboard">&larr; Novo cliente</a></p>
+
+  <app-problem-banner [message]="error()" />
+  @if (notice()) {
+    <div class="notice">{{ notice() }}</div>
+  }
+
+  @if (account(); as acc) {
+    <div class="card header">
+      <div>
+        <h1>{{ acc.formatted }}</h1>
+        <span class="hint">{{ acc.type }} · ISPB {{ acc.ispb }} · <span class="badge" [class.ok]="acc.status === 'ACTIVE'" [class.bad]="acc.status !== 'ACTIVE'">{{ acc.status }}</span></span>
+      </div>
+      <div class="balance">
+        {{ acc.balance | number: '1.2-2' }}
+        <span class="currency">{{ acc.currency }}</span>
+      </div>
+    </div>
+  }
+
+  <h2 class="section-title">Extrato</h2>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Seq.</th>
+          <th>Tipo</th>
+          <th>Direção</th>
+          <th>Valor</th>
+          <th>Saldo após</th>
+          <th>Descrição</th>
+          <th>Quando</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (e of entries(); track e.sequence) {
+          <tr>
+            <td>{{ e.sequence }}</td>
+            <td>{{ e.type }}</td>
+            <td [class.amount-credit]="e.direction === 'CREDIT'" [class.amount-debit]="e.direction === 'DEBIT'">{{ e.direction }}</td>
+            <td [class.amount-credit]="e.direction === 'CREDIT'" [class.amount-debit]="e.direction === 'DEBIT'">
+              {{ e.direction === 'DEBIT' ? '-' : '+' }}{{ e.amount | number: '1.2-2' }}
+            </td>
+            <td>{{ e.balanceAfter | number: '1.2-2' }}</td>
+            <td>{{ e.description }}</td>
+            <td>{{ e.occurredAt | date: 'dd/MM/yy HH:mm' }}</td>
+          </tr>
+        } @empty {
+          <tr>
+            <td colspan="7" class="hint">Nenhum lançamento ainda.</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+    @if (nextBefore() !== null) {
+      <button type="button" class="secondary" (click)="loadStatement(false)">Carregar mais</button>
+    }
+  </div>
+
+  <h2 class="section-title">Depósito</h2>
+  <form class="card inline-form" (ngSubmit)="submitDeposit()">
+    <label>
+      Valor
+      <input type="number" step="0.01" min="0.01" name="depositAmount" [(ngModel)]="depositAmount" required />
+    </label>
+    <label>
+      Descrição
+      <input name="depositDescription" [(ngModel)]="depositDescription" maxlength="140" />
+    </label>
+    <button type="submit" [disabled]="busy()">Depositar</button>
+  </form>
+
+  <h2 class="section-title">Saque</h2>
+  <form class="card inline-form" (ngSubmit)="submitWithdraw()">
+    <label>
+      Valor
+      <input type="number" step="0.01" min="0.01" name="withdrawAmount" [(ngModel)]="withdrawAmount" required />
+    </label>
+    <label>
+      Descrição
+      <input name="withdrawDescription" [(ngModel)]="withdrawDescription" maxlength="140" />
+    </label>
+    <button type="submit" [disabled]="busy()">Sacar</button>
+  </form>
+
+  <h2 class="section-title">Transferência</h2>
+  <form class="card" (ngSubmit)="submitTransfer()">
+    <div class="method-toggle">
+      <label class="radio">
+        <input type="radio" name="transferMethod" value="id" [(ngModel)]="transferMethod" />
+        Por ID da conta destino
+      </label>
+      <label class="radio">
+        <input type="radio" name="transferMethod" value="number" [(ngModel)]="transferMethod" />
+        Por número (agência/conta/dígito)
+      </label>
+    </div>
+
+    @if (transferMethod === 'id') {
+      <label>
+        ID da conta destino
+        <input name="transferDestinationId" [(ngModel)]="transferDestinationId" required />
+      </label>
+    } @else {
+      <div class="inline-form">
+        <label>
+          Agência
+          <input name="transferBranch" [(ngModel)]="transferBranch" required />
+        </label>
+        <label>
+          Número
+          <input name="transferNumber" [(ngModel)]="transferNumber" required />
+        </label>
+        <label>
+          Dígito
+          <input name="transferCheckDigit" [(ngModel)]="transferCheckDigit" required />
+        </label>
+      </div>
+    }
+
+    <div class="inline-form">
+      <label>
+        Valor
+        <input type="number" step="0.01" min="0.01" name="transferAmount" [(ngModel)]="transferAmount" required />
+      </label>
+      <label>
+        Descrição
+        <input name="transferDescription" [(ngModel)]="transferDescription" maxlength="140" />
+      </label>
+    </div>
+    <button type="submit" [disabled]="busy()">Transferir</button>
+  </form>
+
+  <h2 class="section-title">Auditoria (replay do ledger)</h2>
+  <div class="card">
+    <button type="button" class="secondary" (click)="runAudit()" [disabled]="busy()">Rodar auditoria</button>
+    @if (audit(); as a) {
+      <dl class="audit-result">
+        <dt>Resultado</dt>
+        <dd><span class="badge" [class.ok]="a.consistent" [class.bad]="!a.consistent">{{ a.consistent ? 'Consistente' : 'Inconsistente' }}</span></dd>
+        <dt>Lançamentos conferidos</dt>
+        <dd>{{ a.entryCount }}</dd>
+        <dt>Saldo armazenado</dt>
+        <dd>{{ a.storedBalance | number: '1.2-2' }}</dd>
+        <dt>Saldo reconstruído</dt>
+        <dd>{{ a.replayedBalance | number: '1.2-2' }}</dd>
+      </dl>
+      @if (a.findings.length > 0) {
+        <ul class="findings">
+          @for (f of a.findings; track f) {
+            <li>{{ f }}</li>
+          }
+        </ul>
+      }
+    }
+  </div>
+</section>

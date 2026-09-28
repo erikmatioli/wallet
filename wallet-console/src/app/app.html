@@ -1,0 +1,10 @@
+@if (auth.isAuthenticated()) {
+  <header class="topbar">
+    <span class="brand">Wallet Console</span>
+    <div class="topbar-right">
+      <span class="who">{{ auth.clientId() }}</span>
+      <button type="button" (click)="logout()">Sair</button>
+    </div>
+  </header>
+}
+<router-outlet />

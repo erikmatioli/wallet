@@ -1,0 +1,49 @@
+/* Design tokens for the whole app. Deliberately not a UI kit (no Material/Bootstrap) - this is
+   a small internal ops console, and a handful of CSS custom properties plus one shared partial
+   (src/styles/_page.scss) cover every screen without the bundle-size and theming overhead of a
+   full component library. */
+:root {
+  --color-bg: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-text: #101828;
+  --color-text-muted: #667085;
+  --color-border: #d0d5dd;
+
+  --color-accent: #0f766e;
+  --color-accent-hover: #115e59;
+
+  --color-danger-bg: #fef3f2;
+  --color-danger-text: #b42318;
+  --color-danger-border: #fda29b;
+
+  --color-success-bg: #ecfdf3;
+  --color-success-text: #027a48;
+  --color-success-border: #abefc6;
+
+  --color-nav-bg: #0b1f3a;
+  --color-nav-text: #e6eaf0;
+
+  --shadow-card: 0 1px 3px rgba(16, 24, 40, 0.1), 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font-family:
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    Roboto,
+    sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+button {
+  font-family: inherit;
+}

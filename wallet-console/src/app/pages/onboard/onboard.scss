@@ -1,0 +1,22 @@
+@use '../../../styles/page' as *;
+
+.result {
+  margin-top: 1.5rem;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  margin: 1rem 0;
+}
+
+dt {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+dd {
+  margin: 0;
+  font-weight: 500;
+}
