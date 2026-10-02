@@ -1,4 +1,5 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -46,12 +47,23 @@ export class AccountPage implements OnInit {
   constructor(
     private readonly route: ActivatedRoute,
     private readonly api: WalletApiService,
+    private readonly destroyRef: DestroyRef,
   ) {}
 
   ngOnInit(): void {
-    this.accountId = this.route.snapshot.paramMap.get('id') ?? '';
-    this.loadAccount();
-    this.loadStatement(true);
+    // Subscribe instead of reading the snapshot: navigating /accounts/A -> /accounts/B (e.g. via a
+    // statement's counterparty link) reuses this component, so ngOnInit does not run again.
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      this.accountId = params.get('id') ?? '';
+      this.account.set(null);
+      this.entries.set([]);
+      this.nextBefore.set(null);
+      this.audit.set(null);
+      this.error.set(null);
+      this.notice.set(null);
+      this.loadAccount();
+      this.loadStatement(true);
+    });
   }
 
   loadAccount(): void {
