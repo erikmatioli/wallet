@@ -141,7 +141,7 @@ Repetir uma requisição com a mesma `Idempotency-Key` e o mesmo corpo devolve a
 6. **Multi-tenancy por Row Level Security** (ADR-004): `tenant_id` em toda tabela de negócio, policy baseada em `set_config('app.tenant_id', …, true)` aplicado no início de cada transação. O tenant vem sempre do JWT, nunca do corpo da requisição.
 7. **Basic → JWT** (ADR-005): segredo do tenant guardado só como hash (bcrypt), JWT RS256 com `tenant_id` e `scope`, JWKS público, rotas desconhecidas negadas por padrão.
 8. **Outbox transacional**: eventos (`wallet.customer.onboarded.v1`, `wallet.transaction.posted.v1`) gravados na mesma transação do fato e entregues *at-least-once* por um relay (`FOR UPDATE SKIP LOCKED`). Os payloads não carregam CPF/CNPJ nem nome.
-9. **Observabilidade por padrão** (ADR-007): métricas de negócio e tracing nascem na mesma instrumentação (API `Observation` do Micrometer), a auditoria do ledger roda sozinha em segundo plano, e uma inconsistência vira alerta crítico sem que ninguém precise chamar a API manualmente. Detalhes na seção 6.
+9. **Observabilidade por padrão** (ADR-007): métricas de negócio pelo Micrometer, traces e logs pelo agente Java do OpenTelemetry sem código de instrumentação, a auditoria do ledger roda sozinha em segundo plano, e uma inconsistência vira alerta crítico sem que ninguém precise chamar a API manualmente. Detalhes na seção 6.
 
 ## 6. Modelo da conta de pagamento
 
@@ -165,9 +165,9 @@ A ideia central (ADR-007): instrumentação nasce junto do caso de uso, não é 
 
   Tudo isso fica exposto em `GET /actuator/prometheus`.
 
-- **Tracing (OpenTelemetry)** — cada requisição HTTP já gera um span automaticamente (Spring MVC + Micrometer Tracing); `JdbcTransactionRunner` cria um span filho por transação de banco, usando a mesma instrumentação (`Observation`) que já alimenta as métricas acima — um único ponto de código produz span **e** timer. Os spans saem por OTLP (`management.opentelemetry.tracing.export.otlp.endpoint`, variável `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) para qualquer coletor compatível; localmente, o `docker-compose.yml` já encaminha para o **Jaeger** (`http://localhost:16686`). **Atenção:** essa é a propriedade do Spring Boot 4.1 — no 3.x era `management.otlp.tracing.endpoint`, e Spring Boot ignora silenciosamente uma propriedade que não reconhece, então usar o nome errado não dá erro nenhum, só faz o span nunca sair.
+- **Tracing e logs (agente OpenTelemetry)** — a imagem Docker inclui o agente Java do OpenTelemetry (ativado por `JAVA_TOOL_OPTIONS=-javaagent:/app/opentelemetry-javaagent.jar`). Ele gera spans automaticamente para requisições HTTP, consultas JDBC, pool Hikari e jobs `@Scheduled`, e envia traces e logs por OTLP (`OTEL_EXPORTER_OTLP_ENDPOINT`) — tudo configurado pelas variáveis `OTEL_*` em `docker-compose.yml`, nada em `application.yml`. Localmente, o OpenTelemetry Collector encaminha traces para o **Jaeger** e logs para o **Loki**. A aplicação não tem dependência de tracing no `pom.xml`; o `Observation` de `JdbcTransactionRunner` gera só o timer `wallet_db_transaction_seconds_*` (a transação aparece no trace como os spans JDBC do agente).
 
-- **Correlação nos logs** — `TenantLoggingInterceptor` grava `tenant_id` no MDC a cada requisição (depois que o JWT já foi validado); `traceId`/`spanId` chegam automaticamente via Micrometer Tracing. Toda linha de log, inclusive as escritas fundo na camada de persistência, sai como `[tenant_id=…,traceId=…,spanId=…]` — dá para filtrar por tenant ou pular direto para o trace correspondente.
+- **Correlação nos logs** — `TenantLoggingInterceptor` grava `tenant_id` no MDC a cada requisição (depois que o JWT já foi validado); `trace_id`/`span_id` são injetados pelo agente. Toda linha de log, inclusive as escritas fundo na camada de persistência, sai como `[tenant_id=…,trace_id=…,span_id=…]` — dá para filtrar por tenant ou pular direto para o trace correspondente. Sem o agente (ex.: `mvn spring-boot:run`), `trace_id`/`span_id` saem vazios e não há traces; as métricas continuam funcionando.
 
 - **Auditoria contínua** — `AuditSweepJob` roda a cada 5 minutos (`wallet.observability.audit-sweep.*`), reaudita uma amostra das contas mais recentemente movimentadas por tenant, e qualquer achado vira `ERROR` no log + incremento em `wallet_audit_inconsistencies_total`. Um `Gauge` (`wallet_audit_sweep_last_success_epoch_seconds`) também permite alertar se o próprio job parar de rodar.
 
@@ -175,15 +175,28 @@ A ideia central (ADR-007): instrumentação nasce junto do caso de uso, não é 
 
 ### Rodando a stack de observabilidade local
 
-`docker compose up --build` já sobe tudo (a aplicação exporta métricas/traces por padrão). Depois:
+`docker compose up --build` já sobe tudo (a aplicação expõe métricas e o agente exporta traces e logs por padrão). Depois:
 
 | O quê | Onde |
 |---|---|
 | Métricas cruas | `curl http://localhost:8080/actuator/prometheus` |
 | Prometheus (consultas + aba *Alerts*) | http://localhost:9090 |
 | Traces | http://localhost:16686 (Jaeger) |
+| Métricas, logs e traces juntos | http://localhost:3000 (Grafana, `admin`/`admin`) |
 
-Nenhum desses três serviços é necessário para a aplicação funcionar — métricas e traces só não têm para onde ir sem eles. Em produção, aponte `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` para o seu próprio coletor/vendor e configure seu Prometheus (ou equivalente) para fazer scrape de `/actuator/prometheus`; os containers locais não fazem parte do deploy de produção.
+O Grafana já sobe com os data sources Prometheus, Loki e Jaeger provisionados (`docker/grafana/provisioning/datasources/datasources.yml`), ligados entre si: num trace do Jaeger, o botão *Logs for this span* abre as linhas do Loki com o mesmo `trace_id`; numa linha de log do Loki, o link *View trace* abre o trace. Use *Explore* para navegar.
+
+Na pasta **Wallet Core** há três dashboards provisionados (`docker/grafana/dashboards/*.json`, ligados entre si pelo menu do topo):
+
+| Dashboard | O que mostra |
+|---|---|
+| **Wallet Core — Negócio** | Transações postadas, replays de idempotência, rejeições por motivo, onboardings, auditoria do ledger e varredura, com filtro por tenant. Os painéis que espelham um alerta usam a mesma fórmula e mostram o limiar |
+| **Wallet Core — Serviço** | HTTP (vazão, status, latência p50/p95/p99 por endpoint, taxa de 5xx), transações de banco, pool Hikari, outbox e JVM (heap, GC, CPU, threads) |
+| **Wallet Core — Logs** | Logs do Loki filtráveis por nível, tenant e texto; volume por nível, loggers com mais ERROR/WARN e as mensagens citadas nos alertas. Cada linha tem link para o trace no Jaeger |
+
+Os JSONs são a fonte da verdade: edições pela UI do Grafana valem até o próximo restart. Para mudar um painel de vez, exporte o JSON (*Share → Export*) e substitua o arquivo.
+
+Nenhum desses serviços é necessário para a aplicação funcionar — métricas, traces e logs só não têm para onde ir sem eles. Em produção, aponte `OTEL_EXPORTER_OTLP_ENDPOINT` para o seu próprio coletor/vendor e configure seu Prometheus (ou equivalente) para fazer scrape de `/actuator/prometheus`; os containers locais não fazem parte do deploy de produção.
 
 ## 8. Estado da verificação (leia antes de usar)
 
@@ -192,7 +205,7 @@ Nenhum desses três serviços é necessário para a aplicação funcionar — m�
 | `wallet-domain` e `wallet-application` | **Compilados e testados**: 31 testes unitários passando (CPF/CNPJ, dígito, partidas dobradas, idempotência, transferências, saldo insuficiente, auditoria detectando adulteração, paginação). Compilados com JDK 21 (`--release 21`), pois o ambiente onde o projeto foi gerado não tinha JDK 25 |
 | Adapters, bootstrap, migrations SQL, testes de concorrência | **Escritos e revisados, mas ainda não compilados nem executados**: o ambiente de geração não alcançava o Maven Central nem tinha Docker. Só houve checagem de sintaxe. Rode `mvn verify` com Docker; se algo divergir nas APIs do Spring Boot 4 / Jackson 3 / Testcontainers 2 (nomes de starters e pacotes mudaram na versão 4), o ajuste deve ser pontual |
 | Testes de concorrência (`WalletCoreConcurrencyTest`) | Cobrem 200 movimentos simultâneos na mesma carteira, saques que não podem estourar o saldo, transferências opostas sem deadlock, mesma `Idempotency-Key` em paralelo, isolamento entre tenants (RLS) e imutabilidade do ledger. São ignorados automaticamente sem Docker |
-| Observabilidade (métricas, tracing, `AuditSweepJob`, `docker-compose.yml`/Prometheus/Jaeger) | **Escrita e revisada, ainda não executada de ponta a ponta** — mesma limitação de ambiente acima. Os nomes de métrica usados nas regras de `docker/prometheus/alerts.yml` foram conferidos contra a convenção de nomenclatura do Micrometer para Prometheus, mas vale rodar `docker compose up` e abrir a aba *Alerts* do Prometheus para confirmar que cada regra carrega sem erro de sintaxe PromQL |
+| Observabilidade (métricas, tracing, `AuditSweepJob`, `docker-compose.yml`/Prometheus/Jaeger/Loki/Grafana) | **Escrita e revisada, ainda não executada de ponta a ponta** — mesma limitação de ambiente acima. Os nomes de métrica usados nas regras de `docker/prometheus/alerts.yml` foram conferidos contra a convenção de nomenclatura do Micrometer para Prometheus, mas vale rodar `docker compose up` e abrir a aba *Alerts* do Prometheus para confirmar que cada regra carrega sem erro de sintaxe PromQL |
 
 ## 9. Versionamento e CI/CD
 
@@ -214,6 +227,6 @@ Pipeline (`ci.yml` + `release.yml` + `build-test.yml` reutilizável) assume **Gi
 - Publisher real (Kafka/SNS/SQS), DLQ e limpeza do outbox publicado.
 - Trilha de *hash chain* por conta para evidência criptográfica de adulteração (a auditoria por replay já existe; isso adicionaria uma segunda camada, independente do banco).
 - Bloqueio/reserva de saldo (holds), limites, tarifas, estorno e integração com SPI/PIX (DICT, QR Code).
-- Dashboards Grafana prontos (as métricas já estão em Prometheus; faltam os JSONs dos painéis) e roteamento de alertas para um canal real (Alertmanager + Slack/PagerDuty) — hoje os alertas só aparecem na aba *Alerts* do Prometheus.
+- Roteamento de alertas para um canal real (Alertmanager + Slack/PagerDuty) — hoje os alertas só aparecem na aba *Alerts* do Prometheus.
 - Deploy contínuo de fato (o pipeline publica a imagem no GHCR, mas não a implanta em nenhum ambiente — depende de uma decisão de infraestrutura ainda não tomada) e cobertura de testes agregada (JaCoCo) no CI.
 

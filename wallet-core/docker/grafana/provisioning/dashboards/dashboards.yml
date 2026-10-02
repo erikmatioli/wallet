@@ -1,0 +1,13 @@
+# Loads the dashboard JSONs from docker/grafana/dashboards (mounted at /etc/grafana/dashboards).
+# Edits made in the Grafana UI are kept only until the next restart: change the JSON instead.
+apiVersion: 1
+
+providers:
+  - name: wallet-core
+    folder: Wallet Core
+    type: file
+    disableDeletion: true
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

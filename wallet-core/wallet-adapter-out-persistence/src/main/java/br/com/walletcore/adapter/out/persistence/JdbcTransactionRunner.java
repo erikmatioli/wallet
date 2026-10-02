@@ -25,11 +25,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  * version, so no stronger isolation level is needed. Reads use a REPEATABLE READ read-only
  * snapshot so that multi-statement reads (e.g. the audit replay) are consistent.
  *
- * <p>Every call is wrapped in a Micrometer {@link Observation}, named {@code wallet.db.transaction}.
- * One instrumentation point gives both a span (child of the current HTTP/trace context, so it
- * shows up nested under the request that triggered it) and a timer/counter
- * ({@code wallet.db.transaction.*} in {@code /actuator/prometheus}) - this is what lets a slow
- * request be traced down to "which database transaction took the time" without extra wiring.
+ * <p>Every call is wrapped in a Micrometer {@link Observation}, named {@code wallet.db.transaction},
+ * which feeds a timer/counter ({@code wallet.db.transaction.*} in {@code /actuator/prometheus}).
+ * Spans come from the OpenTelemetry Java agent, which already instruments every JDBC statement
+ * run inside this call, so a slow request can still be traced down to the database
+ * work that took the time. No Micrometer tracing bridge is on the classpath, so this observation
+ * does not produce a span of its own.
  */
 @Component
 class JdbcTransactionRunner implements TransactionRunner {
