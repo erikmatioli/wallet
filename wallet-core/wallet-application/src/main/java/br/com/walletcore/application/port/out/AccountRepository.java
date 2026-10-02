@@ -5,6 +5,7 @@ import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.TenantId;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public interface AccountRepository {
 
@@ -13,6 +14,30 @@ public interface AccountRepository {
     Optional<Account> findById(TenantId tenantId, AccountId accountId);
 
     Optional<Account> findByNumber(TenantId tenantId, String branch, String number, String checkDigit);
+
+    /** Read-model row for the accounts directory: an Account joined with its customer's display name. */
+    record AccountDirectoryItem(Account account, String customerName, String documentMasked) {
+    }
+
+    /**
+     * Page of the tenant's CUSTOMER accounts, newest first. Cursor pagination reuses the fact
+     * that {@link AccountId} is a UUIDv7 (time-ordered, see UuidV7): "id < cursor, ordered by id
+     * desc" is exactly "created strictly before the last seen account" - no separate sequence
+     * column needed, unlike the ledger's {@code sequence_no} (which orders events per account,
+     * not accounts themselves).
+     *
+     * @param cursorExclusive only accounts created before this id are returned; null = from the newest
+     */
+    List<AccountDirectoryItem> findAccountDirectory(TenantId tenantId, AccountId cursorExclusive, int limit);
+
+    /**
+     * Batched lookup of display info (customer name, formatted number) for a known set of
+     * account ids - used to enrich a statement page's transfer counterparties in one query
+     * instead of one query per row. Ids that don't resolve to a CUSTOMER account of this tenant
+     * (shouldn't happen for a genuine transfer counterparty, but degrade gracefully) are simply
+     * absent from the result; callers must not assume every id comes back.
+     */
+    List<AccountDirectoryItem> findByIds(TenantId tenantId, Set<AccountId> ids);
 
     /** Next value of the account number sequence (may skip values; never repeats). */
     long nextAccountSequence();

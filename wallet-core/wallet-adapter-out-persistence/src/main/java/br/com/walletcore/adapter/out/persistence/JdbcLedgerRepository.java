@@ -11,6 +11,7 @@ import br.com.walletcore.domain.shared.TransactionId;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Consumer;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -20,7 +21,7 @@ class JdbcLedgerRepository implements LedgerRepository {
 
     private static final String COLUMNS = """
             id, tenant_id, transaction_id, account_id, sequence_no, direction, amount_cents,
-            balance_after_cents, type, description, occurred_at""";
+            balance_after_cents, type, description, counterparty_account_id, occurred_at""";
     private static final int REPLAY_CHUNK = 1_000;
 
     private final JdbcClient jdbc;
@@ -34,8 +35,10 @@ class JdbcLedgerRepository implements LedgerRepository {
         for (LedgerEntry e : entries) {
             jdbc.sql("""
                     INSERT INTO ledger_entry (id, tenant_id, transaction_id, account_id, sequence_no, direction,
-                                              amount_cents, balance_after_cents, type, description, occurred_at)
-                    VALUES (:id, :tenant, :tx, :account, :seq, :direction, :amount, :balanceAfter, :type, :description, :at)""")
+                                              amount_cents, balance_after_cents, type, description,
+                                              counterparty_account_id, occurred_at)
+                    VALUES (:id, :tenant, :tx, :account, :seq, :direction, :amount, :balanceAfter, :type, :description,
+                            :counterparty, :at)""")
                     .param("id", e.id())
                     .param("tenant", e.tenantId().value())
                     .param("tx", e.transactionId().value())
@@ -46,6 +49,7 @@ class JdbcLedgerRepository implements LedgerRepository {
                     .param("balanceAfter", e.balanceAfter().cents())
                     .param("type", e.type().name())
                     .param("description", e.description())
+                    .param("counterparty", e.counterpartyAccountId().value())
                     .param("at", Sql.ts(e.occurredAt()))
                     .update();
         }
@@ -90,6 +94,7 @@ class JdbcLedgerRepository implements LedgerRepository {
     }
 
     private static LedgerEntry map(ResultSet rs, int rowNum) throws SQLException {
+        UUID counterparty = rs.getObject("counterparty_account_id", UUID.class);
         return new LedgerEntry(
                 Sql.uuid(rs, "id"),
                 new TenantId(Sql.uuid(rs, "tenant_id")),
@@ -101,6 +106,8 @@ class JdbcLedgerRepository implements LedgerRepository {
                 Money.ofCents(rs.getLong("balance_after_cents")),
                 TransactionType.valueOf(rs.getString("type")),
                 rs.getString("description"),
+                // Only null for rows written before the V2 migration added this column.
+                counterparty == null ? null : new AccountId(counterparty),
                 Sql.instant(rs, "occurred_at"));
     }
 }

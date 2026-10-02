@@ -1,0 +1,62 @@
+<section class="page">
+  <div class="home-header">
+    <h1>Contas</h1>
+    <a routerLink="/onboard"><button type="button">+ Nova conta</button></a>
+  </div>
+
+  <app-problem-banner [message]="error()" />
+
+  <div class="card search-card">
+    <h2 class="section-title no-top-margin">Buscar conta específica por número</h2>
+    <form class="inline-form" (ngSubmit)="search()">
+      <label>
+        Agência
+        <input name="searchBranch" [(ngModel)]="searchBranch" required />
+      </label>
+      <label>
+        Número
+        <input name="searchNumber" [(ngModel)]="searchNumber" required />
+      </label>
+      <label>
+        Dígito
+        <input name="searchCheckDigit" [(ngModel)]="searchCheckDigit" required />
+      </label>
+      <button type="submit" [disabled]="searching()">{{ searching() ? 'Buscando...' : 'Buscar' }}</button>
+    </form>
+  </div>
+
+  <h2 class="section-title">Todas as contas</h2>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Cliente</th>
+          <th>Documento</th>
+          <th>Conta</th>
+          <th>Status</th>
+          <th>Saldo</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (i of items(); track i.accountId) {
+          <tr class="clickable" (click)="openAccount(i.accountId)">
+            <td>{{ i.customerName }}</td>
+            <td>{{ i.documentMasked }}</td>
+            <td>{{ i.accountFormatted }}</td>
+            <td><span class="badge" [class.ok]="i.status === 'ACTIVE'" [class.bad]="i.status !== 'ACTIVE'">{{ i.status }}</span></td>
+            <td>{{ i.balance | number: '1.2-2' }} {{ i.currency }}</td>
+          </tr>
+        } @empty {
+          @if (!loading()) {
+            <tr>
+              <td colspan="5" class="hint">Nenhuma conta ainda. Clique em "+ Nova conta" para criar a primeira.</td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+    @if (cursor() !== null) {
+      <button type="button" class="secondary" (click)="loadPage(false)" [disabled]="loading()">Carregar mais</button>
+    }
+  </div>
+</section>

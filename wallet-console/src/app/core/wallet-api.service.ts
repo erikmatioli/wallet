@@ -2,6 +2,8 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
+  AccountDetailResponse,
+  AccountListResponse,
   AccountResponse,
   AuditResponse,
   BalanceResponse,
@@ -27,8 +29,8 @@ export class WalletApiService {
     return this.http.post<OnboardCustomerResponse>('/v1/customers', request);
   }
 
-  getAccount(accountId: string): Observable<AccountResponse> {
-    return this.http.get<AccountResponse>(`/v1/accounts/${accountId}`);
+  getAccount(accountId: string): Observable<AccountDetailResponse> {
+    return this.http.get<AccountDetailResponse>(`/v1/accounts/${accountId}`);
   }
 
   getBalance(accountId: string): Observable<BalanceResponse> {
@@ -61,5 +63,17 @@ export class WalletApiService {
 
   audit(accountId: string): Observable<AuditResponse> {
     return this.http.get<AuditResponse>(`/v1/accounts/${accountId}/audit`);
+  }
+
+  listAccounts(cursor?: string, limit = 20): Observable<AccountListResponse> {
+    let params = new HttpParams().set('limit', limit);
+    if (cursor) params = params.set('cursor', cursor);
+    return this.http.get<AccountListResponse>('/v1/accounts', { params });
+  }
+
+  /** Looks up one account by its bank-style number. 404 (via extractErrorMessage) if not found. */
+  lookupAccountByNumber(branch: string, number: string, checkDigit: string): Observable<AccountResponse> {
+    const params = new HttpParams().set('branch', branch).set('number', number).set('checkDigit', checkDigit);
+    return this.http.get<AccountResponse>('/v1/accounts/lookup', { params });
   }
 }

@@ -4,6 +4,7 @@ import br.com.walletcore.application.port.in.AuditLedgerUseCase;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase;
 import br.com.walletcore.application.port.in.OnboardCustomerUseCase;
 import br.com.walletcore.application.port.in.ProvisionTenantUseCase;
+import br.com.walletcore.application.port.in.ListAccountsUseCase;
 import br.com.walletcore.application.port.in.QueryAccountUseCase;
 import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.CustomerRepository;
@@ -18,6 +19,7 @@ import br.com.walletcore.application.service.AuditLedgerService;
 import br.com.walletcore.application.service.MoveMoneyService;
 import br.com.walletcore.application.service.OnboardCustomerService;
 import br.com.walletcore.application.service.ProvisionTenantService;
+import br.com.walletcore.application.service.ListAccountsService;
 import br.com.walletcore.application.service.QueryAccountService;
 import br.com.walletcore.application.service.SettlementRouter;
 import java.time.Clock;
@@ -58,6 +60,11 @@ class UseCaseConfig {
     @Bean
     QueryAccountUseCase queryAccountUseCase(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger) {
         return new QueryAccountService(tx, accounts, ledger);
+    }
+
+    @Bean
+    ListAccountsUseCase listAccountsUseCase(TransactionRunner tx, AccountRepository accounts) {
+        return new ListAccountsService(tx, accounts);
     }
 
     @Bean

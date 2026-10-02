@@ -1,5 +1,5 @@
 <section class="page">
-  <p><a routerLink="/onboard">&larr; Novo cliente</a></p>
+  <p><a routerLink="/home">&larr; Contas</a></p>
 
   <app-problem-banner [message]="error()" />
   @if (notice()) {
@@ -9,8 +9,11 @@
   @if (account(); as acc) {
     <div class="card header">
       <div>
-        <h1>{{ acc.formatted }}</h1>
-        <span class="hint">{{ acc.type }} · ISPB {{ acc.ispb }} · <span class="badge" [class.ok]="acc.status === 'ACTIVE'" [class.bad]="acc.status !== 'ACTIVE'">{{ acc.status }}</span></span>
+        <h1>{{ acc.customerName }}</h1>
+        <span class="hint">
+          {{ acc.documentMasked }} · {{ acc.formatted }} · {{ acc.type }} ·
+          <span class="badge" [class.ok]="acc.status === 'ACTIVE'" [class.bad]="acc.status !== 'ACTIVE'">{{ acc.status }}</span>
+        </span>
       </div>
       <div class="balance">
         {{ acc.balance | number: '1.2-2' }}
@@ -30,6 +33,7 @@
           <th>Valor</th>
           <th>Saldo após</th>
           <th>Descrição</th>
+          <th>Contraparte</th>
           <th>Quando</th>
         </tr>
       </thead>
@@ -44,11 +48,21 @@
             </td>
             <td>{{ e.balanceAfter | number: '1.2-2' }}</td>
             <td>{{ e.description }}</td>
+            <td>
+              @if (e.counterpartyAccountId) {
+                <a [routerLink]="['/accounts', e.counterpartyAccountId]" class="counterparty-link">
+                  <span class="counterparty-name">{{ e.counterpartyCustomerName }}</span>
+                  <span class="counterparty-number">{{ e.counterpartyAccountFormatted }}</span>
+                </a>
+              } @else {
+                <span class="hint">&mdash;</span>
+              }
+            </td>
             <td>{{ e.occurredAt | date: 'dd/MM/yy HH:mm' }}</td>
           </tr>
         } @empty {
           <tr>
-            <td colspan="7" class="hint">Nenhum lançamento ainda.</td>
+            <td colspan="8" class="hint">Nenhum lançamento ainda.</td>
           </tr>
         }
       </tbody>

@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { WalletApiService } from '../../core/wallet-api.service';
 import { extractErrorMessage } from '../../core/http-error.util';
-import { AccountResponse, AuditResponse, EntryResponse } from '../../core/models';
+import { AccountDetailResponse, AuditResponse, EntryResponse } from '../../core/models';
 import { ProblemBanner } from '../../shared/problem-banner/problem-banner';
 
 type TransferMethod = 'id' | 'number';
@@ -18,7 +18,7 @@ type TransferMethod = 'id' | 'number';
 export class AccountPage implements OnInit {
   private accountId = '';
 
-  readonly account = signal<AccountResponse | null>(null);
+  readonly account = signal<AccountDetailResponse | null>(null);
   readonly entries = signal<EntryResponse[]>([]);
   readonly nextBefore = signal<number | null>(null);
   readonly audit = signal<AuditResponse | null>(null);

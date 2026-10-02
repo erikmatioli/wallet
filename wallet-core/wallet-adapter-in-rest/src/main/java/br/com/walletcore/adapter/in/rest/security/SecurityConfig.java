@@ -47,6 +47,12 @@ class SecurityConfig {
                                 "/v3/api-docs/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/v1/customers").hasAuthority("SCOPE_customers:write")
                         .requestMatchers(HttpMethod.GET, "/v1/accounts/*/audit").hasAuthority("SCOPE_ledger:audit")
+                        // Bare "/v1/accounts" (the directory listing) explicitly, rather than relying on
+                        // "/v1/accounts/**" to also match the zero-segment case: Spring Security 6 uses
+                        // PathPatternParser by default, whose "**" semantics for a bare prefix differ from
+                        // the legacy AntPathMatcher's - safer to say what we mean than to rely on it.
+                        .requestMatchers(HttpMethod.GET, "/v1/accounts", "/v1/accounts/lookup")
+                        .hasAuthority("SCOPE_accounts:read")
                         .requestMatchers(HttpMethod.GET, "/v1/accounts/**").hasAuthority("SCOPE_accounts:read")
                         .requestMatchers(HttpMethod.POST, "/v1/accounts/*/deposits", "/v1/accounts/*/withdrawals",
                                 "/v1/transfers").hasAuthority("SCOPE_ledger:write")

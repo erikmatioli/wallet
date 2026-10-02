@@ -28,7 +28,7 @@ export class Login {
     this.loading.set(true);
     try {
       await this.auth.login(this.clientId.trim(), this.clientSecret);
-      const returnUrl = this.route.snapshot.queryParamMap.get('returnUrl') ?? '/onboard';
+      const returnUrl = this.route.snapshot.queryParamMap.get('returnUrl') ?? '/home';
       await this.router.navigateByUrl(returnUrl);
     } catch (err) {
       this.error.set(extractErrorMessage(err));
