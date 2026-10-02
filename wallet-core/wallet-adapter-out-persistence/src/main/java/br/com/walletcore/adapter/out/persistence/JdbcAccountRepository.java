@@ -99,6 +99,8 @@ class JdbcAccountRepository implements AccountRepository {
     public List<AccountDirectoryItem> findAccountDirectory(TenantId tenantId, AccountId cursorExclusive, int limit) {
         // AccountId is a UUIDv7 (time-ordered, see UuidV7), so "id < cursor, order by id desc"
         // is "created strictly before the last seen account" - newest first, no extra column.
+        // The trailing "\n" on the cursor filter matters: the text block below has its
+        // indentation stripped, so without it the SQL would read ":cursorORDER BY".
         String sql = """
                 SELECT a.id, a.customer_id, a.ispb, a.branch, a.account_number, a.check_digit, a.status,
                        a.allow_negative, a.balance_cents, a.version, a.created_at,
@@ -106,7 +108,7 @@ class JdbcAccountRepository implements AccountRepository {
                   FROM account a
                   JOIN customer c ON c.id = a.customer_id
                  WHERE a.tenant_id = :tenant AND a.kind = 'CUSTOMER'
-                """ + (cursorExclusive != null ? " AND a.id < :cursor" : "") + """
+                """ + (cursorExclusive != null ? " AND a.id < :cursor\n" : "") + """
                  ORDER BY a.id DESC
                  LIMIT :limit""";
         JdbcClient.StatementSpec spec = jdbc.sql(sql).param("tenant", tenantId.value()).param("limit", limit);
