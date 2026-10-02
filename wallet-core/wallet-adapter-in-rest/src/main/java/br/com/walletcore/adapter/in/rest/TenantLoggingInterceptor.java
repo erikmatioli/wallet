@@ -16,8 +16,8 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * authenticated the request and resolved the JWT), not a servlet filter, precisely so it does not
  * need to worry about filter-chain ordering relative to Spring Security.
  *
- * <p>{@code trace_id}/{@code span_id} are added to the MDC automatically by Micrometer Tracing
- * once {@code management.tracing.*} is configured (see {@code application.yml}); this class only
+ * <p>{@code trace_id}/{@code span_id} are added to the MDC automatically by the OpenTelemetry
+ * Java agent (see {@code docker-compose.yml}); this class only
  * adds the one field tracing does not know about: which tenant the request belongs to.
  */
 @Component

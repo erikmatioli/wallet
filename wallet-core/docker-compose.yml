@@ -40,12 +40,12 @@ services:
       OTEL_TRACES_EXPORTER: "otlp"
       OTEL_METRICS_EXPORTER: "otlp"
       OTEL_LOGS_EXPORTER: "otlp"
+      # Copies tenant_id from the MDC (TenantLoggingInterceptor) onto each exported log record,
+      # so Loki can filter by tenant (Wallet Core — Logs dashboard).
+      OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_MDC_ATTRIBUTES: "tenant_id"
 
-      TRACING_SAMPLING_PROBABILITY: "1.0"   # trace every request locally; lower this in production
-      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
-      MANAGEMENT_OBSERVABILITY_HTTP_SERVER_REQUESTS_ENABLED: "true"
-      OTEL_RESOURCE_ATTRIBUTES: "service.name=wallet-core,deployment.environment=dev"
-      OTEL_TRACES_SAMPLER: "always_on"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=dev"
+      OTEL_TRACES_SAMPLER: "always_on"     # trace every request locally; use parentbased_traceidratio in production
     ports:
       - "8080:8080"
 
@@ -102,6 +102,8 @@ services:
       - loki
       - jaeger
     volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro   # Prometheus, Loki and Jaeger data sources
+      - ./docker/grafana/dashboards:/etc/grafana/dashboards:ro       # Wallet Core dashboards (Negócio, Serviço, Logs)
       - grafandata:/var/lib/grafana
 
 volumes:
