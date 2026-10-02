@@ -1,6 +1,6 @@
 package br.com.walletcore.adapter.in.rest;
 
-import br.com.walletcore.adapter.in.rest.ApiModels.AccountResponse;
+import br.com.walletcore.adapter.in.rest.ApiModels.AccountDetailResponse;
 import br.com.walletcore.adapter.in.rest.ApiModels.AuditResponse;
 import br.com.walletcore.adapter.in.rest.ApiModels.BalanceResponse;
 import br.com.walletcore.adapter.in.rest.ApiModels.EntryResponse;
@@ -18,9 +18,6 @@ import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.Money;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.headers.Header;
-import io.swagger.v3.oas.annotations.media.Content;
-import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -42,8 +39,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/v1/accounts/{accountId}")
-@Tag(name = "Accounts", description = "Endpoints de gerenciamento de contas, saldos, extratos, movimentações financeiras e auditoria.")
-@SecurityRequirement(name = "bearerAuth") // Informa ao Swagger que os endpoints exigem autenticação JWT
+@Tag(name = "Account Operations", description = "Endpoints escopados a uma conta específica para consulta de dados, extratos, movimentações financeiras e auditoria.")
+@SecurityRequirement(name = "bearerAuth")
 class AccountController {
 
     static final String IDEMPOTENCY_KEY = "Idempotency-Key";
@@ -60,44 +57,57 @@ class AccountController {
     }
 
     @GetMapping
-    @Operation(summary = "Obter detalhes da conta", description = "Retorna as informações cadastrais e metadados de uma conta específica pelo ID.")
+    @Operation(
+            summary = "Obter detalhes da conta",
+            description = "Retorna os detalhes completos de uma conta específica, incluindo dados do saldo e informações mascaradas do titular."
+    )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Conta encontrada com sucesso"),
-            @ApiResponse(responseCode = "401", description = "Token JWT ausente ou inválido"),
-            @ApiResponse(responseCode = "404", description = "Conta não encontrada")
+            @ApiResponse(responseCode = "200", description = "Detalhes da conta retornados com sucesso"),
+            @ApiResponse(responseCode = "404", description = "Conta não encontrada"),
+            @ApiResponse(responseCode = "401", description = "Token JWT ausente ou inválido")
     })
-    AccountResponse get(
+    AccountDetailResponse get(
             @AuthenticationPrincipal Jwt jwt,
-            @Parameter(description = "UUID da conta", required = true) @PathVariable UUID accountId) {
-        return AccountResponse.from(query.getAccount(CurrentTenant.from(jwt), new AccountId(accountId)));
+            @Parameter(description = "UUID da conta", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", required = true)
+            @PathVariable UUID accountId) {
+        return AccountDetailResponse.from(query.getAccountDetail(CurrentTenant.from(jwt), new AccountId(accountId)));
     }
 
     @GetMapping("/balance")
-    @Operation(summary = "Consultar saldo atual", description = "Retorna o saldo atual consolidado da conta informada.")
+    @Operation(
+            summary = "Consultar saldo atual",
+            description = "Retorna o saldo atual disponível na conta informada."
+    )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Saldo obtido com sucesso"),
-            @ApiResponse(responseCode = "401", description = "Não autorizado"),
-            @ApiResponse(responseCode = "404", description = "Conta não encontrada")
+            @ApiResponse(responseCode = "200", description = "Saldo consultado com sucesso"),
+            @ApiResponse(responseCode = "404", description = "Conta não encontrada"),
+            @ApiResponse(responseCode = "401", description = "Token JWT ausente ou inválido")
     })
     BalanceResponse balance(
             @AuthenticationPrincipal Jwt jwt,
-            @Parameter(description = "UUID da conta", required = true) @PathVariable UUID accountId) {
+            @Parameter(description = "UUID da conta", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", required = true)
+            @PathVariable UUID accountId) {
         Account account = query.getAccount(CurrentTenant.from(jwt), new AccountId(accountId));
         return new BalanceResponse(accountId, account.balance().toDecimal(), Money.CURRENCY);
     }
 
     @GetMapping("/statement")
-    @Operation(summary = "Consultar extrato da conta", description = "Retorna a listagem de lançamentos e entradas da conta com suporte a paginação baseada em cursor (before).")
+    @Operation(
+            summary = "Consultar extrato da conta",
+            description = "Retorna o extrato contábil (ledger) de lançamentos da conta de forma paginada baseada em cursor."
+    )
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Extrato retornado com sucesso"),
-            @ApiResponse(responseCode = "401", description = "Não autorizado")
+            @ApiResponse(responseCode = "404", description = "Conta não encontrada"),
+            @ApiResponse(responseCode = "401", description = "Token JWT ausente ou inválido")
     })
     StatementResponse statement(
             @AuthenticationPrincipal Jwt jwt,
+            @Parameter(description = "UUID da conta", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", required = true)
             @PathVariable UUID accountId,
-            @Parameter(description = "Cursor para paginação (identificador do último registro anterior)", required = false)
+            @Parameter(description = "Cursor numérico (before) para paginação de registros mais antigos", example = "15")
             @RequestParam(required = false) Long before,
-            @Parameter(description = "Limite de registros retornados (padrão: 50)")
+            @Parameter(description = "Número máximo de registros por página", example = "50")
             @RequestParam(defaultValue = "50") int limit) {
         var statement = query.getStatement(CurrentTenant.from(jwt), new AccountId(accountId), before, limit);
         return new StatementResponse(statement.entries().stream().map(EntryResponse::from).toList(),
@@ -105,17 +115,21 @@ class AccountController {
     }
 
     @PostMapping("/deposits")
-    @Operation(summary = "Realizar depósito", description = "Efetua uma operação de depósito na conta. Requer chave de idempotência no cabeçalho.")
+    @Operation(
+            summary = "Realizar depósito",
+            description = "Efetua um depósito de valores na conta especificada. Requer cabeçalho obrigatório de chave de idempotência."
+    )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "201", description = "Depósito efetuado com sucesso (Novo recurso criado)"),
-            @ApiResponse(responseCode = "200", description = "Requisição já processada anteriormente (Retorno de Idempotência / Replay)",
-                    headers = @Header(name = REPLAYED_HEADER, description = "Indica se o evento foi recuperado por idempotência (true)", schema = @Schema(type = "string"))),
-            @ApiResponse(responseCode = "400", description = "Dados da requisição inválidos ou chave de idempotência ausente")
+            @ApiResponse(responseCode = "201", description = "Depósito efetuado com sucesso (criado)"),
+            @ApiResponse(responseCode = "200", description = "Depósito já processado anteriormente (retornado via idempotência)"),
+            @ApiResponse(responseCode = "400", description = "Dados da requisição inválidos ou ausência da chave de idempotência"),
+            @ApiResponse(responseCode = "401", description = "Token JWT ausente ou inválido")
     })
     ResponseEntity<TransactionResponse> deposit(
             @AuthenticationPrincipal Jwt jwt,
+            @Parameter(description = "UUID da conta", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", required = true)
             @PathVariable UUID accountId,
-            @Parameter(description = "Chave única de idempotência para evitar duplicidade de transações", required = true)
+            @Parameter(description = "Chave única de idempotência da requisição", example = "b82f099c-3a81-4e2b-912c-d9c49021b333", required = true)
             @RequestHeader(IDEMPOTENCY_KEY) String idempotencyKey,
             @Valid @RequestBody MoneyMovementRequest request) {
         TransactionResult result = moveMoney.deposit(new DepositCommand(CurrentTenant.from(jwt),
@@ -124,17 +138,21 @@ class AccountController {
     }
 
     @PostMapping("/withdrawals")
-    @Operation(summary = "Realizar saque", description = "Efetua uma operação de saque na conta, validando saldo disponível. Requer chave de idempotência.")
+    @Operation(
+            summary = "Realizar saque",
+            description = "Efetua um saque de valores da conta especificada. Requer cabeçalho obrigatório de chave de idempotência e saldo suficiente."
+    )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "201", description = "Saque efetuado com sucesso"),
-            @ApiResponse(responseCode = "200", description = "Requisição já processada anteriormente (Idempotent Replay)",
-                    headers = @Header(name = REPLAYED_HEADER, description = "Indica se o evento foi recuperado por idempotência", schema = @Schema(type = "string"))),
-            @ApiResponse(responseCode = "422", description = "Saldo insuficiente ou conta inativa")
+            @ApiResponse(responseCode = "201", description = "Saque efetuado com sucesso (criado)"),
+            @ApiResponse(responseCode = "200", description = "Saque já processado anteriormente (retornado via idempotência)"),
+            @ApiResponse(responseCode = "400", description = "Dados inválidos, saldo insuficiente ou ausência da chave de idempotência"),
+            @ApiResponse(responseCode = "401", description = "Token JWT ausente ou inválido")
     })
     ResponseEntity<TransactionResponse> withdraw(
             @AuthenticationPrincipal Jwt jwt,
+            @Parameter(description = "UUID da conta", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", required = true)
             @PathVariable UUID accountId,
-            @Parameter(description = "Chave única de idempotência", required = true)
+            @Parameter(description = "Chave única de idempotência da requisição", example = "c93g100d-4b92-5f3c-823d-e0d50132c444", required = true)
             @RequestHeader(IDEMPOTENCY_KEY) String idempotencyKey,
             @Valid @RequestBody MoneyMovementRequest request) {
         TransactionResult result = moveMoney.withdraw(new WithdrawCommand(CurrentTenant.from(jwt),
@@ -144,12 +162,19 @@ class AccountController {
 
     /** Rebuilds the balance from the ledger events and compares it with the stored balance. */
     @GetMapping("/audit")
-    @Operation(summary = "Auditar integridade do ledger", description = "Reconstrói o saldo a partir dos eventos do ledger e compara com o saldo armazenado, reportando eventuais inconsistências.")
+    @Operation(
+            summary = "Auditar integridade da conta",
+            description = "Reconstrói o saldo a partir dos eventos do ledger e o compara com o saldo armazenado, validando a consistência dos dados da conta."
+    )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Auditoria executada com sucesso com o relatório de consistência"),
-            @ApiResponse(responseCode = "401", description = "Não autorizado")
+            @ApiResponse(responseCode = "200", description = "Auditoria executada com sucesso"),
+            @ApiResponse(responseCode = "404", description = "Conta não encontrada"),
+            @ApiResponse(responseCode = "401", description = "Token JWT ausente ou inválido")
     })
-    AuditResponse audit(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID accountId) {
+    AuditResponse audit(
+            @AuthenticationPrincipal Jwt jwt,
+            @Parameter(description = "UUID da conta", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", required = true)
+            @PathVariable UUID accountId) {
         var report = auditLedger.audit(CurrentTenant.from(jwt), new AccountId(accountId));
         return new AuditResponse(accountId, report.entryCount(), report.storedBalance().toDecimal(),
                 report.replayedBalance().toDecimal(), report.storedVersion(), report.consistent(), report.findings());

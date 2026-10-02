@@ -1,10 +1,12 @@
 package br.com.walletcore.adapter.out.persistence;
 
 import br.com.walletcore.application.port.out.AccountRepository;
+import br.com.walletcore.application.port.out.AccountRepository.AccountDirectoryItem;
 import br.com.walletcore.application.port.out.BalanceUpdateResult;
 import br.com.walletcore.domain.account.Account;
 import br.com.walletcore.domain.account.AccountType;
 import br.com.walletcore.domain.account.PaymentAccountNumber;
+import br.com.walletcore.domain.customer.TaxId;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.CustomerId;
 import br.com.walletcore.domain.shared.Money;
@@ -14,6 +16,7 @@ import java.sql.SQLException;
 import java.sql.Types;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -93,6 +96,50 @@ class JdbcAccountRepository implements AccountRepository {
     }
 
     @Override
+    public List<AccountDirectoryItem> findAccountDirectory(TenantId tenantId, AccountId cursorExclusive, int limit) {
+        // AccountId is a UUIDv7 (time-ordered, see UuidV7), so "id < cursor, order by id desc"
+        // is "created strictly before the last seen account" - newest first, no extra column.
+        String sql = """
+                SELECT a.id, a.customer_id, a.ispb, a.branch, a.account_number, a.check_digit, a.status,
+                       a.allow_negative, a.balance_cents, a.version, a.created_at,
+                       c.name AS customer_name, c.tax_id, c.tax_id_type
+                  FROM account a
+                  JOIN customer c ON c.id = a.customer_id
+                 WHERE a.tenant_id = :tenant AND a.kind = 'CUSTOMER'
+                """ + (cursorExclusive != null ? " AND a.id < :cursor" : "") + """
+                 ORDER BY a.id DESC
+                 LIMIT :limit""";
+        JdbcClient.StatementSpec spec = jdbc.sql(sql).param("tenant", tenantId.value()).param("limit", limit);
+        if (cursorExclusive != null) {
+            spec = spec.param("cursor", cursorExclusive.value());
+        }
+        return spec.query((rs, i) -> mapDirectoryRow(rs, tenantId)).list();
+    }
+
+    @Override
+    public List<AccountDirectoryItem> findByIds(TenantId tenantId, Set<AccountId> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        // Same shape as findAccountDirectory's query, filtered by id instead of cursor-paginated -
+        // kept as its own method rather than a shared helper because the two callers' WHERE
+        // clauses differ enough (cursor range vs. IN-list) that sharing would add more
+        // indirection than it would save.
+        String sql = """
+                SELECT a.id, a.customer_id, a.ispb, a.branch, a.account_number, a.check_digit, a.status,
+                       a.allow_negative, a.balance_cents, a.version, a.created_at,
+                       c.name AS customer_name, c.tax_id, c.tax_id_type
+                  FROM account a
+                  JOIN customer c ON c.id = a.customer_id
+                 WHERE a.tenant_id = :tenant AND a.kind = 'CUSTOMER' AND a.id IN (:ids)""";
+        return jdbc.sql(sql)
+                .param("tenant", tenantId.value())
+                .param("ids", ids.stream().map(AccountId::value).toList())
+                .query((rs, i) -> mapDirectoryRow(rs, tenantId))
+                .list();
+    }
+
+    @Override
     public long nextAccountSequence() {
         return jdbc.sql("SELECT nextval('account_number_seq')").query(Long.class).single();
     }
@@ -163,5 +210,31 @@ class JdbcAccountRepository implements AccountRepository {
                 Money.ofCents(rs.getLong("balance_cents")),
                 rs.getLong("version"),
                 Sql.instant(rs, "created_at"));
+    }
+
+    /**
+     * Row mapper for {@link #findAccountDirectory}. A separate mapper (not {@link #map}) because
+     * the directory query selects a different column set (no tenant_id, kind or account_type -
+     * the WHERE clause already fixes kind='CUSTOMER', so account_type is always TRAN) and also
+     * carries the joined customer display fields that {@code Account} itself has no business
+     * knowing about.
+     */
+    private static AccountDirectoryItem mapDirectoryRow(ResultSet rs, TenantId tenantId) throws SQLException {
+        PaymentAccountNumber number = new PaymentAccountNumber(
+                rs.getString("ispb"), rs.getString("branch"), rs.getString("account_number"),
+                rs.getString("check_digit"), AccountType.PAYMENT);
+        Account account = new Account(
+                new AccountId(Sql.uuid(rs, "id")),
+                tenantId,
+                Account.Kind.CUSTOMER,
+                new CustomerId(Sql.uuid(rs, "customer_id")),
+                number,
+                Account.Status.valueOf(rs.getString("status")),
+                rs.getBoolean("allow_negative"),
+                Money.ofCents(rs.getLong("balance_cents")),
+                rs.getLong("version"),
+                Sql.instant(rs, "created_at"));
+        TaxId taxId = new TaxId(rs.getString("tax_id"), TaxId.DocumentType.valueOf(rs.getString("tax_id_type")));
+        return new AccountDirectoryItem(account, rs.getString("customer_name"), taxId.masked());
     }
 }

@@ -31,6 +31,12 @@ export interface AccountResponse {
   currency: string;
 }
 
+/** GET /v1/accounts/{id}: AccountResponse plus who owns it. */
+export interface AccountDetailResponse extends AccountResponse {
+  customerName: string;
+  documentMasked: string;
+}
+
 export interface OnboardCustomerRequest {
   name: string;
   taxId: string;
@@ -80,6 +86,10 @@ export interface EntryResponse {
   balanceAfter: number;
   description: string;
   occurredAt: string;
+  /** Only set for TRANSFER entries - deposit/withdrawal counterparties are internal and never exposed. */
+  counterpartyAccountId: string | null;
+  counterpartyCustomerName: string | null;
+  counterpartyAccountFormatted: string | null;
 }
 
 export interface StatementResponse {
@@ -112,4 +122,21 @@ export interface ProblemDetail {
   instance?: string;
   code?: string;
   errors?: string[];
+}
+
+export interface AccountListItem {
+  accountId: string;
+  customerName: string;
+  documentMasked: string;
+  accountFormatted: string;
+  accountType: string;
+  status: string;
+  balance: number;
+  currency: string;
+  createdAt: string;
+}
+
+export interface AccountListResponse {
+  items: AccountListItem[];
+  nextCursor: string | null;
 }

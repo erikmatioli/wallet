@@ -144,7 +144,8 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
             switch (result) {
                 case BalanceUpdateResult.Applied applied -> entries.add(new LedgerEntry(
                         UuidV7.next(), lt.tenantId(), lt.id(), leg.accountId(), applied.version(), leg.direction(),
-                        leg.amount(), applied.balance(), lt.type(), lt.description(), lt.occurredAt()));
+                        leg.amount(), applied.balance(), lt.type(), lt.description(), counterpartyOf(lt, leg),
+                        lt.occurredAt()));
                 case BalanceUpdateResult.Rejected rejected -> throw rejection(lt.tenantId(), lt.type(), rejected, leg.accountId());
             }
         }
@@ -152,6 +153,20 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
         outbox.enqueue(List.of(TransactionPosted.from(lt, entries)));
         metrics.transactionPosted(lt.tenantId(), lt.type(), false);
         return new TransactionResult(lt.id(), lt.type(), lt.amount(), lt.occurredAt(), lt.description(), false);
+    }
+
+    /**
+     * The account on the other leg of the same transaction. Every deposit/withdrawal/transfer
+     * built by {@link LedgerTransaction} has exactly two legs today, so "the other one" is
+     * unambiguous; this stops being well-defined if a transaction type with 3+ legs is ever
+     * introduced, at which point this method (and what "counterparty" even means) needs revisiting.
+     */
+    private static AccountId counterpartyOf(LedgerTransaction lt, Leg leg) {
+        return lt.legs().stream()
+                .map(Leg::accountId)
+                .filter(id -> !id.equals(leg.accountId()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("transaction leg has no counterparty: " + leg));
     }
 
     private RuntimeException rejection(TenantId tenantId, TransactionType type, BalanceUpdateResult.Rejected rejected,

@@ -1,6 +1,7 @@
 package br.com.walletcore.application;
 
 import br.com.walletcore.application.port.out.AccountRepository;
+import br.com.walletcore.application.port.out.AccountRepository.AccountDirectoryItem;
 import br.com.walletcore.application.port.out.BalanceUpdateResult;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
@@ -31,6 +32,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -92,6 +94,27 @@ final class InMemoryFixture {
         public List<AccountId> findRecentlyActiveCustomerAccountIds(TenantId tenantId, int limit) {
             return accounts.values().stream().filter(a -> a.kind() == Account.Kind.CUSTOMER)
                     .map(Account::id).limit(limit).toList();
+        }
+
+        @Override
+        public List<AccountDirectoryItem> findAccountDirectory(TenantId tenantId, AccountId cursorExclusive, int limit) {
+            // No customer name lookup here: these tests never assert on it, and the fixture has
+            // no CustomerRepository reference to join against. Real behaviour is exercised by
+            // JdbcAccountRepository against a live Postgres (WalletCoreConcurrencyTest).
+            return accounts.values().stream().filter(a -> a.kind() == Account.Kind.CUSTOMER)
+                    .sorted(Comparator.comparing((Account a) -> a.id().value()).reversed())
+                    .filter(a -> cursorExclusive == null || a.id().value().compareTo(cursorExclusive.value()) < 0)
+                    .limit(limit)
+                    .map(a -> new AccountDirectoryItem(a, "Test Customer", "***0000"))
+                    .toList();
+        }
+
+        @Override
+        public List<AccountDirectoryItem> findByIds(TenantId tenantId, Set<AccountId> ids) {
+            return accounts.values().stream()
+                    .filter(a -> ids.contains(a.id()))
+                    .map(a -> new AccountDirectoryItem(a, "Test Customer", "***0000"))
+                    .toList();
         }
 
         @Override

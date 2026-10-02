@@ -211,6 +211,7 @@ Cada linha é um fato imutável: "a conta X recebeu um débito/crédito de Y cen
 | `balance_after_cents` | bigint | saldo da conta **logo após** este lançamento |
 | `type` | text | copiado da transação (`DEPOSIT` \| `WITHDRAWAL` \| `TRANSFER`) — desnormalizado de propósito, para consultar o extrato sem precisar fazer join |
 | `description` | text | copiado da transação |
+| `counterparty_account_id` | uuid | FK → `account.id`, nullable. A conta da outra perna da mesma transação (adicionada na migration `V2`). Gravada para toda transação, mas **só exposta pela API quando `type = TRANSFER`** — para depósito/saque a contraparte é uma conta interna de settlement, que nunca pode ficar visível ao cliente (ver `EntryResponse.from`) |
 | `occurred_at`, `created_at` | timestamptz | |
 
 **`UNIQUE (account_id, sequence_no)`** é a constraint que garante a sequência **sem buracos** por conta — a base de tudo: o serviço de auditoria (`AuditLedgerService`) percorre os lançamentos de uma conta em ordem de `sequence_no` e recalcula o saldo passo a passo, comparando com `balance_after_cents` em cada um e com `account.balance_cents`/`account.version` no final.

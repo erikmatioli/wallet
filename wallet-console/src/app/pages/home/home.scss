@@ -1,0 +1,29 @@
+@use '../../../styles/page' as *;
+
+.home-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.home-header h1 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.search-card {
+  margin-bottom: 1.5rem;
+}
+
+.no-top-margin {
+  margin-top: 0;
+}
+
+tr.clickable {
+  cursor: pointer;
+}
+
+tr.clickable:hover {
+  background: var(--color-bg);
+}

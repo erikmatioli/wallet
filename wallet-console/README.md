@@ -16,11 +16,9 @@ depósito, saque, transferência e auditoria (replay do ledger).
 | Rota | Tela | Endpoints usados |
 |---|---|---|
 | `/login` | Login com client id / secret do tenant | `POST /v1/auth/token` (Basic → JWT) |
+| `/home` | Lista todas as contas do tenant (paginada), busca uma específica por número, botão "+ Nova conta" | `GET /v1/accounts`, `GET /v1/accounts/lookup` |
 | `/onboard` | Cadastro de cliente + abertura da conta | `POST /v1/customers` |
-| `/accounts/:id` | Saldo, extrato paginado, depósito, saque, transferência (por ID ou por agência/conta/dígito), auditoria | `GET /v1/accounts/{id}`, `/statement`, `POST /deposits`, `/withdrawals`, `POST /v1/transfers`, `GET /audit` |
-
-O wallet-core ainda não tem endpoint de listagem/busca de clientes ou contas — por isso a navegação
-é "cadastrar → abrir a conta criada" (ou abrir `/accounts/<id>` direto, com o id em mãos).
+| `/accounts/:id` | Saldo, extrato paginado (com link para a conta contraparte em transferências), depósito, saque, transferência (por ID ou por agência/conta/dígito), auditoria | `GET /v1/accounts/{id}`, `/statement`, `POST /deposits`, `/withdrawals`, `POST /v1/transfers`, `GET /audit` |
 
 ## Rodando
 
