@@ -85,7 +85,7 @@ jobs:
           tags: ${{ env.TAGS }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # Categorised by PR labels per .github/release.yml (feature/fix/chore/docs/dependencies).
           # PRs without a matching label fall into the default "Other Changes" bucket -
