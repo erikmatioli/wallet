@@ -54,8 +54,16 @@ class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/v1/accounts", "/v1/accounts/lookup")
                         .hasAuthority("SCOPE_accounts:read")
                         .requestMatchers(HttpMethod.GET, "/v1/accounts/**").hasAuthority("SCOPE_accounts:read")
-                        .requestMatchers(HttpMethod.POST, "/v1/accounts/*/deposits", "/v1/accounts/*/withdrawals",
-                                "/v1/transfers").hasAuthority("SCOPE_ledger:write")
+                        // A read despite being a POST: it only carries the CPF/CNPJ in the body (see
+                        // AccountDirectoryController#holderCheck), it changes nothing.
+                        .requestMatchers(HttpMethod.POST, "/v1/accounts/holder-check").hasAuthority("SCOPE_accounts:read")
+                        // pix:send (outgoing-Pix context) may debit and reverse its debits, nothing more:
+                        // deposits and transfers stay ledger:write only, so a leaked send token cannot
+                        // credit anyone or move money between customers.
+                        .requestMatchers(HttpMethod.POST, "/v1/accounts/*/withdrawals", "/v1/transactions/*/reversals")
+                        .hasAnyAuthority("SCOPE_ledger:write", "SCOPE_pix:send")
+                        .requestMatchers(HttpMethod.POST, "/v1/accounts/*/deposits", "/v1/transfers")
+                        .hasAuthority("SCOPE_ledger:write")
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()))
                 .csrf(AbstractHttpConfigurer::disable)

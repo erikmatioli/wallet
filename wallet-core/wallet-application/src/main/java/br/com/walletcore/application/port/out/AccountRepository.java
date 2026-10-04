@@ -1,6 +1,7 @@
 package br.com.walletcore.application.port.out;
 
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.customer.Customer;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.TenantId;
 import br.com.walletcore.domain.customer.TaxId;
@@ -17,6 +18,13 @@ public interface AccountRepository {
     Optional<Account> findByTaxId(TenantId tenantId, TaxId taxId);
 
     Optional<Account> findByNumber(TenantId tenantId, String branch, String number, String checkDigit);
+
+    /** A CUSTOMER account with its holder's document and status - for the Pix holder check. */
+    record AccountHolder(Account account, TaxId holderTaxId, Customer.Status holderStatus) {
+    }
+
+    /** Same lookup as {@link #findByNumber}, joined with the owning customer. */
+    Optional<AccountHolder> findHolderByNumber(TenantId tenantId, String branch, String number, String checkDigit);
 
     /** Read-model row for the accounts directory: an Account joined with its customer's display name. */
     record AccountDirectoryItem(Account account, String customerName, String documentMasked) {

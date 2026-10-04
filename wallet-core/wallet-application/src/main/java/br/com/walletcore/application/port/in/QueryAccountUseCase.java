@@ -24,6 +24,29 @@ public interface QueryAccountUseCase {
     Account getAccountByTaxId(TenantId tenantId, String rawTaxId);
 
     /**
+     * Whether branch + number + check digit identify a CUSTOMER account of this tenant that can
+     * receive money and whose holder has the given CPF/CNPJ - the check a receiving PSP makes
+     * before accepting a Pix (pacs.008). A negative outcome is a normal answer, not an exception:
+     * the caller maps it to a rejection reason. A malformed tax id counts as
+     * {@link HolderCheck.Result#TAX_ID_MISMATCH} (no holder can have an invalid document).
+     */
+    HolderCheck checkHolder(TenantId tenantId, String branch, String number, String checkDigit, String rawTaxId);
+
+    /** {@code accountId} is only set when {@code result} is {@link Result#VALID}, so nothing leaks on a miss. */
+    record HolderCheck(Result result, AccountId accountId) {
+
+        public enum Result { VALID, ACCOUNT_NOT_FOUND, ACCOUNT_BLOCKED, ACCOUNT_CLOSED, TAX_ID_MISMATCH }
+
+        public static HolderCheck valid(AccountId accountId) {
+            return new HolderCheck(Result.VALID, accountId);
+        }
+
+        public static HolderCheck rejected(Result result) {
+            return new HolderCheck(result, null);
+        }
+    }
+
+    /**
      * Statement, newest first, using keyset pagination on the per-account sequence.
      *
      * @param beforeSequence only entries with a smaller sequence are returned (null = from the newest)

@@ -12,8 +12,11 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -24,6 +27,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -66,13 +70,30 @@ class TokenController {
     @SecurityRequirement(name = "basicAuth") // Indica que este endpoint usa Basic Auth em vez de Bearer
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Token emitido com sucesso"),
+            @ApiResponse(responseCode = "400", description = "invalid_scope: escopo pedido não pertence ao cliente"),
             @ApiResponse(responseCode = "401", description = "Credenciais de cliente inválidas ou ausentes no cabeçalho Authorization Basic")
     })
-    ResponseEntity<TokenResponse> token(
-            @Parameter(hidden = true) Authentication authentication) {
+    ResponseEntity<?> token(
+            @Parameter(hidden = true) Authentication authentication,
+            @Parameter(description = "Escopos desejados, separados por espaço (OAuth2 client credentials). "
+                    + "Ausente = todos os escopos do tenant. Ex.: \"pix:send\" para um token que só debita e estorna.",
+                    example = "pix:send")
+            @RequestParam(name = "scope", required = false) String requestedScope) {
         TenantPrincipal principal = (TenantPrincipal) authentication.getPrincipal();
         Instant now = clock.instant();
-        String scope = String.join(" ", principal.scopes().stream().sorted().toList());
+        Set<String> granted = principal.scopes();
+        if (requestedScope != null && !requestedScope.isBlank()) {
+            // Down-scoping only: a client may ask for fewer scopes than it has (least privilege
+            // per use - e.g. the Pix service's send context), never for one it was not given.
+            Set<String> requested = Arrays.stream(requestedScope.trim().split("\\s+")).collect(Collectors.toSet());
+            if (!granted.containsAll(requested)) {
+                return ResponseEntity.badRequest().cacheControl(CacheControl.noStore())
+                        .body(Map.of("error", "invalid_scope",
+                                "error_description", "requested scope exceeds the scopes granted to this client"));
+            }
+            granted = requested;
+        }
+        String scope = String.join(" ", granted.stream().sorted().toList());
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(props.issuer())

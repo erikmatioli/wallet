@@ -15,6 +15,7 @@ import br.com.walletcore.domain.exception.BusinessRuleException;
 import br.com.walletcore.domain.exception.ConflictException;
 import br.com.walletcore.domain.exception.NotFoundException;
 import br.com.walletcore.domain.exception.ValidationException;
+import br.com.walletcore.domain.ledger.EntryDirection;
 import br.com.walletcore.domain.ledger.LedgerEntry;
 import br.com.walletcore.domain.ledger.LedgerTransaction;
 import br.com.walletcore.domain.ledger.Leg;
@@ -112,6 +113,33 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
             LedgerTransaction lt = LedgerTransaction.transfer(c.tenantId(), TransactionId.newId(), c.source(),
                     destination, c.amount(), c.description(), clock.instant());
             return post(lt, key, fp, null);
+        });
+    }
+
+    @Override
+    public TransactionResult reverseWithdrawal(ReversalCommand c) {
+        if (c.withdrawalId() == null) {
+            throw new ValidationException("INVALID_TRANSACTION_ID", "transaction id is required");
+        }
+        // The key is derived from the withdrawal, not chosen by the caller: that is what makes
+        // "reverse this debit" happen at most once, even across different callers or retries.
+        String key = "reversal:" + c.withdrawalId().value();
+        return tx.inTransaction(c.tenantId(), () -> {
+            LedgerEntry debit = ledger.findByTransaction(c.tenantId(), c.withdrawalId()).stream()
+                    .filter(e -> e.type() == TransactionType.WITHDRAWAL && e.direction() == EntryDirection.DEBIT)
+                    .findFirst()
+                    .orElseThrow(() -> new NotFoundException("WITHDRAWAL_NOT_FOUND",
+                            "no withdrawal " + c.withdrawalId().value() + " for this tenant"));
+            String description = c.description() == null || c.description().isBlank()
+                    ? "Estorno de " + c.withdrawalId().value() : c.description();
+            // Fingerprint ignores the description on purpose: a retry with a different text is
+            // still the same reversal, not a conflicting request.
+            String fp = fingerprint("REVERSAL", c.withdrawalId().value());
+            TransactionId id = TransactionId.newId();
+            AccountId settlementId = settlement.pick(c.tenantId(), id);
+            LedgerTransaction lt = LedgerTransaction.deposit(c.tenantId(), id, debit.accountId(), settlementId,
+                    debit.amount(), description, clock.instant());
+            return post(lt, key, fp, settlementId);
         });
     }
 

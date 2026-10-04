@@ -1,0 +1,70 @@
+spring:
+  application:
+    name: pix-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/pix}
+    username: ${DB_USER:pix_app}
+    password: ${DB_PASSWORD:pix_app}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      connection-timeout: 3000
+  flyway:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/pix}
+    user: ${DB_MIGRATION_USER:pix_owner}
+    password: ${DB_MIGRATION_PASSWORD:pix_owner}
+
+server:
+  port: ${PORT:8081}
+  shutdown: graceful
+
+logging:
+  pattern:
+    # trace_id/span_id come from the OpenTelemetry Java agent (see docker-compose.yml).
+    level: "%5p [trace_id=%X{trace_id:-},span_id=%X{span_id:-}]"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+pix:
+  wallet-core:
+    base-url: ${WALLET_CORE_URL:http://localhost:8080}
+    # The send API accepts wallet-core's own JWTs (scope pix:send), checked against its JWKS.
+    jwk-set-uri: ${WALLET_CORE_URL:http://localhost:8080}/.well-known/jwks.json
+    issuer: wallet-core
+    connect-timeout: 2s
+    read-timeout: 5s
+  # One entry per wallet-core tenant this service answers for. The SPI addresses a participant
+  # by ISPB; the credentials are that tenant's, so wallet-core's RLS still scopes every call.
+  # Defaults are the two tenants wallet-core's "dev" profile seeds (DevDataSeeder).
+  participants:
+    - ispb: "12345678"
+      client-id: ${PIX_TENANT_1_CLIENT_ID:demo-tenant}
+      client-secret: ${PIX_TENANT_1_CLIENT_SECRET:demo-secret-change-me-please}
+    - ispb: "87654321"
+      client-id: ${PIX_TENANT_2_CLIENT_ID:segundo-tenant}
+      client-secret: ${PIX_TENANT_2_CLIENT_SECRET:segundo-tenant-secret-please}
+  bus:
+    endpoint: ${AWS_ENDPOINT_URL:http://localhost:4566}
+    region: ${AWS_REGION:us-east-1}
+    access-key: ${AWS_ACCESS_KEY_ID:test}
+    secret-key: ${AWS_SECRET_ACCESS_KEY:test}
+    psp-to-spi-topic-arn: ${PIX_TOPIC_PSP_TO_SPI:arn:aws:sns:us-east-1:000000000000:psp-to-spi}
+    payment-events-topic-arn: ${PIX_TOPIC_PAYMENT_EVENTS:arn:aws:sns:us-east-1:000000000000:pix-payment-events}
+    spi-inbound-queue: ${PIX_QUEUE_SPI_INBOUND:wallet-pix-spi-inbound}
+    outbox-poll-interval-ms: 200
+  # Checked, in order, before the payer is debited (SendPixService.initiate).
+  policies:
+    max-amount: ${PIX_MAX_AMOUNT:5000.00}

@@ -71,6 +71,15 @@ class JdbcLedgerRepository implements LedgerRepository {
     }
 
     @Override
+    public List<LedgerEntry> findByTransaction(TenantId tenantId, TransactionId transactionId) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM ledger_entry WHERE tenant_id = :tenant AND transaction_id = :tx")
+                .param("tenant", tenantId.value())
+                .param("tx", transactionId.value())
+                .query(JdbcLedgerRepository::map)
+                .list();
+    }
+
+    @Override
     public void forEachInSequence(TenantId tenantId, AccountId accountId, Consumer<LedgerEntry> consumer) {
         long last = 0;
         while (true) {

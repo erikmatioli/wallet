@@ -5,6 +5,7 @@ import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.Money;
 import br.com.walletcore.domain.shared.TenantId;
 import br.com.walletcore.domain.shared.TransactionId;
+import br.com.walletcore.domain.shared.TransactionId;
 import java.time.Instant;
 
 /**
@@ -18,6 +19,17 @@ public interface MoveMoneyUseCase {
     TransactionResult withdraw(WithdrawCommand command);
 
     TransactionResult transfer(TransferCommand command);
+
+    /**
+     * Credits back, in full, the account a WITHDRAWAL debited. Idempotent by nature: a given
+     * withdrawal can be reversed once, whatever the caller does - repeating the call returns the
+     * original reversal ({@code replayed = true}). The caller says which debit to undo, never
+     * which account or amount, so this cannot be used to credit arbitrary money.
+     */
+    TransactionResult reverseWithdrawal(ReversalCommand command);
+
+    record ReversalCommand(TenantId tenantId, TransactionId withdrawalId, String description) {
+    }
 
     record DepositCommand(TenantId tenantId, AccountId accountId, Money amount, String description,
                           String idempotencyKey) {

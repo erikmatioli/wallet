@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import br.com.walletcore.application.port.in.AuditLedgerUseCase.AuditReport;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.DepositCommand;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.Destination;
+import br.com.walletcore.application.port.in.MoveMoneyUseCase.ReversalCommand;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.TransactionResult;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.TransferCommand;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.WithdrawCommand;
@@ -214,5 +215,37 @@ class MoveMoneyServiceTest {
         var page3 = f.query.getStatement(f.tenant, a.id(), 2L, 2);
         assertThat(page3.entries()).extracting(se -> se.entry().sequence()).isEqualTo(List.of(1L));
         assertThat(page3.nextBefore()).isNull();
+    }
+
+    // ---------------------------------------------------------------- reversal of a withdrawal
+
+    @Test
+    void reversalCreditsBackExactlyTheWithdrawnAmountOnce() {
+        Account a = f.openCustomerAccount();
+        f.moveMoney.deposit(deposit(a, 10_000, "seed"));
+        TransactionResult debit = f.moveMoney.withdraw(new WithdrawCommand(f.tenant, a.id(), Money.ofCents(2_500),
+                "pix", "pix-debit-1"));
+
+        TransactionResult first = f.moveMoney.reverseWithdrawal(new ReversalCommand(f.tenant, debit.id(), "estorno"));
+        TransactionResult again = f.moveMoney.reverseWithdrawal(new ReversalCommand(f.tenant, debit.id(), "outro texto"));
+
+        assertThat(f.balanceOf(a)).isEqualTo(10_000);
+        assertThat(first.replayed()).isFalse();
+        assertThat(again.replayed()).isTrue();
+        assertThat(again.id()).isEqualTo(first.id());
+        assertThat(first.type()).isEqualTo(TransactionType.DEPOSIT);
+        assertThat(f.sumOfAllBalances()).isZero();
+    }
+
+    @Test
+    void onlyWithdrawalsCanBeReversed() {
+        Account a = f.openCustomerAccount();
+        TransactionResult deposit = f.moveMoney.deposit(deposit(a, 10_000, "seed"));
+
+        assertThatThrownBy(() -> f.moveMoney.reverseWithdrawal(new ReversalCommand(f.tenant, deposit.id(), null)))
+                .isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> f.moveMoney.reverseWithdrawal(new ReversalCommand(f.tenant,
+                br.com.walletcore.domain.shared.TransactionId.newId(), null))).isInstanceOf(NotFoundException.class);
+        assertThat(f.balanceOf(a)).isEqualTo(10_000);
     }
 }

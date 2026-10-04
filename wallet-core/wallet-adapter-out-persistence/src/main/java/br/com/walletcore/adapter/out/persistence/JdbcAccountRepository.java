@@ -2,10 +2,12 @@ package br.com.walletcore.adapter.out.persistence;
 
 import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.AccountRepository.AccountDirectoryItem;
+import br.com.walletcore.application.port.out.AccountRepository.AccountHolder;
 import br.com.walletcore.application.port.out.BalanceUpdateResult;
 import br.com.walletcore.domain.account.Account;
 import br.com.walletcore.domain.account.AccountType;
 import br.com.walletcore.domain.account.PaymentAccountNumber;
+import br.com.walletcore.domain.customer.Customer;
 import br.com.walletcore.domain.customer.TaxId;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.CustomerId;
@@ -91,6 +93,31 @@ class JdbcAccountRepository implements AccountRepository {
                 .param("number", number)
                 .param("digit", checkDigit)
                 .query(JdbcAccountRepository::map)
+                .optional();
+    }
+
+    @Override
+    public Optional<AccountHolder> findHolderByNumber(TenantId tenantId, String branch, String number,
+                                                      String checkDigit) {
+        // Selects the account columns under the names map() expects, plus the holder's document
+        // and status. The document is compared in the service, not here, so a miss can still
+        // tell "no such account" apart from "account exists, document doesn't match".
+        return jdbc.sql("""
+                SELECT a.id, a.tenant_id, a.kind, a.customer_id, a.ispb, a.branch, a.account_number,
+                       a.check_digit, a.status, a.allow_negative, a.balance_cents, a.version, a.created_at,
+                       c.tax_id, c.tax_id_type, c.status AS customer_status
+                  FROM account a
+                  JOIN customer c ON c.id = a.customer_id
+                 WHERE a.tenant_id = :tenant AND a.kind = 'CUSTOMER'
+                   AND a.branch = :branch AND a.account_number = :number AND a.check_digit = :digit""")
+                .param("tenant", tenantId.value())
+                .param("branch", branch)
+                .param("number", number)
+                .param("digit", checkDigit)
+                .query((rs, i) -> new AccountHolder(
+                        map(rs, i),
+                        new TaxId(rs.getString("tax_id"), TaxId.DocumentType.valueOf(rs.getString("tax_id_type"))),
+                        Customer.Status.valueOf(rs.getString("customer_status"))))
                 .optional();
     }
 
