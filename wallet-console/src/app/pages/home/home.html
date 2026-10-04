@@ -9,6 +9,23 @@
   <div class="card search-card">
     <h2 class="section-title no-top-margin">Buscar conta específica por número</h2>
     <form class="inline-form" (ngSubmit)="search()">
+      <div class="method-toggle">
+        <label class="radio">
+          <input type="radio" name="searchMethod" value="taxId" [(ngModel)]="searchMethod" />
+          Por CPF / CNPJ
+        </label>
+        <label class="radio">
+          <input type="radio" name="searchMethod" value="number" [(ngModel)]="searchMethod" />
+          Por número (agência/conta/dígito)
+        </label>
+      </div>
+      <div class="inline-form">
+      @if (searchMethod === 'taxId') {
+      <label>
+        CPF ou CNPJ
+        <input name="searchTaxId" [(ngModel)]="searchTaxId" required placeholder="000.000.000-00" />
+      </label>
+      } @else {
       <label>
         Agência
         <input name="searchBranch" [(ngModel)]="searchBranch" required />
@@ -21,6 +38,8 @@
         Dígito
         <input name="searchCheckDigit" [(ngModel)]="searchCheckDigit" required />
       </label>
+      }
+      </div>
       <button type="submit" [disabled]="searching()">{{ searching() ? 'Buscando...' : 'Buscar' }}</button>
     </form>
   </div>

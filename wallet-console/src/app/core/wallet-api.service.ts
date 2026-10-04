@@ -76,4 +76,10 @@ export class WalletApiService {
     const params = new HttpParams().set('branch', branch).set('number', number).set('checkDigit', checkDigit);
     return this.http.get<AccountResponse>('/v1/accounts/lookup', { params });
   }
+
+  /** Looks up one account by owner taxId. 404 (via extractErrorMessage) if not found. */
+  lookupAccountByTaxId(taxId: string): Observable<AccountResponse> {
+    const params = new HttpParams().set('taxId', taxId);
+    return this.http.get<AccountResponse>('/v1/accounts/findByTaxId', { params });
+  }
 }
