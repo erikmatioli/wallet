@@ -70,12 +70,32 @@ class AccountDirectoryController {
     })
     AccountResponse lookup(
             @AuthenticationPrincipal Jwt jwt,
-            @Parameter(description = "Número da agência bancária", example = "0001", required = true)
+            @Parameter(description = "Número da agência bancária", example = "0001", required = false)
             @RequestParam String branch,
-            @Parameter(description = "Número da conta", example = "1234567", required = true)
+            @Parameter(description = "Número da conta", example = "1234567", required = false)
             @RequestParam String number,
-            @Parameter(description = "Dígito verificador da conta", example = "5", required = true)
+            @Parameter(description = "Dígito verificador da conta", example = "5", required = false)
             @RequestParam String checkDigit) {
+
         return AccountResponse.from(query.getAccountByNumber(CurrentTenant.from(jwt), branch, number, checkDigit));
+    }
+
+    /** Finds one account by its bank-style number instead of its internal id. 404 if not found. */
+    @GetMapping("/findByTaxId")
+    @Operation(
+            summary = "Buscar conta por TaxId",
+            description = "Localiza e retorna os detalhes de uma conta utilizando dados do TaxId do proprietário"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Conta encontrada com sucesso"),
+            @ApiResponse(responseCode = "404", description = "Conta não encontrada"),
+            @ApiResponse(responseCode = "401", description = "Token JWT ausente ou inválido")
+    })
+    AccountResponse findByTaxId(
+            @AuthenticationPrincipal Jwt jwt,
+            @Parameter(description = "Documento do dono na conta", example = "501.501.370-10", required = false)
+            @RequestParam String taxId) {
+
+        return AccountResponse.from(query.getAccountByTaxId(CurrentTenant.from(jwt), taxId));
     }
 }

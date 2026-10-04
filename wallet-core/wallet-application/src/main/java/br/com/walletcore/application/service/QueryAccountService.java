@@ -6,6 +6,7 @@ import br.com.walletcore.application.port.out.AccountRepository.AccountDirectory
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.TransactionRunner;
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.customer.TaxId;
 import br.com.walletcore.domain.exception.NotFoundException;
 import br.com.walletcore.domain.ledger.LedgerEntry;
 import br.com.walletcore.domain.ledger.TransactionType;
@@ -49,6 +50,14 @@ public final class QueryAccountService implements QueryAccountUseCase {
     @Override
     public Account getAccountByNumber(TenantId tenantId, String branch, String number, String checkDigit) {
         return tx.readOnly(tenantId, () -> accounts.findByNumber(tenantId, branch, number, checkDigit)
+                .filter(a -> a.kind() == Account.Kind.CUSTOMER) // internal accounts are never exposed
+                .orElseThrow(() -> new NotFoundException("ACCOUNT_NOT_FOUND", "account not found")));
+    }
+
+    @Override
+    public Account getAccountByTaxId(TenantId tenantId, String rawTaxId) {
+        TaxId taxId = TaxId.parse(rawTaxId); // transforma a string e valida para formar o objeto
+        return tx.readOnly(tenantId, () -> accounts.findByTaxId(tenantId, taxId)
                 .filter(a -> a.kind() == Account.Kind.CUSTOMER) // internal accounts are never exposed
                 .orElseThrow(() -> new NotFoundException("ACCOUNT_NOT_FOUND", "account not found")));
     }
