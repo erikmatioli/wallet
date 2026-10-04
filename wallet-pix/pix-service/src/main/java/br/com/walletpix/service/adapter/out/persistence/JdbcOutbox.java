@@ -67,6 +67,11 @@ public class JdbcOutbox implements OutboundMessages {
                 .list();
     }
 
+    /** Rows not yet on SNS; served by the partial index outbox_pending_idx. */
+    public long countPending() {
+        return jdbc.sql("SELECT count(*) FROM outbox WHERE published_at IS NULL").query(Long.class).single();
+    }
+
     public void markPublished(long id) {
         jdbc.sql("UPDATE outbox SET published_at = now() WHERE id = :id").param("id", id).update();
     }

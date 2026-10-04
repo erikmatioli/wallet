@@ -4,6 +4,10 @@ import br.com.walletpix.service.application.port.PixPorts.PixMetrics;
 import br.com.walletpix.service.domain.PixPayment;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import java.time.Duration;
+import java.util.EnumSet;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /**
@@ -40,5 +44,20 @@ class MicrometerPixMetrics implements PixMetrics {
                 .tag("ispb", p.ispb())
                 .register(registry)
                 .increment();
+        if (TERMINAL.contains(p.status())) {
+            // First state to last: INBOUND = pacs.008 received -> credited/rejected, OUTBOUND =
+            // debit -> settled/refunded/returned. Histogram, so p95/p99 come from Prometheus.
+            Timer.builder("pix.payment.duration")
+                    .description("Time from the first to the terminal state of a Pix")
+                    .tag("direction", p.direction().name())
+                    .tag("status", p.status().name())
+                    .publishPercentileHistogram()
+                    .register(registry)
+                    .record(Duration.between(p.createdAt(), p.updatedAt()));
+        }
     }
+
+    private static final Set<PixPayment.Status> TERMINAL = EnumSet.of(PixPayment.Status.REJECTED,
+            PixPayment.Status.CREDITED, PixPayment.Status.COMPLETED, PixPayment.Status.REFUNDED,
+            PixPayment.Status.RETURNED);
 }

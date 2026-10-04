@@ -37,6 +37,12 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+    # Buckets for p50/p95/p99 in Prometheus (Wallet Core - Pix dashboard): the send API and the
+    # calls to wallet-core (holder-check sits on the critical path of every incoming Pix).
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        http.client.requests: true
 
 pix:
   wallet-core:

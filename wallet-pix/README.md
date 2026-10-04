@@ -175,9 +175,16 @@ python scripts/pixdev.py events        # PixEvents publicados
   `http://localhost:16686`).
 - **Métricas** em `/actuator/prometheus`, com o Prometheus do wallet-core já fazendo scrape do
   `pix-service:8081`:
-  - `pix_payments_total{direction,status,reason,ispb}`;
+  - `pix_payments_total{direction,status,reason,ispb}`: cada estado alcançado;
+  - `pix_payment_duration_seconds{direction,status}` (histograma): do primeiro ao último estado;
   - `pix_inbound_messages_total{type,result}`, em que uma fatia crescente de `duplicate`
-    indica tempestade de reentrega.
+    indica tempestade de reentrega;
+  - `pix_outbox_pending` e `pix_queue_messages{queue,state}` (fila do SPI e a DLQ dela);
+  - `http_server_requests_seconds` (API de envio) e `http_client_requests_seconds{client_name="wallet-core"}`,
+    com histogramas.
+- **Dashboard** "Wallet Core — Pix" no Grafana do wallet-core (`http://localhost:3000`, pasta
+  Wallet Core). O JSON fica em `../wallet-core/docker/grafana/dashboards/wallet-pix.json`.
+  Qualquer mensagem na DLQ fica vermelha no topo, e cada uma precisa de análise.
 
 ## Testes
 

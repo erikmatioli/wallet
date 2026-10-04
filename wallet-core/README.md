@@ -194,6 +194,7 @@ Na pasta **Wallet Core** há três dashboards provisionados (`docker/grafana/das
 |---|---|
 | **Wallet Core — Negócio** | Transações postadas, replays de idempotência, rejeições por motivo, onboardings, auditoria do ledger e varredura, com filtro por tenant. Os painéis que espelham um alerta usam a mesma fórmula e mostram o limiar |
 | **Wallet Core — Serviço** | HTTP (vazão, status, latência p50/p95/p99 por endpoint, taxa de 5xx), transações de banco, pool Hikari, outbox e JVM (heap, GC, CPU, threads) |
+| **Wallet Core — Pix** | Pix recebidos e enviados (`../wallet-pix`): decisões e rejeições por motivo, desfecho dos envios e estornos, tempo até crédito/liquidação, filas SNS/SQS e DLQ, outbox, chamadas ao wallet-core e logs do pix-service, com filtro por participante (ISPB) |
 | **Wallet Core — Logs** | Logs do Loki filtráveis por nível, tenant e texto; volume por nível, loggers com mais ERROR/WARN e as mensagens citadas nos alertas. Cada linha tem link para o trace no Jaeger |
 
 Os JSONs são a fonte da verdade: edições pela UI do Grafana valem até o próximo restart. Para mudar um painel de vez, exporte o JSON (*Share → Export*) e substitua o arquivo.
