@@ -220,14 +220,10 @@ class WalletCoreClient implements WalletCore {
         if (p == null) {
             throw new PermanentFailure("no wallet-core credentials configured for ISPB " + ispb);
         }
-        TokenResponse response = http.post()
-                .uri(b -> {
-                    b.path("/v1/auth/token");
-                    if (scope != null) {
-                        b.queryParam("scope", scope);
-                    }
-                    return b.build();
-                })
+        // URI templates (not a builder lambda) so the client metric gets a real uri tag, not "none".
+        var spec = scope == null ? http.post().uri("/v1/auth/token")
+                : http.post().uri("/v1/auth/token?scope={scope}", scope);
+        TokenResponse response = spec
                 .headers(h -> h.setBasicAuth(p.clientId(), p.clientSecret()))
                 .retrieve()
                 .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> {
