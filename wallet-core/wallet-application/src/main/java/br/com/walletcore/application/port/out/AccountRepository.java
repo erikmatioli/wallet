@@ -3,6 +3,7 @@ package br.com.walletcore.application.port.out;
 import br.com.walletcore.domain.account.Account;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.TenantId;
+import br.com.walletcore.domain.customer.TaxId;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -12,6 +13,8 @@ public interface AccountRepository {
     void insert(Account account);
 
     Optional<Account> findById(TenantId tenantId, AccountId accountId);
+
+    Optional<Account> findByTaxId(TenantId tenantId, TaxId taxId);
 
     Optional<Account> findByNumber(TenantId tenantId, String branch, String number, String checkDigit);
 

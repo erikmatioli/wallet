@@ -69,6 +69,18 @@ class JdbcAccountRepository implements AccountRepository {
     }
 
     @Override
+    public Optional<Account> findByTaxId(TenantId tenantId, TaxId taxId) {
+        return jdbc.sql("SELECT " + COLUMNS + """
+                 FROM account
+                WHERE tenant_id = :tenant AND kind = 'CUSTOMER'
+                  AND customer_id = (SELECT id FROM customer WHERE tenant_id = :tenant AND tax_id = :taxId)""")
+                .param("tenant", tenantId.value())
+                .param("taxId", taxId.value())
+                .query(JdbcAccountRepository::map)
+                .optional();
+    }
+
+    @Override
     public Optional<Account> findByNumber(TenantId tenantId, String branch, String number, String checkDigit) {
         return jdbc.sql("SELECT " + COLUMNS + """
                  FROM account

@@ -16,6 +16,7 @@ import br.com.walletcore.application.service.SettlementRouter;
 import br.com.walletcore.domain.account.Account;
 import br.com.walletcore.domain.account.AccountType;
 import br.com.walletcore.domain.account.PaymentAccountNumber;
+import br.com.walletcore.domain.customer.TaxId;
 import br.com.walletcore.domain.event.DomainEvent;
 import br.com.walletcore.domain.ledger.LedgerEntry;
 import br.com.walletcore.domain.ledger.LedgerTransaction;
@@ -44,6 +45,8 @@ final class InMemoryFixture {
     final List<LedgerEntry> entries = new ArrayList<>();
     final Map<String, StoredTransaction> journal = new HashMap<>();
     final List<DomainEvent> events = new ArrayList<>();
+
+    final Map<AccountId, TaxId> taxIdsByAccount = new HashMap<>();
     private long accountSequence = 0;
 
     final Clock clock = Clock.fixed(Instant.parse("2026-09-21T12:00:00Z"), ZoneOffset.UTC);
@@ -69,6 +72,14 @@ final class InMemoryFixture {
         @Override
         public Optional<Account> findById(TenantId tenantId, AccountId accountId) {
             return Optional.ofNullable(accounts.get(accountId));
+        }
+
+        @Override
+        public Optional<Account> findByTaxId(TenantId tenantId, TaxId taxId) {
+            return taxIdsByAccount.entrySet().stream()
+                    .filter(e -> e.getValue().equals(taxId))
+                    .map(e -> accounts.get(e.getKey()))
+                    .findFirst();
         }
 
         @Override
@@ -209,6 +220,12 @@ final class InMemoryFixture {
                 accountRepository.nextAccountSequence(), AccountType.PAYMENT);
         Account account = Account.openPayment(tenant, CustomerId.newId(), number, clock.instant());
         accountRepository.insert(account);
+        return account;
+    }
+
+    Account openCustomerAccount(String rawTaxId) {
+        Account account = openCustomerAccount(); // reaproveita o que já existe
+        taxIdsByAccount.put(account.id(), TaxId.parse(rawTaxId));
         return account;
     }
 

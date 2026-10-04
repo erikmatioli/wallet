@@ -20,6 +20,9 @@ public interface QueryAccountUseCase {
     /** Same as {@link #getAccount}, addressed by the bank-style number instead of the internal id. */
     Account getAccountByNumber(TenantId tenantId, String branch, String number, String checkDigit);
 
+    /** Same as {@link #getAccount}, addressed by the bank-style number instead of the internal id. */
+    Account getAccountByTaxId(TenantId tenantId, String rawTaxId);
+
     /**
      * Statement, newest first, using keyset pagination on the per-account sequence.
      *
