@@ -10,3 +10,10 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["wallet-core:8080"]
+
+  # wallet-pix (../wallet-pix/docker-compose.yml) joins this network. While it isn't running this
+  # target is simply reported as down - nothing alerts on it.
+  - job_name: pix-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["pix-service:8081"]

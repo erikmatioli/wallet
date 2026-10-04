@@ -1,0 +1,52 @@
+name: CI - wallet-pix
+
+# Same model as ci.yml (wallet-core), per ADR-009: its own caller workflow, the shared
+# build-test.yml with project-dir, and path filters so wallet-core changes don't run this.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "wallet-pix/**"
+      - ".github/workflows/ci-wallet-pix.yml"
+      - ".github/workflows/build-test.yml"
+  push:
+    branches: [main]
+    paths:
+      - "wallet-pix/**"
+      - ".github/workflows/ci-wallet-pix.yml"
+      - ".github/workflows/build-test.yml"
+
+concurrency:
+  group: ci-wallet-pix-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    uses: ./.github/workflows/build-test.yml
+    with:
+      project-dir: wallet-pix
+
+  docker:
+    name: Docker build (${{ matrix.module }})
+    needs: build-test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # spi-simulator is built to keep its Dockerfile path honest; it is never published.
+        module: [pix-service, spi-simulator]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: wallet-pix
+          build-args: MODULE=${{ matrix.module }}
+          push: false
+          tags: wallet-pix/${{ matrix.module }}:ci

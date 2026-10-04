@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: spi-simulator
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: ${PORT:8090}
+
+logging:
+  pattern:
+    level: "%5p [trace_id=%X{trace_id:-},span_id=%X{span_id:-}]"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+spi:
+  # ISPBs served by the Pix service (wallet-core dev tenants): orders between them go through it on both sides.
+  participants: ["12345678", "87654321"]
+  external-ispb: "99999999"
+  endpoint: ${AWS_ENDPOINT_URL:http://localhost:4566}
+  region: ${AWS_REGION:us-east-1}
+  access-key: ${AWS_ACCESS_KEY_ID:test}
+  secret-key: ${AWS_SECRET_ACCESS_KEY:test}
+  spi-to-psp-topic-arn: ${SPI_TOPIC_SPI_TO_PSP:arn:aws:sns:us-east-1:000000000000:spi-to-psp}
+  inbound-queue: ${SPI_QUEUE_INBOUND:spi-simulator-inbound}

@@ -1,0 +1,3 @@
+# Mounted into Linux containers (LocalStack init, pix-db-init): must keep LF even on Windows checkouts.
+*.sh text eol=lf
+*.py text eol=lf

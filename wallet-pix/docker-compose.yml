@@ -1,0 +1,94 @@
+# Pix service + SPI simulator + local SNS/SQS. Runs NEXT TO wallet-core's compose (start that one
+# first): it joins wallet-core's network to reach wallet-core:8080, postgres and otel-collector.
+#
+#   (cd ../wallet-core && docker compose up -d)
+#   docker compose up -d --build
+services:
+  localstack:
+    # Pinned on purpose: from 2026 the "latest" LocalStack image refuses to start without a
+    # LOCALSTACK_AUTH_TOKEN. 4.12 is the last community release that runs without one. It no
+    # longer gets updates - acceptable for a local-only bus; see README "LocalStack" to switch.
+    image: localstack/localstack:4.12
+    environment:
+      SERVICES: sns,sqs
+    volumes:
+      - ./docker/localstack/init-bus.sh:/etc/localstack/init/ready.d/init-bus.sh:ro
+    ports:
+      - "4566:4566"
+    healthcheck:
+      # "Ready" is only reported after the ready.d scripts ran, i.e. once topics and queues exist.
+      test: ["CMD-SHELL", "curl -sf localhost:4566/_localstack/init/ready | grep -q '\"completed\": true'"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  pix-db-init:
+    # Creates the "pix" database and roles on wallet-core's Postgres, then exits.
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: wallet_owner          # wallet-core's superuser, only to create the pix database/roles
+      PGPASSWORD: wallet_owner
+      PGDATABASE: wallet
+    volumes:
+      - ./docker/postgres/init-pix-db.sh:/init-pix-db.sh:ro
+    command: ["sh", "/init-pix-db.sh"]
+    restart: "no"
+
+  pix-service:
+    build:
+      context: .
+      args:
+        MODULE: pix-service
+    depends_on:
+      localstack:
+        condition: service_healthy
+      pix-db-init:
+        condition: service_completed_successfully
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/pix
+      DB_USER: pix_app
+      DB_PASSWORD: pix_app
+      DB_MIGRATION_USER: pix_owner
+      DB_MIGRATION_PASSWORD: pix_owner
+      WALLET_CORE_URL: http://wallet-core:8080
+      AWS_ENDPOINT_URL: http://localstack:4566
+
+      JAVA_TOOL_OPTIONS: "-javaagent:/app/opentelemetry-javaagent.jar"
+      OTEL_SERVICE_NAME: pix-service
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_TRACES_EXPORTER: "otlp"
+      OTEL_METRICS_EXPORTER: "none"     # metrics are scraped from /actuator/prometheus
+      OTEL_LOGS_EXPORTER: "otlp"
+      OTEL_TRACES_SAMPLER: "always_on"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=dev"
+    ports:
+      - "8081:8081"
+
+  spi-simulator:
+    build:
+      context: .
+      args:
+        MODULE: spi-simulator
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+      JAVA_TOOL_OPTIONS: "-javaagent:/app/opentelemetry-javaagent.jar"
+      OTEL_SERVICE_NAME: spi-simulator
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_TRACES_EXPORTER: "otlp"
+      OTEL_METRICS_EXPORTER: "none"
+      OTEL_LOGS_EXPORTER: "otlp"
+      OTEL_TRACES_SAMPLER: "always_on"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=dev"
+    ports:
+      - "8090:8090"   # POST /simulate/incoming, /simulate/return; GET /simulate/messages
+
+networks:
+  default:
+    name: wallet-core_default
+    external: true
