@@ -19,7 +19,11 @@ export class Home implements OnInit {
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
 
+  searchMethod: 'number' | 'taxId' = 'number';
+
+
   // Search by account number
+  searchTaxId = '';
   searchBranch = '';
   searchNumber = '';
   searchCheckDigit = '';
@@ -53,7 +57,12 @@ export class Home implements OnInit {
   search(): void {
     this.error.set(null);
     this.searching.set(true);
-    this.api.lookupAccountByNumber(this.searchBranch.trim(), this.searchNumber.trim(), this.searchCheckDigit.trim()).subscribe({
+    // this.api.lookupAccountByNumber(this.searchBranch.trim(), this.searchNumber.trim(), this.searchCheckDigit.trim())
+    const lookup = this.searchMethod === 'number'
+      ? this.api.lookupAccountByNumber(this.searchBranch.trim(), this.searchNumber.trim(), this.searchCheckDigit.trim())
+      : this.api.lookupAccountByTaxId(this.searchTaxId.trim());
+
+    lookup.subscribe({
       next: (acc) => {
         this.searching.set(false);
         this.router.navigate(['/accounts', acc.id]);
