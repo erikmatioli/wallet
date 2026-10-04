@@ -104,16 +104,18 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 
 | Método e rota | Escopo | Descrição |
 |---|---|---|
-| `POST /v1/auth/token` | Basic | Troca client id/secret por JWT (10 min) |
+| `POST /v1/auth/token[?scope=]` | Basic | Troca client id/secret por JWT (10 min). `scope` opcional só reduz os escopos (ex.: `pix:send`); pedir um que o cliente não tem dá `400 invalid_scope` |
 | `GET /.well-known/jwks.json` | público | Chaves públicas para validar o JWT |
 | `POST /v1/customers` | `customers:write` | Onboarding + abertura de conta de pagamento (201) |
 | `GET /v1/accounts` | `accounts:read` | Lista as contas do tenant, mais nova primeiro (paginação por `cursor`) |
 | `GET /v1/accounts/lookup?branch=&number=&checkDigit=` | `accounts:read` | Busca uma conta pelo número bancário em vez do id |
+| `POST /v1/accounts/holder-check` | `accounts:read` | Confere se agência + conta + dígito são de uma conta apta a receber e se pertencem ao CPF/CNPJ do corpo. Responde `result` (`VALID`, `ACCOUNT_NOT_FOUND`, `ACCOUNT_BLOCKED`, `ACCOUNT_CLOSED`, `TAX_ID_MISMATCH`) e `accountId` só quando `VALID`, sem dados do titular. POST para o documento não ir na URL. Usado na autorização de Pix recebidos (`../wallet-pix`) |
 | `GET /v1/accounts/{id}` | `accounts:read` | Dados da conta (ISPB, agência, número, dígito, tipo `TRAN`, saldo) |
 | `GET /v1/accounts/{id}/balance` | `accounts:read` | Saldo |
 | `GET /v1/accounts/{id}/statement?before=&limit=` | `accounts:read` | Extrato paginado por sequência (mais novo primeiro) |
 | `POST /v1/accounts/{id}/deposits` | `ledger:write` | Entrada de dinheiro |
-| `POST /v1/accounts/{id}/withdrawals` | `ledger:write` | Saída de dinheiro (nunca deixa o saldo negativo) |
+| `POST /v1/accounts/{id}/withdrawals` | `ledger:write` ou `pix:send` | Saída de dinheiro (nunca deixa o saldo negativo) |
+| `POST /v1/transactions/{id}/reversals` | `ledger:write` ou `pix:send` | Estorna integralmente um saque, uma única vez por saque (repetir devolve o estorno original) |
 | `POST /v1/transfers` | `ledger:write` | Transferência entre contas do tenant |
 | `GET /v1/accounts/{id}/audit` | `ledger:audit` | Reconstrói o saldo pelos eventos e compara com o saldo armazenado |
 

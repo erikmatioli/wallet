@@ -2,6 +2,7 @@ package br.com.walletcore.application;
 
 import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.AccountRepository.AccountDirectoryItem;
+import br.com.walletcore.application.port.out.AccountRepository.AccountHolder;
 import br.com.walletcore.application.port.out.BalanceUpdateResult;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
@@ -16,6 +17,7 @@ import br.com.walletcore.application.service.SettlementRouter;
 import br.com.walletcore.domain.account.Account;
 import br.com.walletcore.domain.account.AccountType;
 import br.com.walletcore.domain.account.PaymentAccountNumber;
+import br.com.walletcore.domain.customer.Customer;
 import br.com.walletcore.domain.customer.TaxId;
 import br.com.walletcore.domain.event.DomainEvent;
 import br.com.walletcore.domain.ledger.LedgerEntry;
@@ -47,6 +49,7 @@ final class InMemoryFixture {
     final List<DomainEvent> events = new ArrayList<>();
 
     final Map<AccountId, TaxId> taxIdsByAccount = new HashMap<>();
+    final Map<AccountId, Customer.Status> customerStatusByAccount = new HashMap<>();
     private long accountSequence = 0;
 
     final Clock clock = Clock.fixed(Instant.parse("2026-09-21T12:00:00Z"), ZoneOffset.UTC);
@@ -88,6 +91,15 @@ final class InMemoryFixture {
                     .filter(a -> a.number() != null && a.number().branch().equals(branch)
                             && a.number().number().equals(number) && a.number().checkDigit().equals(checkDigit))
                     .findFirst();
+        }
+
+        @Override
+        public Optional<AccountHolder> findHolderByNumber(TenantId tenantId, String branch, String number,
+                                                          String checkDigit) {
+            return findByNumber(tenantId, branch, number, checkDigit)
+                    .filter(a -> taxIdsByAccount.containsKey(a.id())) // same as the JOIN customer
+                    .map(a -> new AccountHolder(a, taxIdsByAccount.get(a.id()),
+                            customerStatusByAccount.getOrDefault(a.id(), Customer.Status.ACTIVE)));
         }
 
         @Override
@@ -162,6 +174,11 @@ final class InMemoryFixture {
         }
 
         @Override
+        public List<LedgerEntry> findByTransaction(TenantId tenantId, br.com.walletcore.domain.shared.TransactionId id) {
+            return entries.stream().filter(e -> e.transactionId().equals(id)).toList();
+        }
+
+        @Override
         public void forEachInSequence(TenantId tenantId, AccountId accountId, Consumer<LedgerEntry> consumer) {
             entries.stream().filter(e -> e.accountId().equals(accountId))
                     .sorted(Comparator.comparingLong(LedgerEntry::sequence)).forEach(consumer);
@@ -227,6 +244,14 @@ final class InMemoryFixture {
         Account account = openCustomerAccount(); // reaproveita o que já existe
         taxIdsByAccount.put(account.id(), TaxId.parse(rawTaxId));
         return account;
+    }
+
+    /** Replaces the stored account with the same one in another status (BLOCKED, CLOSED). */
+    Account withStatus(Account a, Account.Status status) {
+        Account changed = new Account(a.id(), a.tenantId(), a.kind(), a.customerId(), a.number(), status,
+                a.allowNegativeBalance(), a.balance(), a.version(), a.createdAt());
+        accounts.put(a.id(), changed);
+        return changed;
     }
 
     long balanceOf(Account account) {

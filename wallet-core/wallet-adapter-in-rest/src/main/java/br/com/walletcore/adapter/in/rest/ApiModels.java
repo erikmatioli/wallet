@@ -231,4 +231,33 @@ public final class ApiModels {
                     page.nextCursor() == null ? null : page.nextCursor().value());
         }
     }
+
+    @Schema(description = "Dados para conferir se a conta existe, pode receber e pertence ao CPF/CNPJ informado (autorização de Pix).")
+    public record HolderCheckRequest(
+            @Schema(description = "Número da agência (4 dígitos)", example = "0001")
+            @NotBlank @Pattern(regexp = "\\d{4}") String branch,
+
+            @Schema(description = "Número da conta", example = "00100002")
+            @NotBlank @Pattern(regexp = "\\d{1,20}") String number,
+
+            @Schema(description = "Dígito verificador da conta", example = "9")
+            @NotBlank @Pattern(regexp = "\\d") String checkDigit,
+
+            @Schema(description = "CPF ou CNPJ do titular esperado (com ou sem máscara)", example = "529.982.247-25", maxLength = 32)
+            @NotBlank @Size(max = 32) String taxId) {
+    }
+
+    @Schema(description = "Resultado da conferência de titularidade. Não devolve dados do titular.")
+    public record HolderCheckResponse(
+            @Schema(description = "VALID, ACCOUNT_NOT_FOUND, ACCOUNT_BLOCKED, ACCOUNT_CLOSED ou TAX_ID_MISMATCH", example = "VALID")
+            String result,
+
+            @Schema(description = "UUID da conta, presente apenas quando result = VALID", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+            UUID accountId) {
+
+        static HolderCheckResponse from(QueryAccountUseCase.HolderCheck check) {
+            return new HolderCheckResponse(check.result().name(),
+                    check.accountId() == null ? null : check.accountId().value());
+        }
+    }
 }

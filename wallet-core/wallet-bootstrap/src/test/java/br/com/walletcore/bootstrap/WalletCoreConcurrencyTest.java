@@ -235,6 +235,46 @@ class WalletCoreConcurrencyTest {
     }
 
     @Test
+    void holderCheckMatchesTheRealHolderAndRespectsTenantIsolation() {
+        TenantId tenantA = newTenant();
+        TenantId tenantB = newTenant();
+        Account accountOfA = newAccount(tenantA); // first account of the test instance: CPFS[0]
+        var n = accountOfA.number();
+
+        var valid = query.checkHolder(tenantA, n.branch(), n.number(), n.checkDigit(), CPFS[0]);
+        assertThat(valid.result()).isEqualTo(QueryAccountUseCase.HolderCheck.Result.VALID);
+        assertThat(valid.accountId()).isEqualTo(accountOfA.id());
+
+        assertThat(query.checkHolder(tenantA, n.branch(), n.number(), n.checkDigit(), CPFS[1]).result())
+                .isEqualTo(QueryAccountUseCase.HolderCheck.Result.TAX_ID_MISMATCH);
+        // Same number and the right CPF, but asked as another tenant: RLS hides the row entirely.
+        assertThat(query.checkHolder(tenantB, n.branch(), n.number(), n.checkDigit(), CPFS[0]).result())
+                .isEqualTo(QueryAccountUseCase.HolderCheck.Result.ACCOUNT_NOT_FOUND);
+    }
+
+    @Test
+    void concurrentReversalsOfOneWithdrawalCreditOnce() throws Exception {
+        TenantId tenant = newTenant();
+        Account wallet = newAccount(tenant);
+        deposit(tenant, wallet, "100.00");
+        var debit = moveMoney.withdraw(new WithdrawCommand(tenant, wallet.id(), Money.ofDecimal(new BigDecimal("40.00")),
+                "pix", "pix-debit-" + UUID.randomUUID()));
+
+        List<Callable<MoveMoneyUseCase.TransactionResult>> tasks = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            tasks.add(() -> moveMoney.reverseWithdrawal(new MoveMoneyUseCase.ReversalCommand(tenant, debit.id(), null)));
+        }
+        for (Future<MoveMoneyUseCase.TransactionResult> f : runConcurrently(tasks)) {
+            f.get();
+        }
+
+        assertThat(balance(tenant, wallet)).isEqualTo(Money.ofDecimal(new BigDecimal("100.00")));
+        // Another tenant cannot reverse it (RLS hides the withdrawal's legs).
+        assertThatThrownBy(() -> moveMoney.reverseWithdrawal(new MoveMoneyUseCase.ReversalCommand(newTenant(),
+                debit.id(), null))).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
     void ledgerIsAppendOnlyEvenForTheApplicationRole() {
         TenantId tenant = newTenant();
         Account wallet = newAccount(tenant);

@@ -2,6 +2,8 @@ package br.com.walletcore.adapter.in.rest;
 
 import br.com.walletcore.adapter.in.rest.ApiModels.AccountListResponse;
 import br.com.walletcore.adapter.in.rest.ApiModels.AccountResponse;
+import br.com.walletcore.adapter.in.rest.ApiModels.HolderCheckRequest;
+import br.com.walletcore.adapter.in.rest.ApiModels.HolderCheckResponse;
 import br.com.walletcore.application.port.in.ListAccountsUseCase;
 import br.com.walletcore.application.port.in.QueryAccountUseCase;
 import br.com.walletcore.domain.shared.AccountId;
@@ -11,10 +13,13 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import java.util.UUID;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -97,5 +102,26 @@ class AccountDirectoryController {
             @RequestParam String taxId) {
 
         return AccountResponse.from(query.getAccountByTaxId(CurrentTenant.from(jwt), taxId));
+    }
+
+    /**
+     * Holder check used to authorize an incoming Pix. POST (not GET) so the CPF/CNPJ travels in
+     * the body and never shows up in access logs, the URL attribute of HTTP spans, or proxies.
+     * Always 200 for a well-formed request: a negative result is a normal answer, see
+     * QueryAccountUseCase#checkHolder.
+     */
+    @PostMapping("/holder-check")
+    @Operation(
+            summary = "Conferir titularidade da conta",
+            description = "Confere se agência, conta e dígito identificam uma conta do tenant apta a receber e se ela pertence ao CPF/CNPJ informado. Usado na autorização de Pix recebidos. Não devolve dados do titular."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Conferência realizada (o resultado vem no campo result)"),
+            @ApiResponse(responseCode = "400", description = "Dados da requisição inválidos"),
+            @ApiResponse(responseCode = "401", description = "Token JWT ausente ou inválido")
+    })
+    HolderCheckResponse holderCheck(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody HolderCheckRequest request) {
+        return HolderCheckResponse.from(query.checkHolder(CurrentTenant.from(jwt), request.branch(), request.number(),
+                request.checkDigit(), request.taxId()));
     }
 }

@@ -3,17 +3,21 @@ package br.com.walletcore.application.service;
 import br.com.walletcore.application.port.in.QueryAccountUseCase;
 import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.AccountRepository.AccountDirectoryItem;
+import br.com.walletcore.application.port.out.AccountRepository.AccountHolder;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.TransactionRunner;
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.customer.Customer;
 import br.com.walletcore.domain.customer.TaxId;
 import br.com.walletcore.domain.exception.NotFoundException;
+import br.com.walletcore.domain.exception.ValidationException;
 import br.com.walletcore.domain.ledger.LedgerEntry;
 import br.com.walletcore.domain.ledger.TransactionType;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.TenantId;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -60,6 +64,43 @@ public final class QueryAccountService implements QueryAccountUseCase {
         return tx.readOnly(tenantId, () -> accounts.findByTaxId(tenantId, taxId)
                 .filter(a -> a.kind() == Account.Kind.CUSTOMER) // internal accounts are never exposed
                 .orElseThrow(() -> new NotFoundException("ACCOUNT_NOT_FOUND", "account not found")));
+    }
+
+    @Override
+    public HolderCheck checkHolder(TenantId tenantId, String branch, String number, String checkDigit,
+                                   String rawTaxId) {
+        Optional<TaxId> taxId = parseQuietly(rawTaxId);
+        return tx.readOnly(tenantId, () -> accounts.findHolderByNumber(tenantId, branch, number, checkDigit)
+                .filter(h -> h.account().kind() == Account.Kind.CUSTOMER) // internal accounts are never exposed
+                .map(h -> evaluate(h, taxId))
+                .orElse(HolderCheck.rejected(HolderCheck.Result.ACCOUNT_NOT_FOUND)));
+    }
+
+    /**
+     * Order matters: account state is checked before the document, so a caller probing with
+     * random tax ids against a closed account learns only "closed", never whether the guess was
+     * right. The document is compared last, and on a match the account must also be ACTIVE.
+     */
+    private static HolderCheck evaluate(AccountHolder holder, Optional<TaxId> taxId) {
+        Account account = holder.account();
+        if (account.status() == Account.Status.CLOSED) {
+            return HolderCheck.rejected(HolderCheck.Result.ACCOUNT_CLOSED);
+        }
+        if (account.status() == Account.Status.BLOCKED || holder.holderStatus() == Customer.Status.BLOCKED) {
+            return HolderCheck.rejected(HolderCheck.Result.ACCOUNT_BLOCKED);
+        }
+        if (taxId.isEmpty() || !taxId.get().value().equals(holder.holderTaxId().value())) {
+            return HolderCheck.rejected(HolderCheck.Result.TAX_ID_MISMATCH);
+        }
+        return HolderCheck.valid(account.id());
+    }
+
+    private static Optional<TaxId> parseQuietly(String rawTaxId) {
+        try {
+            return Optional.of(TaxId.parse(rawTaxId));
+        } catch (ValidationException e) {
+            return Optional.empty();
+        }
     }
 
     @Override
