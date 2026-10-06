@@ -25,8 +25,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -130,6 +133,24 @@ class PixPaymentController {
     @ExceptionHandler(PaymentRefused.class)
     ResponseEntity<ProblemDetail> refused(PaymentRefused e) {
         return problem(STATUS_BY_CODE.getOrDefault(e.code(), HttpStatus.UNPROCESSABLE_CONTENT), e.code(), e.getMessage());
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    ResponseEntity<ProblemDetail> invalidBody(MethodArgumentNotValidException e) {
+        String fields = e.getBindingResult().getFieldErrors().stream()
+                .map(f -> f.getField() + " " + f.getDefaultMessage()).sorted().collect(Collectors.joining("; "));
+        return problem(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", fields);
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    ResponseEntity<ProblemDetail> missingHeader(MissingRequestHeaderException e) {
+        return problem(HttpStatus.BAD_REQUEST, "Idempotency-Key".equalsIgnoreCase(e.getHeaderName())
+                ? "IDEMPOTENCY_KEY_REQUIRED" : "MISSING_HEADER", e.getHeaderName() + " header is required");
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    ResponseEntity<ProblemDetail> unreadable(HttpMessageNotReadableException e) {
+        return problem(HttpStatus.BAD_REQUEST, "MALFORMED_REQUEST", "request could not be parsed");
     }
 
     @ExceptionHandler(RetryLater.class)

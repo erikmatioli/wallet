@@ -32,7 +32,9 @@ class SecurityConfig {
     @Bean
     SecurityFilterChain api(HttpSecurity http) throws Exception {
         http.authorizeHttpRequests(a -> a
-                        .requestMatchers("/actuator/**").permitAll()
+                        // /error: Spring forwards failed requests (e.g. bean validation) there; denying it
+                        // would turn every 400 into a misleading 403.
+                        .requestMatchers("/actuator/**", "/error").permitAll()
                         .requestMatchers(HttpMethod.POST, "/v1/pix/payments").hasAuthority("SCOPE_pix:send")
                         .requestMatchers(HttpMethod.GET, "/v1/pix/payments/*").hasAuthority("SCOPE_pix:send")
                         .anyRequest().denyAll())
