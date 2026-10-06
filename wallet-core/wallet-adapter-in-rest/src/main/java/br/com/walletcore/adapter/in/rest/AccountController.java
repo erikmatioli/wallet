@@ -31,6 +31,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -49,6 +51,8 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "Account Operations", description = "Endpoints escopados a uma conta específica para consulta de dados, extratos, movimentações financeiras e auditoria.")
 @SecurityRequirement(name = "bearerAuth")
 class AccountController {
+
+    private static final Logger log = LoggerFactory.getLogger(AccountController.class);
 
     static final String IDEMPOTENCY_KEY = "Idempotency-Key";
     static final String REPLAYED_HEADER = "Idempotent-Replayed";
@@ -216,7 +220,14 @@ class AccountController {
                 report.replayedBalance().toDecimal(), report.storedVersion(), report.consistent(), report.findings());
     }
 
+    /**
+     * Every money movement (deposit, withdrawal, transfer, reversal, Pix) answers through here, so
+     * this is where each one leaves its log line - on the request thread, with the tenant_id the
+     * TenantLoggingInterceptor put in the MDC and the request's trace_id. No name or document.
+     */
     static ResponseEntity<TransactionResponse> respond(TransactionResult r) {
+        log.info("transaction {}: id={} type={} amount={}{}", r.replayed() ? "replayed" : "posted", r.id().value(),
+                r.type(), r.amount().toDecimal(), r.endToEndId() == null ? "" : " endToEndId=" + r.endToEndId());
         var body = new TransactionResponse(r.id().value(), r.type().name(), r.amount().toDecimal(), Money.CURRENCY,
                 r.description(), r.occurredAt(), r.replayed(), r.endToEndId());
         ResponseEntity.BodyBuilder builder = ResponseEntity.status(r.replayed() ? HttpStatus.OK : HttpStatus.CREATED);
