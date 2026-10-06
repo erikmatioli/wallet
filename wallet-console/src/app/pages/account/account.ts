@@ -85,7 +85,7 @@ export class AccountPage implements OnInit {
     this.api.getStatement(this.accountId, before).subscribe({
       next: (page) => {
         this.entries.set(reset ? page.entries : [...this.entries(), ...page.entries]);
-        this.nextBefore.set(page.nextBefore);
+        this.nextBefore.set(page.nextBefore ?? null);
       },
       error: (err) => this.error.set(extractErrorMessage(err)),
     });
