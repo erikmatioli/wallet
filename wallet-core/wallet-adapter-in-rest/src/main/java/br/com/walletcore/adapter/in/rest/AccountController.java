@@ -14,6 +14,8 @@ import br.com.walletcore.application.port.in.MoveMoneyUseCase.TransactionResult;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.WithdrawCommand;
 import br.com.walletcore.application.port.in.QueryAccountUseCase;
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.exception.ValidationException;
+import br.com.walletcore.domain.ledger.TransactionType;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.Money;
 import io.swagger.v3.oas.annotations.Operation;
@@ -23,6 +25,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -108,10 +115,39 @@ class AccountController {
             @Parameter(description = "Cursor numérico (before) para paginação de registros mais antigos", example = "15")
             @RequestParam(required = false) Long before,
             @Parameter(description = "Número máximo de registros por página", example = "50")
-            @RequestParam(defaultValue = "50") int limit) {
-        var statement = query.getStatement(CurrentTenant.from(jwt), new AccountId(accountId), before, limit);
+            @RequestParam(defaultValue = "50") int limit,
+            @Parameter(description = "Apenas estes tipos, separados por vírgula", example = "PIX_IN,PIX_OUT")
+            @RequestParam(required = false) List<String> types,
+            @Parameter(description = "Atalho para todos os tipos de um produto. Hoje só PIX (todos os PIX_*)", example = "PIX")
+            @RequestParam(required = false) String product) {
+        var statement = query.getStatement(CurrentTenant.from(jwt), new AccountId(accountId), before, limit,
+                typeFilter(types, product));
         return new StatementResponse(statement.entries().stream().map(EntryResponse::from).toList(),
                 statement.nextBefore());
+    }
+
+    /** Union of {@code types} and the types of {@code product}; null when neither was given (no filter). */
+    private static Set<TransactionType> typeFilter(List<String> types, String product) {
+        Set<TransactionType> filter = EnumSet.noneOf(TransactionType.class);
+        if (product != null && !product.isBlank()) {
+            if (!"PIX".equalsIgnoreCase(product.strip())) {
+                throw new ValidationException("INVALID_PRODUCT", "product must be PIX");
+            }
+            Arrays.stream(TransactionType.values()).filter(TransactionType::isPix).forEach(filter::add);
+        }
+        if (types != null) {
+            for (String t : types) {
+                if (t.isBlank()) {
+                    continue;
+                }
+                try {
+                    filter.add(TransactionType.valueOf(t.strip().toUpperCase(Locale.ROOT)));
+                } catch (IllegalArgumentException e) {
+                    throw new ValidationException("INVALID_TRANSACTION_TYPE", "unknown transaction type: " + t.strip());
+                }
+            }
+        }
+        return filter.isEmpty() ? null : filter;
     }
 
     @PostMapping("/deposits")
@@ -182,7 +218,7 @@ class AccountController {
 
     static ResponseEntity<TransactionResponse> respond(TransactionResult r) {
         var body = new TransactionResponse(r.id().value(), r.type().name(), r.amount().toDecimal(), Money.CURRENCY,
-                r.description(), r.occurredAt(), r.replayed());
+                r.description(), r.occurredAt(), r.replayed(), r.endToEndId());
         ResponseEntity.BodyBuilder builder = ResponseEntity.status(r.replayed() ? HttpStatus.OK : HttpStatus.CREATED);
         if (r.replayed()) {
             builder.header(REPLAYED_HEADER, "true");

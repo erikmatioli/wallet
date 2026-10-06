@@ -11,6 +11,7 @@ import br.com.walletcore.application.port.out.CustomerRepository;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
 import br.com.walletcore.application.port.out.OutboxRepository;
+import br.com.walletcore.application.port.out.PixDetailRepository;
 import br.com.walletcore.application.port.out.SecretHasher;
 import br.com.walletcore.application.port.out.TenantRepository;
 import br.com.walletcore.application.port.out.TransactionJournal;
@@ -52,14 +53,16 @@ class UseCaseConfig {
 
     @Bean
     MoveMoneyUseCase moveMoneyUseCase(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
-                                      TransactionJournal journal, OutboxRepository outbox,
+                                      TransactionJournal journal, OutboxRepository outbox, PixDetailRepository pixDetails,
                                       SettlementRouter settlementRouter, MetricsRecorder metrics, Clock clock) {
-        return new MoveMoneyService(tx, accounts, ledger, journal, outbox, settlementRouter, metrics, clock);
+        return new MoveMoneyService(tx, accounts, ledger, journal, outbox, pixDetails, settlementRouter, metrics,
+                clock);
     }
 
     @Bean
-    QueryAccountUseCase queryAccountUseCase(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger) {
-        return new QueryAccountService(tx, accounts, ledger);
+    QueryAccountUseCase queryAccountUseCase(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
+                                            PixDetailRepository pixDetails) {
+        return new QueryAccountService(tx, accounts, ledger, pixDetails);
     }
 
     @Bean

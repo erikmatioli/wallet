@@ -62,6 +62,10 @@ class SecurityConfig {
                         // credit anyone or move money between customers.
                         .requestMatchers(HttpMethod.POST, "/v1/accounts/*/withdrawals", "/v1/transactions/*/reversals")
                         .hasAnyAuthority("SCOPE_ledger:write", "SCOPE_pix:send")
+                        // Pix movements (ADR-010) only with the Pix scopes, never ledger:write: each one
+                        // carries its detail and goes through the core's Pix rules.
+                        .requestMatchers(HttpMethod.POST, "/v1/accounts/*/pix-debits").hasAuthority("SCOPE_pix:send")
+                        .requestMatchers(HttpMethod.POST, "/v1/accounts/*/pix-credits").hasAuthority("SCOPE_pix:receive")
                         .requestMatchers(HttpMethod.POST, "/v1/accounts/*/deposits", "/v1/transfers")
                         .hasAuthority("SCOPE_ledger:write")
                         .anyRequest().denyAll())

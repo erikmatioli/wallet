@@ -7,6 +7,9 @@ import br.com.walletcore.application.port.in.AuditLedgerUseCase;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.DepositCommand;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.Destination;
+import br.com.walletcore.application.port.in.MoveMoneyUseCase.PixCommand;
+import br.com.walletcore.application.port.in.MoveMoneyUseCase.ReversalCommand;
+import br.com.walletcore.application.port.in.MoveMoneyUseCase.TransactionResult;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.TransferCommand;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.WithdrawCommand;
 import br.com.walletcore.application.port.in.OnboardCustomerUseCase;
@@ -18,14 +21,20 @@ import br.com.walletcore.domain.exception.BusinessRuleException;
 import br.com.walletcore.domain.exception.ConflictException;
 import br.com.walletcore.domain.exception.DomainException;
 import br.com.walletcore.domain.exception.NotFoundException;
+import br.com.walletcore.domain.ledger.TransactionType;
+import br.com.walletcore.domain.pix.PixCounterparty;
+import br.com.walletcore.domain.pix.PixDetail;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.Money;
 import br.com.walletcore.domain.shared.TenantId;
+import br.com.walletcore.domain.shared.TransactionId;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -37,6 +46,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.DockerClientFactory;
@@ -298,5 +308,102 @@ class WalletCoreConcurrencyTest {
 
         assertThatThrownBy(() -> onboardCustomer.onboard(new OnboardCustomerUseCase.Command(
                 tenant, "Same person", CPFS[0], null))).isInstanceOf(ConflictException.class);
+    }
+
+    // ------------------------------------------------------------------ Pix (ADR-010)
+    private static final PixCounterparty MARIA = PixCounterparty.of("Maria Oliveira", "11144477735", "99999999",
+            "0001", "12345678", "TRAN");
+
+    private static String pixId(char prefix) {
+        return prefix + "12345678202610061200" + UUID.randomUUID().toString().replace("-", "").substring(0, 11);
+    }
+
+    private TransactionResult postPix(TenantId tenant, Account account, TransactionType type, String amount,
+                                      String e2e, String returnId, TransactionId related) {
+        PixDetail detail = new PixDetail(type, e2e, returnId, related, MARIA, returnId == null ? null : "MD06", null);
+        return moveMoney.postPix(new PixCommand(tenant, account.id(), Money.ofDecimal(new BigDecimal(amount)), "pix",
+                "pix-" + UUID.randomUUID(), detail));
+    }
+
+    @Test
+    void pixDetailIsStoredWithTheTransactionAndIsolatedByTenant() {
+        TenantId tenant = newTenant();
+        Account wallet = newAccount(tenant);
+        TransactionResult in = postPix(tenant, wallet, TransactionType.PIX_IN, "25.00", pixId('E'), null, null);
+
+        var pixOnly = query.getStatement(tenant, wallet.id(), null, 10, Set.of(TransactionType.PIX_IN));
+        assertThat(pixOnly.entries()).singleElement().satisfies(se -> {
+            assertThat(se.entry().transactionId()).isEqualTo(in.id());
+            assertThat(se.pix().counterparty().taxIdMasked()).isEqualTo("***7735");
+        });
+        Long visibleToOther = transactionRunner.readOnly(newTenant(), () -> jdbc.sql(
+                "SELECT count(*) FROM pix_transaction_detail WHERE transaction_id = :id")
+                .param("id", in.id().value()).query(Long.class).single());
+        assertThat(visibleToOther).isZero();
+        assertThatThrownBy(() -> transactionRunner.inTransaction(tenant,
+                () -> jdbc.sql("UPDATE pix_transaction_detail SET counterparty_name = 'x'").update()))
+                .isInstanceOf(DataAccessException.class);
+    }
+
+    @Test
+    void aPixTransactionCannotBeCommittedWithoutItsDetail() {
+        TenantId tenant = newTenant();
+        assertThatThrownBy(() -> transactionRunner.inTransaction(tenant, () -> jdbc.sql("""
+                INSERT INTO financial_transaction (id, tenant_id, idempotency_key, fingerprint, type, amount_cents,
+                                                   description, status, occurred_at)
+                VALUES (:id, :tenant, 'raw', 'raw', 'PIX_IN', 100, '', 'POSTED', now())""")
+                .param("id", UUID.randomUUID()).param("tenant", tenant.value()).update()))
+                // The check is deferred to COMMIT, so it surfaces as a failed commit.
+                .isInstanceOf(TransactionSystemException.class)
+                .rootCause().hasMessageContaining("has no pix_transaction_detail");
+    }
+
+    @Test
+    void concurrentReturnsNeverExceedTheOriginalPix() throws Exception {
+        TenantId tenant = newTenant();
+        Account wallet = newAccount(tenant);
+        deposit(tenant, wallet, "100.00");
+        String e2e = pixId('E');
+        TransactionResult out = postPix(tenant, wallet, TransactionType.PIX_OUT, "90.00", e2e, null, null);
+
+        List<Callable<TransactionResult>> tasks = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            tasks.add(() -> postPix(tenant, wallet, TransactionType.PIX_RETURN_IN, "30.00", e2e, pixId('D'), out.id()));
+        }
+        int accepted = 0;
+        for (Future<TransactionResult> f : runConcurrently(tasks)) {
+            try {
+                f.get();
+                accepted++;
+            } catch (ExecutionException e) {
+                assertThat(((DomainException) e.getCause()).code()).isEqualTo("PIX_RETURN_EXCEEDS_ORIGINAL");
+            }
+        }
+        assertThat(accepted).isEqualTo(3);
+        assertThat(balance(tenant, wallet)).isEqualTo(Money.ofDecimal(new BigDecimal("100.00")));
+    }
+
+    @Test
+    void aRefundAndAReturnOfTheSamePixNeverBothHappen() throws Exception {
+        TenantId tenant = newTenant();
+        Account wallet = newAccount(tenant);
+        deposit(tenant, wallet, "100.00");
+        String e2e = pixId('E');
+        TransactionResult out = postPix(tenant, wallet, TransactionType.PIX_OUT, "40.00", e2e, null, null);
+
+        List<Callable<TransactionResult>> tasks = List.of(
+                () -> moveMoney.reverseWithdrawal(new ReversalCommand(tenant, out.id(), null, "AC03")),
+                () -> postPix(tenant, wallet, TransactionType.PIX_RETURN_IN, "40.00", e2e, pixId('D'), out.id()));
+        int succeeded = 0;
+        for (Future<TransactionResult> f : runConcurrently(tasks)) {
+            try {
+                f.get();
+                succeeded++;
+            } catch (ExecutionException e) {
+                assertThat(((DomainException) e.getCause()).code()).isIn("PIX_ALREADY_REFUNDED", "PIX_ALREADY_RETURNED");
+            }
+        }
+        assertThat(succeeded).isEqualTo(1);
+        assertThat(balance(tenant, wallet)).isEqualTo(Money.ofDecimal(new BigDecimal("100.00")));
     }
 }

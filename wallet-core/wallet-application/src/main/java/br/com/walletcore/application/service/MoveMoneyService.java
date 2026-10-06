@@ -6,6 +6,7 @@ import br.com.walletcore.application.port.out.BalanceUpdateResult;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
 import br.com.walletcore.application.port.out.OutboxRepository;
+import br.com.walletcore.application.port.out.PixDetailRepository;
 import br.com.walletcore.application.port.out.StoredTransaction;
 import br.com.walletcore.application.port.out.TransactionJournal;
 import br.com.walletcore.application.port.out.TransactionRunner;
@@ -20,6 +21,7 @@ import br.com.walletcore.domain.ledger.LedgerEntry;
 import br.com.walletcore.domain.ledger.LedgerTransaction;
 import br.com.walletcore.domain.ledger.Leg;
 import br.com.walletcore.domain.ledger.TransactionType;
+import br.com.walletcore.domain.pix.PixDetail;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.Money;
 import br.com.walletcore.domain.shared.TenantId;
@@ -54,18 +56,20 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
     private final LedgerRepository ledger;
     private final TransactionJournal journal;
     private final OutboxRepository outbox;
+    private final PixDetailRepository pixDetails;
     private final SettlementRouter settlement;
     private final MetricsRecorder metrics;
     private final Clock clock;
 
     public MoveMoneyService(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
-                            TransactionJournal journal, OutboxRepository outbox, SettlementRouter settlement,
-                            MetricsRecorder metrics, Clock clock) {
+                            TransactionJournal journal, OutboxRepository outbox, PixDetailRepository pixDetails,
+                            SettlementRouter settlement, MetricsRecorder metrics, Clock clock) {
         this.tx = tx;
         this.accounts = accounts;
         this.ledger = ledger;
         this.journal = journal;
         this.outbox = outbox;
+        this.pixDetails = pixDetails;
         this.settlement = settlement;
         this.metrics = metrics;
         this.clock = clock;
@@ -126,7 +130,8 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
         String key = "reversal:" + c.withdrawalId().value();
         return tx.inTransaction(c.tenantId(), () -> {
             LedgerEntry debit = ledger.findByTransaction(c.tenantId(), c.withdrawalId()).stream()
-                    .filter(e -> e.type() == TransactionType.WITHDRAWAL && e.direction() == EntryDirection.DEBIT)
+                    .filter(e -> (e.type() == TransactionType.WITHDRAWAL || e.type() == TransactionType.PIX_OUT)
+                            && e.direction() == EntryDirection.DEBIT)
                     .findFirst()
                     .orElseThrow(() -> new NotFoundException("WITHDRAWAL_NOT_FOUND",
                             "no withdrawal " + c.withdrawalId().value() + " for this tenant"));
@@ -137,10 +142,98 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
             String fp = fingerprint("REVERSAL", c.withdrawalId().value());
             TransactionId id = TransactionId.newId();
             AccountId settlementId = settlement.pick(c.tenantId(), id);
-            LedgerTransaction lt = LedgerTransaction.deposit(c.tenantId(), id, debit.accountId(), settlementId,
-                    debit.amount(), description, clock.instant());
-            return post(lt, key, fp, settlementId);
+            if (debit.type() == TransactionType.WITHDRAWAL) {
+                LedgerTransaction lt = LedgerTransaction.deposit(c.tenantId(), id, debit.accountId(), settlementId,
+                        debit.amount(), description, clock.instant());
+                return post(lt, key, fp, settlementId);
+            }
+            pixDetails.lockOriginal(c.tenantId(), c.withdrawalId());
+            PixDetail refund = pixDetails.findByTransaction(c.tenantId(), c.withdrawalId())
+                    .orElseThrow(() -> new IllegalStateException("PIX_OUT " + c.withdrawalId().value() + " has no detail"))
+                    .refundOf(c.withdrawalId(), c.reasonCode());
+            LedgerTransaction lt = LedgerTransaction.pix(c.tenantId(), id, TransactionType.PIX_REFUND,
+                    debit.accountId(), settlementId, debit.amount(), description, clock.instant());
+            return post(lt, key, fp, settlementId, refund, () -> {
+                if (pixDetails.sumRelated(c.tenantId(), c.withdrawalId(), TransactionType.PIX_RETURN_IN) > 0) {
+                    throw new BusinessRuleException("PIX_ALREADY_RETURNED",
+                            "this Pix was settled and returned; it cannot be refunded");
+                }
+            });
         });
+    }
+
+    @Override
+    public TransactionResult postPix(PixCommand c) {
+        String key = validateKey(c.idempotencyKey());
+        requirePositive(c.amount());
+        PixDetail detail = c.detail();
+        if (detail == null) {
+            throw new ValidationException("INVALID_PIX_DETAIL", "Pix detail is required");
+        }
+        if (detail.type() == TransactionType.PIX_REFUND) {
+            throw new ValidationException("INVALID_PIX_TYPE",
+                    "a PIX_REFUND is posted by reversing the PIX_OUT (POST /v1/transactions/{id}/reversals)");
+        }
+        TransactionId related = detail.relatedTransactionId();
+        // PIX_OUT: the EndToEndId is minted by the caller per attempt, see PixCommand.
+        String e2e = detail.type() == TransactionType.PIX_OUT ? null : detail.endToEndId();
+        String fp = fingerprint(detail.type(), c.accountId(), c.amount().cents(), description(c.description()),
+                e2e, detail.returnId(), related == null ? null : related.value(), counterpartyKey(detail));
+        return tx.inTransaction(c.tenantId(), () -> {
+            if (related != null) {
+                pixDetails.lockOriginal(c.tenantId(), related);
+            }
+            TransactionId id = TransactionId.newId();
+            AccountId settlementId = settlement.pick(c.tenantId(), id);
+            LedgerTransaction lt = LedgerTransaction.pix(c.tenantId(), id, detail.type(), c.accountId(), settlementId,
+                    c.amount(), c.description(), clock.instant());
+            return post(lt, key, fp, settlementId, detail, () -> checkPixRules(c, detail));
+        });
+    }
+
+    /** Who the Pix is with, in the fingerprint: the same key for another payee is another request. */
+    private static String counterpartyKey(PixDetail d) {
+        return d.counterparty().ispb() + "/" + d.counterparty().branch() + "/" + d.counterparty().account();
+    }
+
+    /** Runs only for a new transaction (not on an idempotent replay), under the lock of the original. */
+    private void checkPixRules(PixCommand c, PixDetail detail) {
+        if (pixDetails.exists(c.tenantId(), detail.type(), detail.endToEndId(), detail.returnId())) {
+            throw new ConflictException("PIX_ALREADY_POSTED",
+                    "this Pix was already posted with another Idempotency-Key");
+        }
+        switch (detail.type()) {
+            case PIX_RETURN_IN -> {
+                LedgerEntry original = originalPix(c, detail.relatedTransactionId(), TransactionType.PIX_OUT);
+                if (pixDetails.sumRelated(c.tenantId(), original.transactionId(), TransactionType.PIX_REFUND) > 0) {
+                    throw new BusinessRuleException("PIX_ALREADY_REFUNDED",
+                            "this Pix was refunded, so it was never settled and cannot be returned");
+                }
+                requireWithinOriginal(c, original, TransactionType.PIX_RETURN_IN);
+            }
+            case PIX_RETURN_OUT -> requireWithinOriginal(c,
+                    originalPix(c, detail.relatedTransactionId(), TransactionType.PIX_IN), TransactionType.PIX_RETURN_OUT);
+            default -> {
+                // PIX_IN and PIX_OUT stand alone: nothing to check besides the duplicate above.
+            }
+        }
+    }
+
+    /** The customer leg of the original Pix, which must be of {@code type} and on the same account. */
+    private LedgerEntry originalPix(PixCommand c, TransactionId related, TransactionType type) {
+        return ledger.findByTransaction(c.tenantId(), related).stream()
+                .filter(e -> e.type() == type && e.accountId().equals(c.accountId()))
+                .findFirst()
+                .orElseThrow(() -> new NotFoundException("PIX_ORIGINAL_NOT_FOUND",
+                        "no " + type + " " + related.value() + " on this account"));
+    }
+
+    private void requireWithinOriginal(PixCommand c, LedgerEntry original, TransactionType returnType) {
+        long returned = pixDetails.sumRelated(c.tenantId(), original.transactionId(), returnType);
+        if (returned + c.amount().cents() > original.amount().cents()) {
+            throw new BusinessRuleException("PIX_RETURN_EXCEEDS_ORIGINAL",
+                    "returns would exceed the original Pix amount");
+        }
     }
 
     private AccountId resolve(TenantId tenantId, Destination destination) {
@@ -154,6 +247,17 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
     }
 
     private TransactionResult post(LedgerTransaction lt, String key, String fingerprint, AccountId settlementId) {
+        return post(lt, key, fingerprint, settlementId, null, () -> { });
+    }
+
+    /**
+     * @param pixDetail stored with the transaction when it is a Pix (null otherwise)
+     * @param rules     checks that only apply to a new transaction: they run after the idempotency
+     *                  lookup, so a replay is still answered when the rules would now refuse it
+     *                  (a full return, replayed, would otherwise "exceed" the original)
+     */
+    private TransactionResult post(LedgerTransaction lt, String key, String fingerprint, AccountId settlementId,
+                                   PixDetail pixDetail, Runnable rules) {
         Optional<StoredTransaction> existing = journal.insertIfAbsent(lt, key, fingerprint);
         if (existing.isPresent()) {
             StoredTransaction s = existing.get();
@@ -162,8 +266,13 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
                         "this Idempotency-Key was already used with a different request");
             }
             metrics.transactionPosted(lt.tenantId(), s.type(), true);
-            return new TransactionResult(s.id(), s.type(), s.amount(), s.occurredAt(), s.description(), true);
+            String storedE2e = s.type().isPix()
+                    ? pixDetails.findByTransaction(lt.tenantId(), s.id()).map(PixDetail::endToEndId).orElse(null)
+                    : null;
+            return new TransactionResult(s.id(), s.type(), s.amount(), s.occurredAt(), s.description(), true,
+                    storedE2e);
         }
+        rules.run();
 
         List<LedgerEntry> entries = new ArrayList<>(lt.legs().size());
         for (Leg leg : lt.legsInLockOrder()) {
@@ -178,9 +287,13 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
             }
         }
         ledger.append(entries);
+        if (pixDetail != null) {
+            pixDetails.insert(lt.tenantId(), lt.id(), pixDetail);
+        }
         outbox.enqueue(List.of(TransactionPosted.from(lt, entries)));
         metrics.transactionPosted(lt.tenantId(), lt.type(), false);
-        return new TransactionResult(lt.id(), lt.type(), lt.amount(), lt.occurredAt(), lt.description(), false);
+        return new TransactionResult(lt.id(), lt.type(), lt.amount(), lt.occurredAt(), lt.description(), false,
+                pixDetail == null ? null : pixDetail.endToEndId());
     }
 
     /**

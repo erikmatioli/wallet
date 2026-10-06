@@ -11,6 +11,7 @@ import br.com.walletcore.domain.shared.TransactionId;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -56,9 +57,12 @@ class JdbcLedgerRepository implements LedgerRepository {
     }
 
     @Override
-    public List<LedgerEntry> findPage(TenantId tenantId, AccountId accountId, Long beforeSequence, int limit) {
+    public List<LedgerEntry> findPage(TenantId tenantId, AccountId accountId, Long beforeSequence, int limit,
+                                      Set<TransactionType> types) {
+        boolean filtered = types != null && !types.isEmpty();
         String sql = "SELECT " + COLUMNS + " FROM ledger_entry WHERE tenant_id = :tenant AND account_id = :account"
                 + (beforeSequence != null ? " AND sequence_no < :before" : "")
+                + (filtered ? " AND type IN (:types)" : "")
                 + " ORDER BY sequence_no DESC LIMIT :limit";
         JdbcClient.StatementSpec spec = jdbc.sql(sql)
                 .param("tenant", tenantId.value())
@@ -66,6 +70,9 @@ class JdbcLedgerRepository implements LedgerRepository {
                 .param("limit", limit);
         if (beforeSequence != null) {
             spec = spec.param("before", beforeSequence);
+        }
+        if (filtered) {
+            spec = spec.param("types", types.stream().map(TransactionType::name).toList());
         }
         return spec.query(JdbcLedgerRepository::map).list();
     }

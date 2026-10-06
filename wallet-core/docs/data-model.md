@@ -184,7 +184,7 @@ Um registro por movimentação de dinheiro (depósito, saque ou transferência),
 | `tenant_id` | uuid | FK → `tenant.id` |
 | `idempotency_key` | text | a chave enviada pelo cliente no header `Idempotency-Key` |
 | `fingerprint` | text | hash SHA-256 dos parâmetros do pedido (conta, valor, tipo, descrição) |
-| `type` | text | `DEPOSIT` \| `WITHDRAWAL` \| `TRANSFER` |
+| `type` | text | `DEPOSIT` \| `WITHDRAWAL` \| `TRANSFER`, ou um tipo Pix (migration `V4`, ADR-010): `PIX_IN` \| `PIX_OUT` \| `PIX_REFUND` \| `PIX_RETURN_IN` \| `PIX_RETURN_OUT` |
 | `amount_cents` | bigint | valor da transação, sempre positivo |
 | `description` | text | |
 | `status` | text | hoje só existe `POSTED` (reservado para estender no futuro, ex. `REVERSED`) |
@@ -209,7 +209,7 @@ Cada linha é um fato imutável: "a conta X recebeu um débito/crédito de Y cen
 | `direction` | text | `DEBIT` \| `CREDIT` |
 | `amount_cents` | bigint | sempre positivo (o sinal vem de `direction`, não do valor) |
 | `balance_after_cents` | bigint | saldo da conta **logo após** este lançamento |
-| `type` | text | copiado da transação (`DEPOSIT` \| `WITHDRAWAL` \| `TRANSFER`) — desnormalizado de propósito, para consultar o extrato sem precisar fazer join |
+| `type` | text | copiado da transação (inclusive os tipos Pix) — desnormalizado de propósito, para consultar e filtrar o extrato sem precisar fazer join |
 | `description` | text | copiado da transação |
 | `counterparty_account_id` | uuid | FK → `account.id`, nullable. A conta da outra perna da mesma transação (adicionada na migration `V2`). Gravada para toda transação, mas **só exposta pela API quando `type = TRANSFER`** — para depósito/saque a contraparte é uma conta interna de settlement, que nunca pode ficar visível ao cliente (ver `EntryResponse.from`) |
 | `occurred_at`, `created_at` | timestamptz | |
@@ -217,6 +217,31 @@ Cada linha é um fato imutável: "a conta X recebeu um débito/crédito de Y cen
 **`UNIQUE (account_id, sequence_no)`** é a constraint que garante a sequência **sem buracos** por conta — a base de tudo: o serviço de auditoria (`AuditLedgerService`) percorre os lançamentos de uma conta em ordem de `sequence_no` e recalcula o saldo passo a passo, comparando com `balance_after_cents` em cada um e com `account.balance_cents`/`account.version` no final.
 
 Toda transação gera **no mínimo duas linhas** em `ledger_entry` (uma por perna/`Leg`), sempre com `Σ créditos = Σ débitos` — ver seção 5.
+
+### 3.5.1 `pix_transaction_detail` — o detalhe de cada transação Pix
+
+Adicionada na migration `V4` (ADR-010). Uma linha por transação `PIX_*`, gravada na **mesma transação de banco** que o lançamento, com o que o extrato precisa para mostrar o Pix sozinho: EndToEndId, contraparte e motivo. Append-only (mesmo trigger do ledger) e com a mesma política de RLS.
+
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `transaction_id` | uuid | PK, FK → `financial_transaction.id` |
+| `tenant_id` | uuid | FK → `tenant.id` |
+| `type` | text | o mesmo tipo `PIX_*` da transação, repetido para a unicidade e os filtros não precisarem de join |
+| `end_to_end_id` | text | EndToEndId do Pix (estorno e devolução levam o do Pix original) |
+| `return_id` | text | id da devolução (`RtrId`), só em `PIX_RETURN_*` |
+| `related_transaction_id` | uuid | FK → `financial_transaction.id`: o Pix original, em `PIX_REFUND` e `PIX_RETURN_*` |
+| `counterparty_name` | text | nome da contraparte (recebedor de um Pix enviado, pagador de um recebido) |
+| `counterparty_tax_id_masked` | text | CPF/CNPJ **só mascarado** (`***7735`); o completo fica no banco `pix` |
+| `counterparty_ispb`, `counterparty_branch`, `counterparty_account`, `counterparty_account_type` | text | conta da contraparte; agência e tipo são opcionais |
+| `reason_code` | text | motivo do estorno ou da devolução (ex.: `AC03`, `MD06`) |
+| `remittance_info` | text | mensagem do pagador |
+
+Regras no banco:
+- **`pix_transaction_detail_shape`**: `PIX_IN`/`PIX_OUT` não apontam para outra transação; `PIX_REFUND` aponta; `PIX_RETURN_*` apontam e têm `return_id`.
+- **Índice único `(tenant_id, type, end_to_end_id, return_id) NULLS NOT DISTINCT`**: o mesmo Pix não é lançado duas vezes, qualquer que seja a `Idempotency-Key`.
+- **Constraint trigger adiado `financial_transaction_pix_detail`**: no COMMIT, toda transação `PIX_*` precisa ter a sua linha aqui.
+
+As regras que dependem de outras transações (estorno uma única vez, devoluções somadas até o valor original, estorno e devolução nunca no mesmo Pix) ficam no `MoveMoneyService`, serializadas por um advisory lock da transação original.
 
 ### 3.6 `outbox_event` — fila transacional de eventos
 
@@ -246,6 +271,8 @@ Implementa o padrão *transactional outbox*: o evento é gravado na **mesma tran
 | `customer` | `account` | 1:0..1 (no V1) | um cliente tem no máximo uma conta `CUSTOMER`, imposto pela aplicação, não pelo schema |
 | `account` | `ledger_entry` | 1:N | cada conta acumula um lançamento por transação da qual participa |
 | `financial_transaction` | `ledger_entry` | 1:N (mínimo 2) | toda transação vira 2+ lançamentos balanceados |
+| `financial_transaction` | `pix_transaction_detail` | 1:0..1 | exatamente 1 quando o tipo é `PIX_*`, nenhum nos demais |
+| `financial_transaction` | `pix_transaction_detail` (`related_transaction_id`) | 1:N | um Pix original pode ter um estorno ou várias devoluções |
 
 Não existe uma FK formal de `account` para `financial_transaction`, nem de `outbox_event` para as demais tabelas — essas ligações são feitas via `ledger_entry` (que referencia as duas) e via `aggregate_id`/`tenant_id` copiados como valor simples.
 

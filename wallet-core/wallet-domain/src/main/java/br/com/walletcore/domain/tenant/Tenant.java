@@ -27,9 +27,13 @@ public record Tenant(
      * {@code pix:send} is a narrow scope for an outgoing-Pix context: debit (withdrawal) and
      * reversal of a debit only - no deposits, no transfers. Clients request it on its own
      * ({@code POST /v1/auth/token?scope=pix:send}) so that token cannot do anything else.
+     *
+     * <p>{@code pix:receive} is its incoming counterpart: credit an incoming Pix or a return
+     * (PIX_IN, PIX_RETURN_IN), always with the Pix detail and the core's Pix rules - never a free
+     * deposit, which stays {@code ledger:write} (ADR-010).
      */
     public static final Set<String> DEFAULT_SCOPES =
-            Set.of("customers:write", "accounts:read", "ledger:write", "ledger:audit", "pix:send");
+            Set.of("customers:write", "accounts:read", "ledger:write", "ledger:audit", "pix:send", "pix:receive");
 
     private static final Pattern CLIENT_ID = Pattern.compile("[a-z0-9][a-z0-9-]{2,62}");
     private static final Pattern ISPB = Pattern.compile("[0-9]{8}");
