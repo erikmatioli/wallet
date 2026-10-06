@@ -67,20 +67,53 @@ export interface TransferRequest {
   description?: string;
 }
 
+export type TransactionType =
+  | 'DEPOSIT'
+  | 'WITHDRAWAL'
+  | 'TRANSFER'
+  | 'PIX_IN'
+  | 'PIX_OUT'
+  | 'PIX_REFUND'
+  | 'PIX_RETURN_IN'
+  | 'PIX_RETURN_OUT';
+
 export interface TransactionResponse {
   id: string;
-  type: 'DEPOSIT' | 'WITHDRAWAL' | 'TRANSFER';
+  type: TransactionType;
   amount: number;
   currency: string;
   description: string;
   occurredAt: string;
   replayed: boolean;
+  /** Only for PIX_* transactions. */
+  endToEndId: string | null;
+}
+
+/** The other side of a Pix: the payee of a Pix sent, the payer of a Pix received (ADR-010). */
+export interface PixCounterpartyResponse {
+  name: string;
+  taxIdMasked: string;
+  ispb: string;
+  branch: string | null;
+  account: string;
+  accountType: string | null;
+}
+
+export interface PixDetailResponse {
+  endToEndId: string;
+  /** Only for returns (PIX_RETURN_*). */
+  returnId: string | null;
+  /** The original Pix, for a refund or a return. */
+  relatedTransactionId: string | null;
+  counterparty: PixCounterpartyResponse;
+  reasonCode: string | null;
+  remittanceInfo: string | null;
 }
 
 export interface EntryResponse {
   transactionId: string;
   sequence: number;
-  type: string;
+  type: TransactionType;
   direction: 'DEBIT' | 'CREDIT';
   amount: number;
   balanceAfter: number;
@@ -90,6 +123,8 @@ export interface EntryResponse {
   counterpartyAccountId: string | null;
   counterpartyCustomerName: string | null;
   counterpartyAccountFormatted: string | null;
+  /** Only set for PIX_* entries: the Pix as it was posted, counterparty outside the institution included. */
+  pix: PixDetailResponse | null;
 }
 
 export interface StatementResponse {

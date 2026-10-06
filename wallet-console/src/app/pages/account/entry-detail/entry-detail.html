@@ -1,0 +1,93 @@
+<!-- Detail of one statement entry: everything the statement already loaded, no new request. -->
+<dialog #dialog class="detail" (close)="selected.set(null)" (click)="closeOnBackdrop($event)">
+  @if (selected(); as e) {
+    <header class="detail-header">
+      <div>
+        <h3>{{ typeLabel(e.type) }}</h3>
+        <span class="hint">{{ e.occurredAt | date: 'dd/MM/yyyy HH:mm:ss' }}</span>
+      </div>
+      <div class="detail-amount" [class.amount-credit]="e.direction === 'CREDIT'" [class.amount-debit]="e.direction === 'DEBIT'">
+        {{ e.direction === 'DEBIT' ? '-' : '+' }}{{ e.amount | number: '1.2-2' }}
+      </div>
+    </header>
+
+    <dl>
+      <dt>Movimento</dt>
+      <dd>{{ e.direction === 'CREDIT' ? 'Crédito' : 'Débito' }}</dd>
+      <dt>Saldo após</dt>
+      <dd>{{ e.balanceAfter | number: '1.2-2' }}</dd>
+      @if (e.description) {
+        <dt>Descrição</dt>
+        <dd class="wrap">{{ e.description }}</dd>
+      }
+      <dt>Transação</dt>
+      <dd class="mono">{{ e.transactionId }}</dd>
+      <dt>Sequência na conta</dt>
+      <dd>{{ e.sequence }}</dd>
+    </dl>
+
+    @if (e.counterpartyAccountId) {
+      <h4>Contraparte</h4>
+      <dl>
+        <dt>Nome</dt>
+        <dd>{{ e.counterpartyCustomerName }}</dd>
+        <dt>Conta</dt>
+        <dd>
+          <a [routerLink]="['/accounts', e.counterpartyAccountId]" (click)="close()">{{ e.counterpartyAccountFormatted }}</a>
+        </dd>
+      </dl>
+    }
+
+    @if (e.pix; as pix) {
+      <h4>Contraparte</h4>
+      <dl>
+        <dt>Nome</dt>
+        <dd>{{ pix.counterparty.name }}</dd>
+        <dt>CPF/CNPJ</dt>
+        <dd>{{ pix.counterparty.taxIdMasked }}</dd>
+        <dt>Instituição (ISPB)</dt>
+        <dd>{{ pix.counterparty.ispb }}</dd>
+        <dt>Agência / conta</dt>
+        <dd>{{ pix.counterparty.branch ? pix.counterparty.branch + ' / ' : '' }}{{ pix.counterparty.account }}</dd>
+        @if (pix.counterparty.accountType) {
+          <dt>Tipo de conta</dt>
+          <dd>{{ pix.counterparty.accountType }}</dd>
+        }
+      </dl>
+
+      <h4>Pix</h4>
+      <dl>
+        <dt>EndToEndId</dt>
+        <dd class="mono">{{ pix.endToEndId }}</dd>
+        @if (pix.returnId) {
+          <dt>Id da devolução</dt>
+          <dd class="mono">{{ pix.returnId }}</dd>
+        }
+        @if (pix.reasonCode) {
+          <dt>Motivo</dt>
+          <dd>{{ reason(pix.reasonCode) ?? 'Código' }} ({{ pix.reasonCode }})</dd>
+        }
+        @if (pix.remittanceInfo) {
+          <dt>Mensagem do pagador</dt>
+          <dd class="wrap">{{ pix.remittanceInfo }}</dd>
+        }
+        @if (pix.relatedTransactionId) {
+          <dt>Pix original</dt>
+          <dd>
+            @if (loadedEntry(pix.relatedTransactionId); as original) {
+              <button type="button" class="link" (click)="open(original)">
+                {{ typeLabel(original.type) }} de {{ original.amount | number: '1.2-2' }} em {{ original.occurredAt | date: 'dd/MM HH:mm' }}
+              </button>
+            } @else {
+              <span class="mono">{{ pix.relatedTransactionId }}</span>
+            }
+          </dd>
+        }
+      </dl>
+    }
+
+    <div class="detail-actions">
+      <button type="button" class="close-button" (click)="close()">Fechar</button>
+    </div>
+  }
+</dialog>

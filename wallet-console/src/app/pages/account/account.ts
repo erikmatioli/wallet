@@ -6,13 +6,15 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { WalletApiService } from '../../core/wallet-api.service';
 import { extractErrorMessage } from '../../core/http-error.util';
 import { AccountDetailResponse, AuditResponse, EntryResponse } from '../../core/models';
+import { counterpartyName, transactionLabel } from '../../core/transaction-labels';
+import { EntryDetail } from './entry-detail/entry-detail';
 import { ProblemBanner } from '../../shared/problem-banner/problem-banner';
 
 type TransferMethod = 'id' | 'number';
 
 @Component({
   selector: 'app-account',
-  imports: [FormsModule, RouterLink, DecimalPipe, DatePipe, ProblemBanner],
+  imports: [FormsModule, RouterLink, DecimalPipe, DatePipe, ProblemBanner, EntryDetail],
   templateUrl: './account.html',
   styleUrl: './account.scss',
 })
@@ -22,6 +24,8 @@ export class AccountPage implements OnInit {
   readonly account = signal<AccountDetailResponse | null>(null);
   readonly entries = signal<EntryResponse[]>([]);
   readonly nextBefore = signal<number | null>(null);
+  /** Statement restricted to Pix entries (every PIX_* type). */
+  readonly pixOnly = signal(false);
   readonly audit = signal<AuditResponse | null>(null);
 
   readonly loading = signal(false);
@@ -58,6 +62,7 @@ export class AccountPage implements OnInit {
       this.account.set(null);
       this.entries.set([]);
       this.nextBefore.set(null);
+      this.pixOnly.set(false);
       this.audit.set(null);
       this.error.set(null);
       this.notice.set(null);
@@ -82,7 +87,7 @@ export class AccountPage implements OnInit {
 
   loadStatement(reset: boolean): void {
     const before = reset ? undefined : (this.nextBefore() ?? undefined);
-    this.api.getStatement(this.accountId, before).subscribe({
+    this.api.getStatement(this.accountId, before, undefined, this.pixOnly() ? 'PIX' : undefined).subscribe({
       next: (page) => {
         this.entries.set(reset ? page.entries : [...this.entries(), ...page.entries]);
         this.nextBefore.set(page.nextBefore ?? null);
@@ -90,6 +95,20 @@ export class AccountPage implements OnInit {
       error: (err) => this.error.set(extractErrorMessage(err)),
     });
   }
+
+  togglePixOnly(): void {
+    this.pixOnly.update((v) => !v);
+    this.loadStatement(true);
+  }
+
+  typeLabel(type: string): string {
+    return transactionLabel(type);
+  }
+
+  counterparty(entry: EntryResponse): string | null {
+    return counterpartyName(entry);
+  }
+
 
   private runAction(action: () => void): void {
     this.error.set(null);
