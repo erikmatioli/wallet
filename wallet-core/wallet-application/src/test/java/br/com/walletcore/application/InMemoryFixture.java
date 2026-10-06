@@ -7,6 +7,7 @@ import br.com.walletcore.application.port.out.BalanceUpdateResult;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
 import br.com.walletcore.application.port.out.OutboxRepository;
+import br.com.walletcore.application.port.out.PixDetailRepository;
 import br.com.walletcore.application.port.out.StoredTransaction;
 import br.com.walletcore.application.port.out.TransactionJournal;
 import br.com.walletcore.application.port.out.TransactionRunner;
@@ -22,10 +23,16 @@ import br.com.walletcore.domain.customer.TaxId;
 import br.com.walletcore.domain.event.DomainEvent;
 import br.com.walletcore.domain.ledger.LedgerEntry;
 import br.com.walletcore.domain.ledger.LedgerTransaction;
+import br.com.walletcore.domain.ledger.TransactionType;
+import br.com.walletcore.domain.pix.PixDetail;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.CustomerId;
 import br.com.walletcore.domain.shared.Money;
 import br.com.walletcore.domain.shared.TenantId;
+import br.com.walletcore.domain.shared.TransactionId;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.Objects;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -47,6 +54,7 @@ final class InMemoryFixture {
     final List<LedgerEntry> entries = new ArrayList<>();
     final Map<String, StoredTransaction> journal = new HashMap<>();
     final List<DomainEvent> events = new ArrayList<>();
+    final Map<TransactionId, PixDetail> pixDetails = new LinkedHashMap<>();
 
     final Map<AccountId, TaxId> taxIdsByAccount = new HashMap<>();
     final Map<AccountId, Customer.Status> customerStatusByAccount = new HashMap<>();
@@ -166,9 +174,11 @@ final class InMemoryFixture {
         }
 
         @Override
-        public List<LedgerEntry> findPage(TenantId tenantId, AccountId accountId, Long before, int limit) {
+        public List<LedgerEntry> findPage(TenantId tenantId, AccountId accountId, Long before, int limit,
+                                          Set<TransactionType> types) {
             return entries.stream()
                     .filter(e -> e.accountId().equals(accountId) && (before == null || e.sequence() < before))
+                    .filter(e -> types == null || types.isEmpty() || types.contains(e.type()))
                     .sorted(Comparator.comparingLong(LedgerEntry::sequence).reversed())
                     .limit(limit).toList();
         }
@@ -200,6 +210,48 @@ final class InMemoryFixture {
 
     final OutboxRepository outbox = newEvents -> events.addAll(newEvents);
 
+    final PixDetailRepository pixDetailRepository = new PixDetailRepository() {
+        @Override
+        public void insert(TenantId tenantId, TransactionId transactionId, PixDetail detail) {
+            if (exists(tenantId, detail.type(), detail.endToEndId(), detail.returnId())) {
+                throw new br.com.walletcore.domain.exception.ConflictException("PIX_ALREADY_POSTED", "duplicate");
+            }
+            pixDetails.put(transactionId, detail);
+        }
+
+        @Override
+        public Optional<PixDetail> findByTransaction(TenantId tenantId, TransactionId transactionId) {
+            return Optional.ofNullable(pixDetails.get(transactionId));
+        }
+
+        @Override
+        public Map<TransactionId, PixDetail> findByTransactions(TenantId tenantId, Collection<TransactionId> ids) {
+            Map<TransactionId, PixDetail> found = new HashMap<>();
+            ids.forEach(id -> findByTransaction(tenantId, id).ifPresent(d -> found.put(id, d)));
+            return found;
+        }
+
+        @Override
+        public boolean exists(TenantId tenantId, TransactionType type, String endToEndId, String returnId) {
+            return pixDetails.values().stream().anyMatch(d -> d.type() == type && d.endToEndId().equals(endToEndId)
+                    && Objects.equals(d.returnId(), returnId));
+        }
+
+        @Override
+        public long sumRelated(TenantId tenantId, TransactionId related, TransactionType type) {
+            return pixDetails.entrySet().stream()
+                    .filter(e -> e.getValue().type() == type && related.equals(e.getValue().relatedTransactionId()))
+                    .mapToLong(e -> journal.values().stream().filter(t -> t.id().equals(e.getKey()))
+                            .mapToLong(t -> t.amount().cents()).sum())
+                    .sum();
+        }
+
+        @Override
+        public void lockOriginal(TenantId tenantId, TransactionId original) {
+            // single-threaded fixture: nothing to serialize
+        }
+    };
+
     /** No-op: these tests assert on domain/ledger state, not on what gets reported to metrics. */
     final MetricsRecorder metrics = new MetricsRecorder() {
         @Override
@@ -222,8 +274,9 @@ final class InMemoryFixture {
     };
 
     final MoveMoneyService moveMoney = new MoveMoneyService(runner, accountRepository, ledgerRepository,
-            transactionJournal, outbox, new SettlementRouter(accountRepository), metrics, clock);
-    final QueryAccountService query = new QueryAccountService(runner, accountRepository, ledgerRepository);
+            transactionJournal, outbox, pixDetailRepository, new SettlementRouter(accountRepository), metrics, clock);
+    final QueryAccountService query = new QueryAccountService(runner, accountRepository, ledgerRepository,
+            pixDetailRepository);
     final AuditLedgerService audit = new AuditLedgerService(runner, accountRepository, ledgerRepository, metrics);
 
     InMemoryFixture() {

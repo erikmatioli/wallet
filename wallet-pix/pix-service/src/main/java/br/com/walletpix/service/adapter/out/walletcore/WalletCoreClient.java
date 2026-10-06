@@ -2,8 +2,10 @@ package br.com.walletpix.service.adapter.out.walletcore;
 
 import br.com.walletpix.service.application.MessageFailures.PermanentFailure;
 import br.com.walletpix.service.application.MessageFailures.RetryLater;
+import br.com.walletpix.service.application.port.PixPorts.Counterparty;
 import br.com.walletpix.service.application.port.PixPorts.DebitResult;
 import br.com.walletpix.service.application.port.PixPorts.PayerAccount;
+import br.com.walletpix.service.application.port.PixPorts.PixRecord;
 import br.com.walletpix.service.application.port.PixPorts.WalletCore;
 import br.com.walletpix.service.config.PixProperties;
 import br.com.walletpix.service.domain.Amounts;
@@ -16,6 +18,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,9 +33,10 @@ import org.springframework.web.client.RestClient;
 
 /**
  * wallet-core over HTTP, as the tenant that owns the ISPB in question - so Row Level Security
- * still scopes every call to that tenant's accounts. Two tokens per tenant, least privilege per
- * use: the full one for reads and credits, and one down-scoped to {@code pix:send} for the debit
- * and its reversal - the only operations that scope allows.
+ * still scopes every call to that tenant's accounts. Three tokens per tenant, least privilege per
+ * use: the full one for reads, one down-scoped to {@code pix:receive} for the credits of a Pix or a
+ * return received, and one down-scoped to {@code pix:send} for the debit and its reversal. Every
+ * money movement is a Pix type in wallet-core, with the Pix detail (ADR-010 of wallet-core).
  *
  * <p>Error mapping: network failures, 5xx and 429 are {@link RetryLater} (the message stays on
  * the queue); a 401 drops the cached token and retries once; any other 4xx is
@@ -47,6 +51,9 @@ class WalletCoreClient implements WalletCore {
     private static final long EXPIRY_MARGIN_SECONDS = 60;
     /** Scope of the debit/reversal token (null elsewhere = every scope of the tenant). */
     private static final String SEND_SCOPE = "pix:send";
+    /** Scope of the credit token. */
+    private static final String RECEIVE_SCOPE = "pix:receive";
+    private static final Pattern BRANCH = Pattern.compile("\\d{4}");
 
     private final RestClient http;
     private final Map<String, PixProperties.Participant> participantsByIspb;
@@ -69,10 +76,15 @@ class WalletCoreClient implements WalletCore {
     record HolderCheckResponse(String result, UUID accountId) {
     }
 
-    record DepositRequest(BigDecimal amount, String description) {
+    record CounterpartyRequest(String name, String taxId, String ispb, String branch, String account) {
     }
 
-    record TransactionResponse(UUID id, boolean replayed) {
+    record PixTransactionRequest(String type, BigDecimal amount, String description, String endToEndId,
+                                 String returnId, UUID relatedTransactionId, CounterpartyRequest counterparty,
+                                 String reasonCode, String remittanceInfo) {
+    }
+
+    record TransactionResponse(UUID id, boolean replayed, String endToEndId) {
     }
 
     record TokenResponse(String access_token, long expires_in) {
@@ -82,7 +94,7 @@ class WalletCoreClient implements WalletCore {
                            String customerName) {
     }
 
-    record ReversalRequest(String description) {
+    record ReversalRequest(String description, String reasonCode) {
     }
 
     record Problem(String code, String detail) {
@@ -118,16 +130,16 @@ class WalletCoreClient implements WalletCore {
 
     @Override
     public DebitResult debit(String ispb, UUID accountId, long amountCents, String description,
-                             String idempotencyKey) {
+                             String idempotencyKey, PixRecord pix) {
         try {
             TransactionResponse response = call(ispb, SEND_SCOPE, "debit", token -> http.post()
-                    .uri("/v1/accounts/{id}/withdrawals", accountId)
+                    .uri("/v1/accounts/{id}/pix-debits", accountId)
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                     .header("Idempotency-Key", idempotencyKey)
-                    .body(new DepositRequest(Amounts.toDecimal(amountCents), description))
+                    .body(request("PIX_OUT", amountCents, description, pix))
                     .retrieve()
                     .body(TransactionResponse.class));
-            return new DebitResult.Debited(response.id());
+            return new DebitResult.Debited(response.id(), response.endToEndId());
         } catch (Refused e) {
             // 422 (INSUFFICIENT_FUNDS, ACCOUNT_NOT_ACTIVE) or 409 (IDEMPOTENCY_KEY_REUSED): a
             // business answer for the caller of the REST API; nothing was debited.
@@ -136,29 +148,44 @@ class WalletCoreClient implements WalletCore {
     }
 
     @Override
-    public UUID reverse(String ispb, UUID debitTransactionId, String description) {
+    public UUID reverse(String ispb, UUID debitTransactionId, String description, String reasonCode) {
         TransactionResponse response = call(ispb, SEND_SCOPE, "reversal", token -> http.post()
                 .uri("/v1/transactions/{id}/reversals", debitTransactionId)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-                .body(new ReversalRequest(description))
+                .body(new ReversalRequest(description, reasonCode))
                 .retrieve()
                 .body(TransactionResponse.class));
         return response.id();
     }
 
     @Override
-    public UUID credit(String ispb, UUID accountId, long amountCents, String description, String idempotencyKey) {
-        TransactionResponse response = call(ispb, null, "credit", token -> http.post()
-                .uri("/v1/accounts/{id}/deposits", accountId)
+    public UUID credit(String ispb, UUID accountId, long amountCents, String description, String idempotencyKey,
+                       PixRecord pix) {
+        String type = pix.returnId() == null ? "PIX_IN" : "PIX_RETURN_IN";
+        TransactionResponse response = call(ispb, RECEIVE_SCOPE, "credit", token -> http.post()
+                .uri("/v1/accounts/{id}/pix-credits", accountId)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                 .header("Idempotency-Key", idempotencyKey)
-                .body(new DepositRequest(Amounts.toDecimal(amountCents), description))
+                .body(request(type, amountCents, description, pix))
                 .retrieve()
                 .body(TransactionResponse.class));
         if (response.replayed()) {
             log.info("credit {} was already made (idempotent replay), transaction {}", idempotencyKey, response.id());
         }
         return response.id();
+    }
+
+    private static PixTransactionRequest request(String type, long amountCents, String description, PixRecord pix) {
+        Counterparty c = pix.counterparty();
+        // wallet-core keeps the branch only in its 4-digit form and the account as digits; what
+        // the SPI sent in another shape is still in our own database, in full.
+        String branch = c.branch() != null && BRANCH.matcher(c.branch()).matches() ? c.branch() : null;
+        String account = c.accountNumber() == null ? null : c.accountNumber().replaceAll("\\D", "");
+        String remittance = pix.remittanceInfo() == null || pix.remittanceInfo().length() <= 140
+                ? pix.remittanceInfo() : pix.remittanceInfo().substring(0, 140);
+        return new PixTransactionRequest(type, Amounts.toDecimal(amountCents), description, pix.endToEndId(),
+                pix.returnId(), pix.relatedTransactionId(),
+                new CounterpartyRequest(c.name(), c.taxId(), c.ispb(), branch, account), pix.reasonCode(), remittance);
     }
 
     /**

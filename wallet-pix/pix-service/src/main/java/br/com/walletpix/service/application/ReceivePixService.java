@@ -9,11 +9,13 @@ import br.com.walletpix.messages.SpiMessages.Pacs008;
 import br.com.walletpix.messages.SpiMessages.TxInfAndSts;
 import br.com.walletpix.messages.SpiMessages.TxStatus;
 import br.com.walletpix.service.application.MessageFailures.PermanentFailure;
+import br.com.walletpix.service.application.port.PixPorts.Counterparty;
 import br.com.walletpix.service.application.port.PixPorts.InboundMessageLog;
 import br.com.walletpix.service.application.port.PixPorts.OutboundMessages;
 import br.com.walletpix.service.application.port.PixPorts.Participants;
 import br.com.walletpix.service.application.port.PixPorts.PixMetrics;
 import br.com.walletpix.service.application.port.PixPorts.PixPaymentRepository;
+import br.com.walletpix.service.application.port.PixPorts.PixRecord;
 import br.com.walletpix.service.application.port.PixPorts.Transactions;
 import br.com.walletpix.service.application.port.PixPorts.WalletCore;
 import br.com.walletpix.service.domain.Amounts;
@@ -180,8 +182,12 @@ public final class ReceivePixService {
         }
         // Idempotency key = EndToEndId: if a previous attempt credited and then crashed before
         // committing below, this returns the same wallet-core transaction instead of paying twice.
+        PartyAccount payer = payment.payer();
         UUID creditId = walletCore.credit(payment.ispb(), payment.walletAccountId(), payment.amountCents(),
-                creditDescription(payment), payment.endToEndId());
+                creditDescription(payment), payment.endToEndId(), PixRecord.of(payment.endToEndId(),
+                        new Counterparty(payer.name(), payer.taxId(), payment.counterpartIspb(), payer.branch(),
+                                payer.accountNumber()),
+                        payment.description()));
         PixPayment credited = payment.credited(creditId, clock.instant());
         boolean committed = commit(messageKey, MsgType.PACS_002, () -> {
             payments.update(credited);

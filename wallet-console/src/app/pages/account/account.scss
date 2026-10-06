@@ -77,23 +77,52 @@ h1 {
   margin: 0;
 }
 
-.counterparty-link {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  text-decoration: none;
-  line-height: 1.25;
+.statement {
+  table-layout: fixed;
+  width: 100%;
+
+  th:nth-child(1) { width: 6.5rem; }
+  th:nth-child(2) { width: 9.5rem; }
+  th.num { width: 6.5rem; }
 }
 
-.counterparty-name {
-  color: var(--color-text);
-  font-weight: 500;
+.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-row {
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--color-bg);
+    outline: none;
+  }
+}
+
+.table-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+}
+
+.filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
   font-size: 0.85rem;
-}
-
-.counterparty-number {
-  color: var(--color-text-muted);
-  font-size: 0.75rem;
+  cursor: pointer;
 }
 
 .findings {

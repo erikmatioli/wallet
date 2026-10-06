@@ -2,9 +2,12 @@ package br.com.walletcore.application.port.in;
 
 import br.com.walletcore.domain.account.Account;
 import br.com.walletcore.domain.ledger.LedgerEntry;
+import br.com.walletcore.domain.ledger.TransactionType;
+import br.com.walletcore.domain.pix.PixDetail;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.TenantId;
 import java.util.List;
+import java.util.Set;
 
 public interface QueryAccountUseCase {
 
@@ -50,8 +53,15 @@ public interface QueryAccountUseCase {
      * Statement, newest first, using keyset pagination on the per-account sequence.
      *
      * @param beforeSequence only entries with a smaller sequence are returned (null = from the newest)
+     * @param types          only entries of these types (null or empty = every type), e.g. the
+     *                       PIX_* types for a Pix-only statement
      */
-    Statement getStatement(TenantId tenantId, AccountId accountId, Long beforeSequence, int limit);
+    Statement getStatement(TenantId tenantId, AccountId accountId, Long beforeSequence, int limit,
+                           Set<TransactionType> types);
+
+    default Statement getStatement(TenantId tenantId, AccountId accountId, Long beforeSequence, int limit) {
+        return getStatement(tenantId, accountId, beforeSequence, limit, null);
+    }
 
     /**
      * A ledger entry enriched for display: for a TRANSFER, who the counterparty is (customer
@@ -59,8 +69,12 @@ public interface QueryAccountUseCase {
      * query per row - see QueryAccountService.getStatement. Null for every other transaction
      * type, by the same invariant as {@link LedgerEntry#counterpartyAccountId()}: a deposit or
      * withdrawal's counterparty is an internal settlement account, which never surfaces here.
+     *
+     * <p>{@code pix} is the Pix detail (counterparty outside the institution, EndToEndId, reason)
+     * of a PIX_* entry, null for every other type.
      */
-    record StatementEntry(LedgerEntry entry, String counterpartyCustomerName, String counterpartyAccountFormatted) {
+    record StatementEntry(LedgerEntry entry, String counterpartyCustomerName, String counterpartyAccountFormatted,
+                          PixDetail pix) {
     }
 
     /** {@code nextBefore} is the cursor for the next page, or null when there are no more entries. */

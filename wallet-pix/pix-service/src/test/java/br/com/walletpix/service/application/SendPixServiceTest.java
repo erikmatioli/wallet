@@ -16,6 +16,7 @@ import br.com.walletpix.messages.SpiMessages.Pacs008;
 import br.com.walletpix.messages.SpiMessages.TxInf;
 import br.com.walletpix.messages.SpiMessages.TxInfAndSts;
 import br.com.walletpix.messages.SpiMessages.TxStatus;
+import br.com.walletpix.service.application.port.PixPorts;
 import br.com.walletpix.service.application.MessageFailures.PermanentFailure;
 import br.com.walletpix.service.application.MessageFailures.RetryLater;
 import br.com.walletpix.service.application.SendPixService.InitiateCommand;
@@ -53,6 +54,28 @@ class SendPixServiceTest {
         assertThat(SpiIds.isEndToEndId(order.cdtTrfTxInf().endToEndId())).isTrue();
         assertThat(order.cdtTrfTxInf().intrBkSttlmAmt().amt()).isEqualByComparingTo("75.50");
         assertThat(order.cdtTrfTxInf().dbtr().id()).isEqualTo(CPF);
+
+        // wallet-core records the debit as a PIX_OUT with the same EndToEndId and the payee
+        var pix = f.pixRecordsByKey.get("pix-debit-req-1");
+        assertThat(pix.endToEndId()).isEqualTo(order.cdtTrfTxInf().endToEndId());
+        assertThat(pix.counterparty().name()).isEqualTo("João Externo");
+        assertThat(pix.counterparty().ispb()).isEqualTo(EXTERNAL_ISPB);
+        assertThat(pix.counterparty().taxId()).isEqualTo("11144477735");
+        assertThat(pix.remittanceInfo()).isEqualTo("aluguel");
+    }
+
+    @Test
+    void retryAfterACrashSendsTheEndToEndIdOfTheFirstDebit() {
+        // First attempt debited, then the process died before the payment was stored.
+        String firstE2e = "E" + OUR_ISPB + "202610041159abcdefghijk";
+        f.walletCore.debit(OUR_ISPB, payer, 75_50, "Pix enviado para João Externo", "pix-debit-req-1",
+                PixPorts.PixRecord.of(firstE2e, null, null));
+
+        PixPayment p = f.send.initiate(command("req-1", "75.50")).payment();
+
+        assertThat(p.endToEndId()).isEqualTo(firstE2e);
+        assertThat(((Pacs008) f.sentToSpi.getFirst().document()).cdtTrfTxInf().endToEndId()).isEqualTo(firstE2e);
+        assertThat(f.balances.get(payer)).as("debited once").isEqualTo(24_50);
     }
 
     @Test
@@ -146,6 +169,7 @@ class SendPixServiceTest {
         assertThat(refunded.walletTransactionId()).isEqualTo(f.reversalsByDebit.get(sent.debitTransactionId()));
         assertThat(f.balances.get(payer)).isEqualTo(100_00);
         assertThat(f.creditCalls).as("a rejection is undone by reversal, not by a new deposit").isEmpty();
+        assertThat(f.reversalReasons.get(sent.debitTransactionId())).isEqualTo("AC03");
         assertThat(f.events).extracting(e -> e.type()).containsExactly(EventType.PIX_SENT_REFUNDED);
     }
 
@@ -160,6 +184,12 @@ class SendPixServiceTest {
 
         assertThat(f.stored(sent.endToEndId(), Direction.OUTBOUND).status()).isEqualTo(Status.RETURNED);
         assertThat(f.creditedCentsByKey.get("pix-return-" + rtrId)).isEqualTo(2000);
+        var pix = f.pixRecordsByKey.get("pix-return-" + rtrId);
+        assertThat(pix.returnId()).isEqualTo(rtrId);
+        assertThat(pix.endToEndId()).isEqualTo(sent.endToEndId());
+        assertThat(pix.relatedTransactionId()).as("tied to the original debit").isEqualTo(sent.debitTransactionId());
+        assertThat(pix.reasonCode()).isEqualTo("MD06");
+        assertThat(pix.counterparty().name()).isEqualTo("João Externo");
         assertThat(f.events).extracting(e -> e.type())
                 .containsExactly(EventType.PIX_SENT_COMPLETED, EventType.PIX_RETURN_RECEIVED);
     }

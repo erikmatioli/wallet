@@ -220,6 +220,8 @@ O CI está em `.github/workflows/ci-wallet-pix.yml`.
   resolve. Falta um job de reconciliação que procure débitos `pix-debit-*` sem pagamento.
 - **Fora do escopo:** DICT (chaves Pix), QR Code, MED, envio de devolução (pacs.004 de saída) e
   limites além do valor por transação.
-- **Uma devolução por Pix:** a segunda devolução parcial do mesmo Pix é recusada (fica na DLQ).
+- **Uma devolução por Pix:** a segunda devolução parcial do mesmo Pix ainda não é creditada. O
+  wallet-core já aceita várias e limita a soma ao valor original (ADR-010 do wallet-core), mas o
+  `PixPayment` deste serviço vai para `RETURNED` na primeira.
 - **Dados pessoais:** nomes e CPF/CNPJ ficam em claro no banco `pix`. Para produção, criptografar
   essas colunas ou guardar só o necessário para reconciliação.

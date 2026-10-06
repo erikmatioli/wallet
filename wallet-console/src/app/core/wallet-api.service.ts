@@ -37,9 +37,11 @@ export class WalletApiService {
     return this.http.get<BalanceResponse>(`/v1/accounts/${accountId}/balance`);
   }
 
-  getStatement(accountId: string, before?: number, limit = 20): Observable<StatementResponse> {
+  /** {@code product: 'PIX'} keeps only the Pix entries (every PIX_* type). */
+  getStatement(accountId: string, before?: number, limit = 20, product?: 'PIX'): Observable<StatementResponse> {
     let params = new HttpParams().set('limit', limit);
     if (before != null) params = params.set('before', before);
+    if (product) params = params.set('product', product);
     return this.http.get<StatementResponse>(`/v1/accounts/${accountId}/statement`, { params });
   }
 

@@ -22,51 +22,44 @@
     </div>
   }
 
+  <app-entry-detail #entryDetail [entries]="entries()" />
+
   <h2 class="section-title">Extrato</h2>
   <div class="card">
-    <table>
+    <label class="filter">
+      <input type="checkbox" [checked]="pixOnly()" (change)="togglePixOnly()" />
+      Somente Pix
+    </label>
+    <table class="statement">
       <thead>
         <tr>
-          <th>Seq.</th>
+          <th>Data</th>
           <th>Tipo</th>
-          <th>Direção</th>
-          <th>Valor</th>
-          <th>Saldo após</th>
-          <th>Descrição</th>
           <th>Contraparte</th>
-          <th>Quando</th>
+          <th class="num">Valor</th>
+          <th class="num">Saldo após</th>
         </tr>
       </thead>
       <tbody>
         @for (e of entries(); track e.sequence) {
-          <tr>
-            <td>{{ e.sequence }}</td>
-            <td>{{ e.type }}</td>
-            <td [class.amount-credit]="e.direction === 'CREDIT'" [class.amount-debit]="e.direction === 'DEBIT'">{{ e.direction }}</td>
-            <td [class.amount-credit]="e.direction === 'CREDIT'" [class.amount-debit]="e.direction === 'DEBIT'">
+          <tr class="entry-row" tabindex="0" (click)="entryDetail.open(e)" (keydown.enter)="entryDetail.open(e)"
+              [attr.aria-label]="'Ver detalhes: ' + typeLabel(e.type)">
+            <td class="nowrap">{{ e.occurredAt | date: 'dd/MM HH:mm' }}</td>
+            <td>{{ typeLabel(e.type) }}</td>
+            <td class="ellipsis">{{ counterparty(e) ?? '—' }}</td>
+            <td class="num" [class.amount-credit]="e.direction === 'CREDIT'" [class.amount-debit]="e.direction === 'DEBIT'">
               {{ e.direction === 'DEBIT' ? '-' : '+' }}{{ e.amount | number: '1.2-2' }}
             </td>
-            <td>{{ e.balanceAfter | number: '1.2-2' }}</td>
-            <td>{{ e.description }}</td>
-            <td>
-              @if (e.counterpartyAccountId) {
-                <a [routerLink]="['/accounts', e.counterpartyAccountId]" class="counterparty-link">
-                  <span class="counterparty-name">{{ e.counterpartyCustomerName }}</span>
-                  <span class="counterparty-number">{{ e.counterpartyAccountFormatted }}</span>
-                </a>
-              } @else {
-                <span class="hint">&mdash;</span>
-              }
-            </td>
-            <td>{{ e.occurredAt | date: 'dd/MM/yy HH:mm' }}</td>
+            <td class="num">{{ e.balanceAfter | number: '1.2-2' }}</td>
           </tr>
         } @empty {
           <tr>
-            <td colspan="8" class="hint">Nenhum lançamento ainda.</td>
+            <td colspan="5" class="hint">{{ pixOnly() ? 'Nenhum Pix nesta conta.' : 'Nenhum lançamento ainda.' }}</td>
           </tr>
         }
       </tbody>
     </table>
+    <p class="hint table-hint">Clique num lançamento para ver os detalhes.</p>
     @if (nextBefore() !== null) {
       <button type="button" class="secondary" (click)="loadStatement(false)">Carregar mais</button>
     }

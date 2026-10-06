@@ -71,6 +71,26 @@ public record LedgerTransaction(
                         new Leg(settlementAccount, EntryDirection.CREDIT, amount)), now);
     }
 
+    /**
+     * A Pix movement: the customer account against settlement, in the direction the type implies
+     * (see {@link TransactionType#creditsCustomer()}). The rules that tie a refund or return to
+     * the original Pix live in the application service, which can see the other transactions.
+     */
+    public static LedgerTransaction pix(TenantId tenantId, TransactionId id, TransactionType type,
+                                        AccountId customerAccount, AccountId settlementAccount, Money amount,
+                                        String description, Instant now) {
+        Objects.requireNonNull(type, "type");
+        if (!type.isPix()) {
+            throw new IllegalArgumentException(type + " is not a Pix transaction type");
+        }
+        List<Leg> legs = type.creditsCustomer()
+                ? List.of(new Leg(settlementAccount, EntryDirection.DEBIT, amount),
+                        new Leg(customerAccount, EntryDirection.CREDIT, amount))
+                : List.of(new Leg(customerAccount, EntryDirection.DEBIT, amount),
+                        new Leg(settlementAccount, EntryDirection.CREDIT, amount));
+        return new LedgerTransaction(id, tenantId, type, amount, description, legs, now);
+    }
+
     /** Book transfer between two accounts of the same tenant. */
     public static LedgerTransaction transfer(TenantId tenantId, TransactionId id, AccountId source,
                                              AccountId destination, Money amount, String description, Instant now) {

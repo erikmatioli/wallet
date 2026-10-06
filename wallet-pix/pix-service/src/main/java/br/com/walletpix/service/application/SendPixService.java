@@ -9,6 +9,7 @@ import br.com.walletpix.messages.SpiMessages.TxInfAndSts;
 import br.com.walletpix.messages.SpiMessages.TxStatus;
 import br.com.walletpix.service.application.MessageFailures.PermanentFailure;
 import br.com.walletpix.service.application.MessageFailures.RetryLater;
+import br.com.walletpix.service.application.port.PixPorts.Counterparty;
 import br.com.walletpix.service.application.port.PixPorts.DebitResult;
 import br.com.walletpix.service.application.port.PixPorts.InboundMessageLog;
 import br.com.walletpix.service.application.port.PixPorts.OutboundMessages;
@@ -18,6 +19,7 @@ import br.com.walletpix.service.application.port.PixPorts.PaymentPolicy.PaymentA
 import br.com.walletpix.service.application.port.PixPorts.Participants;
 import br.com.walletpix.service.application.port.PixPorts.PixMetrics;
 import br.com.walletpix.service.application.port.PixPorts.PixPaymentRepository;
+import br.com.walletpix.service.application.port.PixPorts.PixRecord;
 import br.com.walletpix.service.application.port.PixPorts.Transactions;
 import br.com.walletpix.service.application.port.PixPorts.WalletCore;
 import br.com.walletpix.service.domain.Amounts;
@@ -135,16 +137,22 @@ public final class SendPixService {
 
         // Atomic in wallet-core: no balance pre-check here, the debit itself refuses an overdraft.
         // The description must be the same on every retry of this request - it is part of the
-        // idempotency fingerprint (an EndToEndId would differ per attempt and make retries conflict).
+        // idempotency fingerprint. The EndToEndId is not: each attempt mints one, and a retry after
+        // a crash gets back the one stored with the first debit, which is the one to send.
         DebitResult debit = walletCore.debit(c.ispb(), c.payerAccountId(), cents,
-                limit("Pix enviado para " + c.payeeName()), "pix-debit-" + c.requestId());
+                limit("Pix enviado para " + c.payeeName()), "pix-debit-" + c.requestId(),
+                PixRecord.of(SpiIds.newEndToEndId(c.ispb(), now),
+                        new Counterparty(c.payeeName(), digits(c.payeeTaxId()), c.payeeIspb(), c.payeeBranch(),
+                                c.payeeAccountNumber()),
+                        c.description()));
         if (debit instanceof DebitResult.Refused refused) {
             metrics.inboundMessage("initiate", "debit-" + refused.code());
             throw new PaymentRefused(refused.code(), refused.detail());
         }
-        UUID debitId = ((DebitResult.Debited) debit).transactionId();
+        DebitResult.Debited debited = (DebitResult.Debited) debit;
+        UUID debitId = debited.transactionId();
 
-        PixPayment payment = PixPayment.sentOutgoing(SpiIds.newEndToEndId(c.ispb(), now), c.ispb(), c.payeeIspb(),
+        PixPayment payment = PixPayment.sentOutgoing(debited.endToEndId(), c.ispb(), c.payeeIspb(),
                 SpiIds.newMessageId(c.ispb()), cents,
                 new PartyAccount(payer.holderName(), digits(c.payerTaxId()), payer.branch(), acc),
                 new PartyAccount(c.payeeName(), digits(c.payeeTaxId()), c.payeeBranch(), c.payeeAccountNumber()),
@@ -220,10 +228,10 @@ public final class SendPixService {
                 }
             }
             case TxStatus.RJCT -> {
-                // Reverses exactly the debit made for this Pix; wallet-core allows one reversal
-                // per withdrawal, so a redelivered RJCT gets the same reversal back.
+                // Reverses exactly the debit made for this Pix (a PIX_REFUND in wallet-core); one
+                // reversal per debit, so a redelivered RJCT gets the same reversal back.
                 UUID reversalId = walletCore.reverse(payment.ispb(), payment.debitTransactionId(),
-                        limit("Estorno de Pix não concluído (" + status.rsnCd() + ")"));
+                        limit("Estorno de Pix não concluído (" + status.rsnCd() + ")"), status.rsnCd());
                 PixPayment refunded = payment.refunded(status.rsnCd(), reversalId, clock.instant());
                 if (commit(messageKey, MsgType.PACS_002, () -> {
                     payments.update(refunded);
@@ -258,9 +266,15 @@ public final class SendPixService {
         if (cents > payment.amountCents()) {
             throw new PermanentFailure("return of " + cents + " cents exceeds the original " + payment.amountCents());
         }
-        // A return is new money coming back (possibly partial), not an undo of our debit: credit.
+        // A return is new money coming back (possibly partial), not an undo of our debit: credit,
+        // as a PIX_RETURN_IN tied to the original debit (wallet-core caps returns at its amount).
+        PartyAccount payee = payment.payee();
         UUID creditId = walletCore.credit(payment.ispb(), payment.walletAccountId(), cents,
-                limit("Devolução de Pix (" + t.rtrRsnCd() + ") - " + payment.endToEndId()), "pix-return-" + t.rtrId());
+                limit("Devolução de Pix (" + t.rtrRsnCd() + ") - " + payment.endToEndId()), "pix-return-" + t.rtrId(),
+                new PixRecord(payment.endToEndId(), t.rtrId(), payment.debitTransactionId(),
+                        new Counterparty(payee.name(), payee.taxId(), payment.counterpartIspb(), payee.branch(),
+                                payee.accountNumber()),
+                        t.rtrRsnCd(), null));
         PixPayment returned = payment.returned(t.rtrRsnCd(), creditId, clock.instant());
         if (commit(messageKey, MsgType.PACS_004, () -> {
             payments.update(returned);

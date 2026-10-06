@@ -5,6 +5,7 @@ import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.AccountRepository.AccountDirectoryItem;
 import br.com.walletcore.application.port.out.AccountRepository.AccountHolder;
 import br.com.walletcore.application.port.out.LedgerRepository;
+import br.com.walletcore.application.port.out.PixDetailRepository;
 import br.com.walletcore.application.port.out.TransactionRunner;
 import br.com.walletcore.domain.account.Account;
 import br.com.walletcore.domain.customer.Customer;
@@ -13,8 +14,10 @@ import br.com.walletcore.domain.exception.NotFoundException;
 import br.com.walletcore.domain.exception.ValidationException;
 import br.com.walletcore.domain.ledger.LedgerEntry;
 import br.com.walletcore.domain.ledger.TransactionType;
+import br.com.walletcore.domain.pix.PixDetail;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.TenantId;
+import br.com.walletcore.domain.shared.TransactionId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -29,11 +32,14 @@ public final class QueryAccountService implements QueryAccountUseCase {
     private final TransactionRunner tx;
     private final AccountRepository accounts;
     private final LedgerRepository ledger;
+    private final PixDetailRepository pixDetails;
 
-    public QueryAccountService(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger) {
+    public QueryAccountService(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
+                               PixDetailRepository pixDetails) {
         this.tx = tx;
         this.accounts = accounts;
         this.ledger = ledger;
+        this.pixDetails = pixDetails;
     }
 
     @Override
@@ -104,16 +110,29 @@ public final class QueryAccountService implements QueryAccountUseCase {
     }
 
     @Override
-    public Statement getStatement(TenantId tenantId, AccountId accountId, Long beforeSequence, int limit) {
+    public Statement getStatement(TenantId tenantId, AccountId accountId, Long beforeSequence, int limit,
+                                  Set<TransactionType> types) {
         int pageSize = Math.min(Math.max(limit, 1), MAX_PAGE);
         return tx.readOnly(tenantId, () -> {
             load(tenantId, accountId);
-            List<LedgerEntry> page = ledger.findPage(tenantId, accountId, beforeSequence, pageSize);
+            List<LedgerEntry> page = ledger.findPage(tenantId, accountId, beforeSequence, pageSize, types);
             Long next = page.size() == pageSize ? page.get(page.size() - 1).sequence() : null;
             Map<AccountId, AccountDirectoryItem> counterparties = loadCounterparties(tenantId, page);
-            List<StatementEntry> enriched = page.stream().map(e -> enrich(e, counterparties)).toList();
+            Map<TransactionId, PixDetail> pix = loadPixDetails(tenantId, page);
+            List<StatementEntry> enriched = page.stream()
+                    .map(e -> enrich(e, counterparties, pix.get(e.transactionId())))
+                    .toList();
             return new Statement(enriched, next);
         });
+    }
+
+    /** Same batching as the counterparties: one query for every Pix entry of the page. */
+    private Map<TransactionId, PixDetail> loadPixDetails(TenantId tenantId, List<LedgerEntry> page) {
+        Set<TransactionId> ids = page.stream()
+                .filter(e -> e.type().isPix())
+                .map(LedgerEntry::transactionId)
+                .collect(Collectors.toSet());
+        return ids.isEmpty() ? Map.of() : pixDetails.findByTransactions(tenantId, ids);
     }
 
     /** One batched lookup for the whole page, instead of one query per row with a counterparty. */
@@ -129,17 +148,18 @@ public final class QueryAccountService implements QueryAccountUseCase {
                 .collect(Collectors.toMap(item -> item.account().id(), Function.identity()));
     }
 
-    private static StatementEntry enrich(LedgerEntry e, Map<AccountId, AccountDirectoryItem> counterparties) {
+    private static StatementEntry enrich(LedgerEntry e, Map<AccountId, AccountDirectoryItem> counterparties,
+                                        PixDetail pix) {
         if (e.type() != TransactionType.TRANSFER || e.counterpartyAccountId() == null) {
-            return new StatementEntry(e, null, null);
+            return new StatementEntry(e, null, null, pix);
         }
         AccountDirectoryItem counterparty = counterparties.get(e.counterpartyAccountId());
         if (counterparty == null) {
             // Shouldn't happen for a genuine transfer counterparty - degrade gracefully rather
             // than fail the whole statement over a display-only enrichment.
-            return new StatementEntry(e, null, null);
+            return new StatementEntry(e, null, null, null);
         }
-        return new StatementEntry(e, counterparty.customerName(), counterparty.account().number().formatted());
+        return new StatementEntry(e, counterparty.customerName(), counterparty.account().number().formatted(), null);
     }
 
     private Account load(TenantId tenantId, AccountId accountId) {
