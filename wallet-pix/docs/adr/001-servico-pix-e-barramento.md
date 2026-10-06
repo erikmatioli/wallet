@@ -1,6 +1,8 @@
 # ADR-001 (wallet-pix) — Serviço Pix separado, falando com o SPI por SNS/SQS
 
-**Status:** aceita
+**Status:** aceita — a decisão 1 foi substituída em parte pela ADR-010 do wallet-core: o core agora
+conhece os tipos de transação Pix e guarda o detalhe de cada uma, e os lançamentos usam os
+endpoints `pix-credits`, `pix-debits` e o estorno como `PIX_REFUND`.
 
 ## Contexto
 A carteira precisa receber e enviar Pix. O fluxo é definido pelo Banco Central (Manual de

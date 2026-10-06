@@ -20,6 +20,7 @@ import br.com.walletpix.service.application.SendPixService.InitiateCommand;
 import br.com.walletpix.service.application.StatusReportRouter;
 import br.com.walletpix.service.application.port.PixPorts.DebitResult;
 import br.com.walletpix.service.application.port.PixPorts.PayerAccount;
+import br.com.walletpix.service.application.port.PixPorts;
 import br.com.walletpix.service.application.port.PixPorts.WalletCore;
 import br.com.walletpix.service.domain.HolderCheckResult;
 import br.com.walletpix.service.domain.SpiIds;
@@ -87,7 +88,8 @@ class PixPersistenceIntegrationTest {
         }
 
         @Override
-        public UUID credit(String ispb, UUID accountId, long cents, String description, String key) {
+        public UUID credit(String ispb, UUID accountId, long cents, String description, String key,
+                           PixPorts.PixRecord pix) {
             return transactionsByKey.computeIfAbsent(key, k -> {
                 credits.incrementAndGet();
                 return UUID.randomUUID();
@@ -100,15 +102,16 @@ class PixPersistenceIntegrationTest {
         }
 
         @Override
-        public DebitResult debit(String ispb, UUID accountId, long cents, String description, String key) {
+        public DebitResult debit(String ispb, UUID accountId, long cents, String description, String key,
+                                 PixPorts.PixRecord pix) {
             return new DebitResult.Debited(transactionsByKey.computeIfAbsent(key, k -> {
                 debits.incrementAndGet();
                 return UUID.randomUUID();
-            }));
+            }), pix.endToEndId());
         }
 
         @Override
-        public UUID reverse(String ispb, UUID debitTransactionId, String description) {
+        public UUID reverse(String ispb, UUID debitTransactionId, String description, String reasonCode) {
             return UUID.randomUUID();
         }
     }

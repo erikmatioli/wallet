@@ -57,6 +57,11 @@ class ReceivePixServiceTest {
         assertThat(p.status()).isEqualTo(Status.CREDITED);
         assertThat(f.creditCalls).containsExactly(order.e2e); // idempotency key = EndToEndId
         assertThat(f.creditedCentsByKey.get(order.e2e)).isEqualTo(15000);
+        var pix = f.pixRecordsByKey.get(order.e2e);
+        assertThat(pix.endToEndId()).isEqualTo(order.e2e);
+        assertThat(pix.returnId()).as("a PIX_IN, not a return").isNull();
+        assertThat(pix.counterparty().name()).isEqualTo(order.body.cdtTrfTxInf().dbtr().nm());
+        assertThat(pix.counterparty().ispb()).isEqualTo(order.body.cdtTrfTxInf().dbtrAgt().ispb());
         assertThat(f.events).extracting(e -> e.type()).containsExactly(EventType.PIX_RECEIVED);
     }
 

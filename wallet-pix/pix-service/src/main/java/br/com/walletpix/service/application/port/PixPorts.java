@@ -65,23 +65,52 @@ public final class PixPorts {
         HolderCheckResult checkHolder(String ispb, String branch, String number, String checkDigit, String taxId);
 
         /**
-         * Idempotent credit: calling again with the same key returns the original transaction id.
+         * Idempotent credit of a Pix received (PIX_IN) or, when {@code pix} has a return id, of a
+         * return received (PIX_RETURN_IN). Calling again with the same key returns the original
+         * transaction id.
          *
          * @return wallet-core transaction id
          */
-        UUID credit(String ispb, UUID accountId, long amountCents, String description, String idempotencyKey);
+        UUID credit(String ispb, UUID accountId, long amountCents, String description, String idempotencyKey,
+                    PixRecord pix);
 
         /** The payer's account as wallet-core knows it; empty when it doesn't exist for this tenant. */
         Optional<PayerAccount> findAccount(String ispb, UUID accountId);
 
         /**
-         * Idempotent debit (withdrawal), made with a token restricted to {@code pix:send}. The same
-         * key and payload return the original debit; the same key with another payload is refused.
+         * Idempotent debit of a Pix sent (PIX_OUT), made with a token restricted to {@code pix:send}.
+         * The same key and payload return the original debit - with the EndToEndId stored by the
+         * first attempt, which may differ from {@code pix.endToEndId()}; the same key with another
+         * payload is refused.
          */
-        DebitResult debit(String ispb, UUID accountId, long amountCents, String description, String idempotencyKey);
+        DebitResult debit(String ispb, UUID accountId, long amountCents, String description, String idempotencyKey,
+                          PixRecord pix);
 
-        /** Credits back exactly the given withdrawal; at most once per withdrawal (wallet-core enforces it). */
-        UUID reverse(String ispb, UUID debitTransactionId, String description);
+        /**
+         * Credits back exactly the given debit (a PIX_REFUND in wallet-core); at most once per debit
+         * (wallet-core enforces it).
+         */
+        UUID reverse(String ispb, UUID debitTransactionId, String description, String reasonCode);
+    }
+
+    /**
+     * What wallet-core records about the Pix next to the money movement (ADR-010 of wallet-core),
+     * so the customer's statement shows it without asking this service.
+     *
+     * @param returnId             only for a return
+     * @param relatedTransactionId the original Pix's wallet-core transaction, only for a return
+     * @param reasonCode           only for a return
+     */
+    public record PixRecord(String endToEndId, String returnId, UUID relatedTransactionId, Counterparty counterparty,
+                            String reasonCode, String remittanceInfo) {
+
+        public static PixRecord of(String endToEndId, Counterparty counterparty, String remittanceInfo) {
+            return new PixRecord(endToEndId, null, null, counterparty, null, remittanceInfo);
+        }
+    }
+
+    /** The other side of the Pix: the payee of a Pix sent, the payer of a Pix received. */
+    public record Counterparty(String name, String taxId, String ispb, String branch, String accountNumber) {
     }
 
     /** {@code accountWithDigit}: account number with the check digit appended, as on the bus. */
@@ -89,7 +118,8 @@ public final class PixPorts {
     }
 
     public sealed interface DebitResult {
-        record Debited(UUID transactionId) implements DebitResult {
+        /** {@code endToEndId}: the one wallet-core stored with the debit - use it for the Pix. */
+        record Debited(UUID transactionId, String endToEndId) implements DebitResult {
         }
 
         /** wallet-core refused the debit (e.g. INSUFFICIENT_FUNDS, ACCOUNT_NOT_ACTIVE); nothing was moved. */

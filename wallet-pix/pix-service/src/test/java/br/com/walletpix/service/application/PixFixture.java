@@ -38,6 +38,9 @@ final class PixFixture {
     final List<String> creditCalls = new ArrayList<>();
     final Map<String, UUID> creditsByKey = new HashMap<>();
     final Map<String, Long> creditedCentsByKey = new HashMap<>();
+    /** What was sent to wallet-core about each Pix, per idempotency key (credits and debits). */
+    final Map<String, PixPorts.PixRecord> pixRecordsByKey = new HashMap<>();
+    final Map<UUID, String> reversalReasons = new HashMap<>();
     int holderCheckCalls = 0;
     boolean walletCoreDown = false;
 
@@ -119,11 +122,13 @@ final class PixFixture {
         }
 
         @Override
-        public UUID credit(String ispb, UUID accountId, long cents, String description, String key) {
+        public UUID credit(String ispb, UUID accountId, long cents, String description, String key,
+                           PixPorts.PixRecord pix) {
             if (walletCoreDown) {
                 throw new MessageFailures.RetryLater("wallet-core down");
             }
             creditCalls.add(key);
+            pixRecordsByKey.putIfAbsent(key, pix);
             creditedCentsByKey.putIfAbsent(key, cents);
             return creditsByKey.computeIfAbsent(key, k -> UUID.randomUUID());
         }
@@ -134,14 +139,16 @@ final class PixFixture {
         }
 
         @Override
-        public PixPorts.DebitResult debit(String ispb, UUID accountId, long cents, String description, String key) {
+        public PixPorts.DebitResult debit(String ispb, UUID accountId, long cents, String description, String key,
+                                          PixPorts.PixRecord pix) {
             debitCalls++;
             if (walletCoreDown) {
                 throw new MessageFailures.RetryLater("wallet-core down");
             }
             UUID existing = debitsByKey.get(key);
             if (existing != null) {
-                return new PixPorts.DebitResult.Debited(existing); // idempotent replay, like wallet-core
+                // idempotent replay, like wallet-core: the EndToEndId of the first attempt comes back
+                return new PixPorts.DebitResult.Debited(existing, pixRecordsByKey.get(key).endToEndId());
             }
             long balance = balances.getOrDefault(accountId, 0L);
             if (balance < cents) {
@@ -152,14 +159,16 @@ final class PixFixture {
             debitsByKey.put(key, id);
             debitAmounts.put(id, cents);
             debitAccounts.put(id, accountId);
-            return new PixPorts.DebitResult.Debited(id);
+            pixRecordsByKey.put(key, pix);
+            return new PixPorts.DebitResult.Debited(id, pix.endToEndId());
         }
 
         @Override
-        public UUID reverse(String ispb, UUID debitTransactionId, String description) {
+        public UUID reverse(String ispb, UUID debitTransactionId, String description, String reasonCode) {
             if (walletCoreDown) {
                 throw new MessageFailures.RetryLater("wallet-core down");
             }
+            reversalReasons.putIfAbsent(debitTransactionId, reasonCode);
             return reversalsByDebit.computeIfAbsent(debitTransactionId, d -> {
                 balances.merge(debitAccounts.get(d), debitAmounts.get(d), Long::sum);
                 return UUID.randomUUID();
