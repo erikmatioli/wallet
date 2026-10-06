@@ -44,7 +44,7 @@ export class Home implements OnInit {
     this.api.listAccounts(reset ? undefined : (this.cursor() ?? undefined)).subscribe({
       next: (page) => {
         this.items.set(reset ? page.items : [...this.items(), ...page.items]);
-        this.cursor.set(page.nextCursor);
+        this.cursor.set(page.nextCursor ?? null);
         this.loading.set(false);
       },
       error: (err) => {
