@@ -1,0 +1,2269 @@
+{
+  "info": {
+    "_postman_id": "4aaddcf3-4e90-529d-99e1-3eb0aa0048a6",
+    "name": "Wallet Pix — fluxo completo (local)",
+    "description": "Recebimento e envio de Pix de ponta a ponta no ambiente local (wallet-core + wallet-pix). Rode as pastas em ordem, ou a coleção inteira no Runner. Cada execução cria clientes novos. Guia: wallet-pix/docs/guia-testes-pix.md",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 · Saúde dos serviços",
+      "description": "Rode antes de tudo: os três precisam responder UP.",
+      "item": [
+        {
+          "name": "wallet-core",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{walletCoreUrl}}/actuator/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('UP', () => pm.expect(pm.response.json().status).to.eql('UP'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "pix-service",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{pixServiceUrl}}/actuator/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('UP', () => pm.expect(pm.response.json().status).to.eql('UP'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "spi-simulator",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{simulatorUrl}}/actuator/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('UP', () => pm.expect(pm.response.json().status).to.eql('UP'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 · Autenticação",
+      "description": "Tokens do wallet-core (JWT, 10 min). `?scope=` só reduz escopos: o token pix:send é o que o pix-service aceita no envio. Se algo der 401 mais adiante, rode esta pasta de novo.",
+      "item": [
+        {
+          "name": "Token completo — demo-tenant (ISPB 12345678)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/auth/token",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{tenant1ClientId}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{tenant1Secret}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('t1Token', pm.response.json().access_token);",
+                  "pm.test('escopos: ' + pm.response.json().scope, () => pm.expect(pm.response.json().scope).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token pix:send — demo-tenant",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/auth/token?scope=pix:send",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{tenant1ClientId}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{tenant1Secret}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('t1SendToken', pm.response.json().access_token);",
+                  "pm.test('escopos: ' + pm.response.json().scope, () => pm.expect(pm.response.json().scope).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token só accounts:read — demo-tenant (para o teste de 403)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/auth/token?scope=accounts:read",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{tenant1ClientId}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{tenant1Secret}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('t1ReadOnlyToken', pm.response.json().access_token);",
+                  "pm.test('escopos: ' + pm.response.json().scope, () => pm.expect(pm.response.json().scope).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token completo — segundo-tenant (ISPB 87654321)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/auth/token",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{tenant2ClientId}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{tenant2Secret}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('t2Token', pm.response.json().access_token);",
+                  "pm.test('escopos: ' + pm.response.json().scope, () => pm.expect(pm.response.json().scope).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token pix:send — segundo-tenant",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/auth/token?scope=pix:send",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{tenant2ClientId}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{tenant2Secret}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('t2SendToken', pm.response.json().access_token);",
+                  "pm.test('escopos: ' + pm.response.json().scope, () => pm.expect(pm.response.json().scope).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 · Preparação das contas",
+      "description": "Cria clientes novos a cada execução (CPF válido gerado no pre-request), para nunca esbarrar em \"cliente já existe\". Maria (demo-tenant) recebe um depósito inicial de 500,00.",
+      "item": [
+        {
+          "name": "Onboarding Maria (demo-tenant)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{walletCoreUrl}}/v1/customers",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Maria Pagadora\",\n  \"taxId\": \"{{mariaCpf}}\",\n  \"externalRef\": \"postman-{{$timestamp}}-m\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function cpf() {",
+                  "  const d = Array.from({length: 9}, () => Math.floor(Math.random() * 10));",
+                  "  for (const n of [10, 11]) {",
+                  "    const s = d.reduce((acc, v, i) => acc + v * (n - i), 0);",
+                  "    const r = (s * 10) % 11;",
+                  "    d.push(r === 10 ? 0 : r);",
+                  "  }",
+                  "  return d.join('');",
+                  "}",
+                  "pm.collectionVariables.set('mariaCpf', cpf());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const a = pm.response.json().account;",
+                  "pm.collectionVariables.set('mariaAccountId', a.id);",
+                  "pm.collectionVariables.set('mariaBranch', a.branch);",
+                  "pm.collectionVariables.set('mariaAccount', a.number + a.checkDigit); // número + dígito, como no SPI",
+                  "pm.collectionVariables.set('mariaExpected', 0);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Depósito inicial 500,00 na Maria",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{walletCoreUrl}}/v1/accounts/{{mariaAccountId}}/deposits",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500.0,\n  \"description\": \"Saldo inicial (Postman)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mariaExpected', 500);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Onboarding João (segundo-tenant)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{walletCoreUrl}}/v1/customers",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"João Recebedor\",\n  \"taxId\": \"{{joaoCpf}}\",\n  \"externalRef\": \"postman-{{$timestamp}}-j\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function cpf() {",
+                  "  const d = Array.from({length: 9}, () => Math.floor(Math.random() * 10));",
+                  "  for (const n of [10, 11]) {",
+                  "    const s = d.reduce((acc, v, i) => acc + v * (n - i), 0);",
+                  "    const r = (s * 10) % 11;",
+                  "    d.push(r === 10 ? 0 : r);",
+                  "  }",
+                  "  return d.join('');",
+                  "}",
+                  "pm.collectionVariables.set('joaoCpf', cpf());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const a = pm.response.json().account;",
+                  "pm.collectionVariables.set('joaoAccountId', a.id);",
+                  "pm.collectionVariables.set('joaoBranch', a.branch);",
+                  "pm.collectionVariables.set('joaoAccount', a.number + a.checkDigit);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saldo Maria = 500,00",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/accounts/{{mariaAccountId}}/balance",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const expected = Number(pm.collectionVariables.get('mariaExpected'));",
+                  "pm.test('saldo = ' + expected, () => pm.expect(Number(pm.response.json().balance)).to.eql(expected));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 · Conferência de titularidade (wallet-core)",
+      "description": "O mesmo endpoint que o pix-service usa para autorizar um Pix recebido e para conferir o pagador. Nunca devolve dados do titular.",
+      "item": [
+        {
+          "name": "Agência + conta + CPF corretos → VALID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{walletCoreUrl}}/v1/accounts/holder-check",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"branch\": \"{{mariaBranch}}\",\n  \"number\": \"{{mariaNumber}}\",\n  \"checkDigit\": \"{{mariaDigit}}\",\n  \"taxId\": \"{{mariaCpf}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const acc = pm.collectionVariables.get('mariaAccount');",
+                  "pm.collectionVariables.set('mariaNumber', acc.slice(0, -1));",
+                  "pm.collectionVariables.set('mariaDigit', acc.slice(-1));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('VALID', () => pm.expect(pm.response.json().result).to.eql('VALID'));",
+                  "pm.test('accountId da Maria', () => pm.expect(pm.response.json().accountId).to.eql(pm.collectionVariables.get('mariaAccountId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CPF de outra pessoa → TAX_ID_MISMATCH",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{walletCoreUrl}}/v1/accounts/holder-check",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"branch\": \"{{mariaBranch}}\",\n  \"number\": \"{{mariaNumber}}\",\n  \"checkDigit\": \"{{mariaDigit}}\",\n  \"taxId\": \"11144477735\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('TAX_ID_MISMATCH', () => pm.expect(pm.response.json().result).to.eql('TAX_ID_MISMATCH'));",
+                  "pm.test('sem accountId', () => pm.expect(pm.response.json().accountId).to.be.undefined);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Conta inexistente → ACCOUNT_NOT_FOUND",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{walletCoreUrl}}/v1/accounts/holder-check",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"branch\": \"0001\",\n  \"number\": \"99999999\",\n  \"checkDigit\": \"0\",\n  \"taxId\": \"{{mariaCpf}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ACCOUNT_NOT_FOUND', () => pm.expect(pm.response.json().result).to.eql('ACCOUNT_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Conta da Maria vista pelo outro tenant → ACCOUNT_NOT_FOUND (RLS)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{walletCoreUrl}}/v1/accounts/holder-check",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"branch\": \"{{mariaBranch}}\",\n  \"number\": \"{{mariaNumber}}\",\n  \"checkDigit\": \"{{mariaDigit}}\",\n  \"taxId\": \"{{mariaCpf}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('isolamento entre tenants', () => pm.expect(pm.response.json().result).to.eql('ACCOUNT_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 · Recebimento (PSP externo → Maria)",
+      "description": "O simulador faz o papel de outro banco (ISPB 99999999) e do SPI. Fluxo: pacs.008 → pix-service confere a titularidade → pacs.002 ACSP/RJCT → SPI liquida (ACSC) → crédito.",
+      "item": [
+        {
+          "name": "Pix recebido válido (25,00)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{simulatorUrl}}/simulate/incoming",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payeeIspb\": \"12345678\",\n  \"branch\": \"{{mariaBranch}}\",\n  \"accountNumber\": \"{{mariaAccount}}\",\n  \"accountType\": \"TRAN\",\n  \"taxId\": \"{{mariaCpf}}\",\n  \"name\": \"Maria Recebedora\",\n  \"amount\": 25.0,\n  \"payerName\": \"Carlos do Banco Externo\",\n  \"description\": \"Pix de teste\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set('e2eIn', pm.response.json().endToEndId);",
+                  "setTimeout(() => {}, Number(pm.environment.get('asyncWaitMs') || 2500)); // processamento assíncrono (filas)"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saldo Maria = 525,00 (creditado uma vez)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/accounts/{{mariaAccountId}}/balance",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const expected = 525;",
+                  "pm.test('saldo = ' + expected, () => pm.expect(Number(pm.response.json().balance)).to.eql(expected));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Extrato mostra o Pix recebido",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/accounts/{{mariaAccountId}}/statement?limit=5",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const e = pm.response.json().entries.find(x => (x.description || '').includes(pm.collectionVariables.get('e2eIn')));",
+                  "pm.test('lançamento com o EndToEndId', () => pm.expect(e, 'lançamento do Pix').to.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CPF não é do titular → RJCT BE01",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{simulatorUrl}}/simulate/incoming",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payeeIspb\": \"12345678\",\n  \"branch\": \"{{mariaBranch}}\",\n  \"accountNumber\": \"{{mariaAccount}}\",\n  \"accountType\": \"TRAN\",\n  \"taxId\": \"11144477735\",\n  \"name\": \"Maria Recebedora\",\n  \"amount\": 10.0,\n  \"payerName\": \"Carlos do Banco Externo\",\n  \"description\": \"Pix de teste\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set('e2eBe01', pm.response.json().endToEndId);",
+                  "setTimeout(() => {}, Number(pm.environment.get('asyncWaitMs') || 2500)); // processamento assíncrono (filas)"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Conta inexistente → RJCT AC03",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{simulatorUrl}}/simulate/incoming",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payeeIspb\": \"12345678\",\n  \"branch\": \"{{mariaBranch}}\",\n  \"accountNumber\": \"999999990\",\n  \"accountType\": \"TRAN\",\n  \"taxId\": \"{{mariaCpf}}\",\n  \"name\": \"Maria Recebedora\",\n  \"amount\": 10.0,\n  \"payerName\": \"Carlos do Banco Externo\",\n  \"description\": \"Pix de teste\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set('e2eAc03', pm.response.json().endToEndId);",
+                  "setTimeout(() => {}, Number(pm.environment.get('asyncWaitMs') || 2500)); // processamento assíncrono (filas)"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tipo de conta errado (CACC) → RJCT AC14",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{simulatorUrl}}/simulate/incoming",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payeeIspb\": \"12345678\",\n  \"branch\": \"{{mariaBranch}}\",\n  \"accountNumber\": \"{{mariaAccount}}\",\n  \"accountType\": \"CACC\",\n  \"taxId\": \"{{mariaCpf}}\",\n  \"name\": \"Maria Recebedora\",\n  \"amount\": 10.0,\n  \"payerName\": \"Carlos do Banco Externo\",\n  \"description\": \"Pix de teste\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set('e2eAc14', pm.response.json().endToEndId);",
+                  "setTimeout(() => {}, Number(pm.environment.get('asyncWaitMs') || 2500)); // processamento assíncrono (filas)"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Conferir as rejeições no SPI simulado",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{simulatorUrl}}/simulate/messages"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const msgs = pm.response.json();",
+                  "function rjct(e2e) { const m = msgs.find(x => x.endToEndId === e2e && x.direction === 'in' && x.status === 'RJCT'); return m && m.reason; }",
+                  "pm.test('BE01', () => pm.expect(rjct(pm.collectionVariables.get('e2eBe01'))).to.eql('BE01'));",
+                  "pm.test('AC03', () => pm.expect(rjct(pm.collectionVariables.get('e2eAc03'))).to.eql('AC03'));",
+                  "pm.test('AC14', () => pm.expect(rjct(pm.collectionVariables.get('e2eAc14'))).to.eql('AC14'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saldo Maria continua 525,00 (rejeições não creditam)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/accounts/{{mariaAccountId}}/balance",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const expected = 525;",
+                  "pm.test('saldo = ' + expected, () => pm.expect(Number(pm.response.json().balance)).to.eql(expected));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 · Envio (Maria → João e → PSP externo)",
+      "description": "API do pix-service com token pix:send. 202 = Maria debitada e pacs.008 a caminho; o desfecho chega pelo SPI e é consultado no GET.",
+      "item": [
+        {
+          "name": "Maria → João (outro tenant) 30,00",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{sendKey1}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"{{mariaCpf}}\",\n  \"payee\": {\n    \"ispb\": \"87654321\",\n    \"branch\": \"{{joaoBranch}}\",\n    \"accountNumber\": \"{{joaoAccount}}\",\n    \"taxId\": \"{{joaoCpf}}\",\n    \"name\": \"João Recebedor\"\n  },\n  \"amount\": 30.0,\n  \"description\": \"Teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sendKey1', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.test('tem EndToEndId', () => pm.expect(pm.response.json().endToEndId).to.match(/^E\\d{20}[A-Za-z0-9]{11}$/));",
+                  "pm.collectionVariables.set('e2eOut1', pm.response.json().endToEndId);",
+                  "setTimeout(() => {}, Number(pm.environment.get('asyncWaitMs') || 2500)); // processamento assíncrono (filas)",
+                  "pm.test('SENT', () => pm.expect(pm.response.json().status).to.eql('SENT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Status → COMPLETED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{pixServiceUrl}}/v1/pix/payments/{{e2eOut1}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status COMPLETED', () => pm.expect(pm.response.json().status).to.eql('COMPLETED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saldo João = 30,00",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/accounts/{{joaoAccountId}}/balance",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const expected = 30;",
+                  "pm.test('saldo = ' + expected, () => pm.expect(Number(pm.response.json().balance)).to.eql(expected));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saldo Maria = 495,00",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/accounts/{{mariaAccountId}}/balance",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const expected = 495;",
+                  "pm.test('saldo = ' + expected, () => pm.expect(Number(pm.response.json().balance)).to.eql(expected));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mesma Idempotency-Key → 200, mesmo E2E, sem novo débito",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{sendKey1}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"{{mariaCpf}}\",\n  \"payee\": {\n    \"ispb\": \"87654321\",\n    \"branch\": \"{{joaoBranch}}\",\n    \"accountNumber\": \"{{joaoAccount}}\",\n    \"taxId\": \"{{joaoCpf}}\",\n    \"name\": \"João Recebedor\"\n  },\n  \"amount\": 30.0,\n  \"description\": \"Teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('tem EndToEndId', () => pm.expect(pm.response.json().endToEndId).to.match(/^E\\d{20}[A-Za-z0-9]{11}$/));",
+                  "pm.test('mesmo EndToEndId', () => pm.expect(pm.response.json().endToEndId).to.eql(pm.collectionVariables.get('e2eOut1')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mesma chave, outro valor → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{sendKey1}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"{{mariaCpf}}\",\n  \"payee\": {\n    \"ispb\": \"87654321\",\n    \"branch\": \"{{joaoBranch}}\",\n    \"accountNumber\": \"{{joaoAccount}}\",\n    \"taxId\": \"{{joaoCpf}}\",\n    \"name\": \"João Recebedor\"\n  },\n  \"amount\": 31.0,\n  \"description\": \"Teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('code IDEMPOTENCY_KEY_REUSED', () => pm.expect(pm.response.json().code).to.eql('IDEMPOTENCY_KEY_REUSED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saldo Maria ainda 495,00",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/accounts/{{mariaAccountId}}/balance",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const expected = 495;",
+                  "pm.test('saldo = ' + expected, () => pm.expect(Number(pm.response.json().balance)).to.eql(expected));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Maria → PSP externo 20,00 (aceito)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{sendKey2}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"{{mariaCpf}}\",\n  \"payee\": {\n    \"ispb\": \"99999999\",\n    \"branch\": \"0042\",\n    \"accountNumber\": \"1234565\",\n    \"taxId\": \"11144477735\",\n    \"name\": \"Fulano PSP Externo\"\n  },\n  \"amount\": 20.0,\n  \"description\": \"Teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sendKey2', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.test('tem EndToEndId', () => pm.expect(pm.response.json().endToEndId).to.match(/^E\\d{20}[A-Za-z0-9]{11}$/));",
+                  "pm.collectionVariables.set('e2eOut2', pm.response.json().endToEndId);",
+                  "setTimeout(() => {}, Number(pm.environment.get('asyncWaitMs') || 2500)); // processamento assíncrono (filas)"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Status → COMPLETED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{pixServiceUrl}}/v1/pix/payments/{{e2eOut2}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status COMPLETED', () => pm.expect(pm.response.json().status).to.eql('COMPLETED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Maria → PSP externo 10,99 (externo rejeita valores terminados em ,99)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{sendKey3}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"{{mariaCpf}}\",\n  \"payee\": {\n    \"ispb\": \"99999999\",\n    \"branch\": \"0042\",\n    \"accountNumber\": \"1234565\",\n    \"taxId\": \"11144477735\",\n    \"name\": \"Fulano PSP Externo\"\n  },\n  \"amount\": 10.99,\n  \"description\": \"Teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sendKey3', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.test('tem EndToEndId', () => pm.expect(pm.response.json().endToEndId).to.match(/^E\\d{20}[A-Za-z0-9]{11}$/));",
+                  "pm.collectionVariables.set('e2eOut3', pm.response.json().endToEndId);",
+                  "setTimeout(() => {}, Number(pm.environment.get('asyncWaitMs') || 2500)); // processamento assíncrono (filas)"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Status → REFUNDED, motivo AC03 (débito estornado)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{pixServiceUrl}}/v1/pix/payments/{{e2eOut3}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status REFUNDED', () => pm.expect(pm.response.json().status).to.eql('REFUNDED'));",
+                  "pm.test('motivo AC03', () => pm.expect(pm.response.json().reasonCode).to.eql('AC03'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saldo Maria = 475,00 (os 10,99 voltaram)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/accounts/{{mariaAccountId}}/balance",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const expected = 475;",
+                  "pm.test('saldo = ' + expected, () => pm.expect(Number(pm.response.json().balance)).to.eql(expected));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PSP externo devolve 5,00 do Pix de 20,00 (pacs.004)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{simulatorUrl}}/simulate/return",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endToEndId\": \"{{e2eOut2}}\",\n  \"amount\": 5.0,\n  \"reason\": \"MD06\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "setTimeout(() => {}, Number(pm.environment.get('asyncWaitMs') || 2500)); // processamento assíncrono (filas)"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Status → RETURNED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{pixServiceUrl}}/v1/pix/payments/{{e2eOut2}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status RETURNED', () => pm.expect(pm.response.json().status).to.eql('RETURNED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saldo Maria = 480,00 (devolução creditada)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/accounts/{{mariaAccountId}}/balance",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const expected = 480;",
+                  "pm.test('saldo = ' + expected, () => pm.expect(Number(pm.response.json().balance)).to.eql(expected));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 · Recusas da API de envio",
+      "description": "Nada aqui pode debitar: o saldo da Maria precisa continuar 480,00 no fim.",
+      "item": [
+        {
+          "name": "Saldo insuficiente → 422 INSUFFICIENT_FUNDS",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{sendKeyR1}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"{{mariaCpf}}\",\n  \"payee\": {\n    \"ispb\": \"99999999\",\n    \"branch\": \"0042\",\n    \"accountNumber\": \"1234565\",\n    \"taxId\": \"11144477735\",\n    \"name\": \"Fulano PSP Externo\"\n  },\n  \"amount\": 4999.0,\n  \"description\": \"Teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sendKeyR1', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));",
+                  "pm.test('code INSUFFICIENT_FUNDS', () => pm.expect(pm.response.json().code).to.eql('INSUFFICIENT_FUNDS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Acima do limite por transação (5000,00) → 422 POLICY_MAX_AMOUNT",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{sendKeyR2}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"{{mariaCpf}}\",\n  \"payee\": {\n    \"ispb\": \"99999999\",\n    \"branch\": \"0042\",\n    \"accountNumber\": \"1234565\",\n    \"taxId\": \"11144477735\",\n    \"name\": \"Fulano PSP Externo\"\n  },\n  \"amount\": 6000.0,\n  \"description\": \"Teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sendKeyR2', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));",
+                  "pm.test('code POLICY_MAX_AMOUNT', () => pm.expect(pm.response.json().code).to.eql('POLICY_MAX_AMOUNT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CPF do pagador não é do titular → 422 PAYER_TAX_ID_MISMATCH",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{sendKeyR3}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"11144477735\",\n  \"payee\": {\n    \"ispb\": \"99999999\",\n    \"branch\": \"0042\",\n    \"accountNumber\": \"1234565\",\n    \"taxId\": \"11144477735\",\n    \"name\": \"Fulano PSP Externo\"\n  },\n  \"amount\": 1.0,\n  \"description\": \"Teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sendKeyR3', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));",
+                  "pm.test('code PAYER_TAX_ID_MISMATCH', () => pm.expect(pm.response.json().code).to.eql('PAYER_TAX_ID_MISMATCH'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token sem pix:send → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{sendKeyR4}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"{{mariaCpf}}\",\n  \"payee\": {\n    \"ispb\": \"99999999\",\n    \"branch\": \"0042\",\n    \"accountNumber\": \"1234565\",\n    \"taxId\": \"11144477735\",\n    \"name\": \"Fulano PSP Externo\"\n  },\n  \"amount\": 1.0,\n  \"description\": \"Teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1ReadOnlyToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sendKeyR4', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sem token → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"{{mariaCpf}}\",\n  \"payee\": {\n    \"ispb\": \"99999999\",\n    \"branch\": \"0042\",\n    \"accountNumber\": \"1234565\",\n    \"taxId\": \"11144477735\",\n    \"name\": \"Fulano PSP Externo\"\n  },\n  \"amount\": 1.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sem Idempotency-Key → 400 IDEMPOTENCY_KEY_REQUIRED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"{{mariaCpf}}\",\n  \"payee\": {\n    \"ispb\": \"99999999\",\n    \"branch\": \"0042\",\n    \"accountNumber\": \"1234565\",\n    \"taxId\": \"11144477735\",\n    \"name\": \"Fulano PSP Externo\"\n  },\n  \"amount\": 1.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('code IDEMPOTENCY_KEY_REQUIRED', () => pm.expect(pm.response.json().code).to.eql('IDEMPOTENCY_KEY_REQUIRED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ISPB do recebedor inválido → 400 VALIDATION_FAILED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{pixServiceUrl}}/v1/pix/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerAccountId\": \"{{mariaAccountId}}\",\n  \"payerTaxId\": \"{{mariaCpf}}\",\n  \"payee\": {\n    \"ispb\": \"123\",\n    \"branch\": \"0042\",\n    \"accountNumber\": \"1234565\",\n    \"taxId\": \"11144477735\",\n    \"name\": \"Fulano PSP Externo\"\n  },\n  \"amount\": 1.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('code VALIDATION_FAILED', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_FAILED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Outro tenant consulta o Pix da Maria → 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{pixServiceUrl}}/v1/pix/payments/{{e2eOut1}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t2SendToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saldo Maria continua 480,00",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{walletCoreUrl}}/v1/accounts/{{mariaAccountId}}/balance",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{t1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const expected = 480;",
+                  "pm.test('saldo = ' + expected, () => pm.expect(Number(pm.response.json().balance)).to.eql(expected));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 · Mensagens e eventos",
+      "description": "Para inspecionar o que aconteceu por baixo.",
+      "item": [
+        {
+          "name": "Mensagens que passaram pelo SPI simulado",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{simulatorUrl}}/simulate/messages",
+            "description": "Últimas 200 mensagens: direção (in = recebida dos PSPs, out = enviada), tipo, de/para, EndToEndId, status e motivo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PixEvents publicados (fila pix-events-dev)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{localstackUrl}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "Action",
+                  "value": "ReceiveMessage"
+                },
+                {
+                  "key": "QueueUrl",
+                  "value": "{{localstackUrl}}/000000000000/pix-events-dev"
+                },
+                {
+                  "key": "MaxNumberOfMessages",
+                  "value": "10"
+                },
+                {
+                  "key": "WaitTimeSeconds",
+                  "value": "1"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Lê até 10 eventos (XML do SQS). Eles são apagados só se você rodar a remoção; este pedido apenas os torna invisíveis por alguns segundos."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('resposta do SQS', () => pm.expect(pm.response.text()).to.include('ReceiveMessageResponse'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mensagens na DLQ (falhas definitivas)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{localstackUrl}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "Action",
+                  "value": "GetQueueAttributes"
+                },
+                {
+                  "key": "QueueUrl",
+                  "value": "{{localstackUrl}}/000000000000/wallet-pix-spi-inbound-dlq"
+                },
+                {
+                  "key": "AttributeName.1",
+                  "value": "ApproximateNumberOfMessages"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 · Limpeza (opcional)",
+      "description": "Não apaga dados do wallet-core: os clientes criados ficam (externalRef postman-*).",
+      "item": [
+        {
+          "name": "Esvaziar a DLQ",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{localstackUrl}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "Action",
+                  "value": "PurgeQueue"
+                },
+                {
+                  "key": "QueueUrl",
+                  "value": "{{localstackUrl}}/000000000000/wallet-pix-spi-inbound-dlq"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Esvaziar a fila de eventos",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{localstackUrl}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "Action",
+                  "value": "PurgeQueue"
+                },
+                {
+                  "key": "QueueUrl",
+                  "value": "{{localstackUrl}}/000000000000/pix-events-dev"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "t1Token",
+      "value": ""
+    },
+    {
+      "key": "t1SendToken",
+      "value": ""
+    },
+    {
+      "key": "t1ReadOnlyToken",
+      "value": ""
+    },
+    {
+      "key": "t2Token",
+      "value": ""
+    },
+    {
+      "key": "t2SendToken",
+      "value": ""
+    },
+    {
+      "key": "mariaCpf",
+      "value": ""
+    },
+    {
+      "key": "mariaAccountId",
+      "value": ""
+    },
+    {
+      "key": "mariaBranch",
+      "value": ""
+    },
+    {
+      "key": "mariaAccount",
+      "value": ""
+    },
+    {
+      "key": "mariaNumber",
+      "value": ""
+    },
+    {
+      "key": "mariaDigit",
+      "value": ""
+    },
+    {
+      "key": "mariaExpected",
+      "value": ""
+    },
+    {
+      "key": "joaoCpf",
+      "value": ""
+    },
+    {
+      "key": "joaoAccountId",
+      "value": ""
+    },
+    {
+      "key": "joaoBranch",
+      "value": ""
+    },
+    {
+      "key": "joaoAccount",
+      "value": ""
+    },
+    {
+      "key": "e2eIn",
+      "value": ""
+    },
+    {
+      "key": "e2eBe01",
+      "value": ""
+    },
+    {
+      "key": "e2eAc03",
+      "value": ""
+    },
+    {
+      "key": "e2eAc14",
+      "value": ""
+    },
+    {
+      "key": "e2eOut1",
+      "value": ""
+    },
+    {
+      "key": "e2eOut2",
+      "value": ""
+    },
+    {
+      "key": "e2eOut3",
+      "value": ""
+    },
+    {
+      "key": "sendKey1",
+      "value": ""
+    },
+    {
+      "key": "sendKey2",
+      "value": ""
+    },
+    {
+      "key": "sendKey3",
+      "value": ""
+    },
+    {
+      "key": "sendKeyR1",
+      "value": ""
+    },
+    {
+      "key": "sendKeyR2",
+      "value": ""
+    },
+    {
+      "key": "sendKeyR3",
+      "value": ""
+    },
+    {
+      "key": "sendKeyR4",
+      "value": ""
+    }
+  ]
+}

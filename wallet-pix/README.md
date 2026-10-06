@@ -155,6 +155,21 @@ Identificadores no formato do SPI:
 
 O estado fica em memória: reiniciar o simulador esquece os Pix em andamento.
 
+## Testar o fluxo inteiro (Postman ou curl)
+
+[`docs/guia-testes-pix.md`](docs/guia-testes-pix.md) traz o roteiro completo: recebimento,
+rejeições, envio, replay, estorno, devolução e recusas, com o resultado esperado de cada passo,
+em Postman e em curl. A coleção pronta para importar fica em `postman/`:
+- `wallet-pix.postman_collection.json`;
+- `wallet-pix-local.postman_environment.json`.
+
+Ela roda inteira no Runner e cria clientes novos a cada execução. Também roda pela linha de
+comando:
+
+```bash
+npx newman run postman/wallet-pix.postman_collection.json -e postman/wallet-pix-local.postman_environment.json
+```
+
 ## Script de desenvolvimento
 
 `scripts/pixdev.py` usa só a biblioteca padrão do Python:
