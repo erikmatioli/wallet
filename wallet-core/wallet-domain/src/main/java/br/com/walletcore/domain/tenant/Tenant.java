@@ -31,9 +31,13 @@ public record Tenant(
      * <p>{@code pix:receive} is its incoming counterpart: credit an incoming Pix or a return
      * (PIX_IN, PIX_RETURN_IN), always with the Pix detail and the core's Pix rules - never a free
      * deposit, which stays {@code ledger:write} (ADR-010).
+     *
+     * <p>{@code schedules:read} and {@code schedules:write} are not checked by wallet-core itself:
+     * they are for wallet-scheduler's API, which accepts wallet-core's tokens (ADR-001 of
+     * wallet-scheduler) - wallet-core is the one identity provider of the platform.
      */
-    public static final Set<String> DEFAULT_SCOPES =
-            Set.of("customers:write", "accounts:read", "ledger:write", "ledger:audit", "pix:send", "pix:receive");
+    public static final Set<String> DEFAULT_SCOPES = Set.of("customers:write", "accounts:read", "ledger:write",
+            "ledger:audit", "pix:send", "pix:receive", "schedules:read", "schedules:write");
 
     private static final Pattern CLIENT_ID = Pattern.compile("[a-z0-9][a-z0-9-]{2,62}");
     private static final Pattern ISPB = Pattern.compile("[0-9]{8}");
