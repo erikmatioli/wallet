@@ -175,3 +175,67 @@ export interface AccountListResponse {
   items: AccountListItem[];
   nextCursor: string | null;
 }
+
+// ---------------------------------------------------------------- wallet-scheduler (its ADR-001)
+
+export type ScheduleType = 'TRANSFER' | 'PIX';
+export type ScheduleStatus = 'ACTIVE' | 'CANCELLED' | 'COMPLETED';
+export type ExecutionStatus = 'PENDING' | 'PROCESSING' | 'EXECUTED' | 'FAILED' | 'CANCELLED';
+
+export interface ScheduleReason {
+  code: string;
+  message: string;
+  /** Whether a later window of the same day may still succeed. */
+  retryToday: boolean;
+}
+
+export interface ScheduleAttempt {
+  number: number;
+  startedAt: string;
+  finishedAt: string | null;
+  /** Null while the result is unknown or, for a Pix, while its settlement is awaited. */
+  outcome: 'EXECUTED' | 'REFUSED' | null;
+  reason: ScheduleReason | null;
+  transactionId: string | null;
+  endToEndId: string | null;
+}
+
+export interface ScheduleResponse {
+  id: string;
+  type: ScheduleType;
+  status: ScheduleStatus;
+  payerAccountId: string;
+  /** Set for a TRANSFER. */
+  destination: { branch: string; number: string; checkDigit: string; accountId: string; holderName: string } | null;
+  /** Set for a PIX. The CPF/CNPJ only masked. */
+  pixPayee: { ispb: string; branch: string; accountNumber: string; taxIdMasked: string; name: string } | null;
+  amount: number;
+  description: string | null;
+  executeOn: string;
+  createdAt: string;
+  cancelledAt: string | null;
+  execution: {
+    status: ExecutionStatus;
+    attemptCount: number;
+    nextAttemptAt: string | null;
+    /** The wallet-core transaction that moved the money (for a Pix, its debit). */
+    transactionId: string | null;
+    endToEndId: string | null;
+    /** The last refusal - also while a later window of the day is still to come. */
+    failure: ScheduleReason | null;
+  };
+  attempts: ScheduleAttempt[];
+}
+
+export interface CreateScheduleRequest {
+  type: ScheduleType;
+  payerAccountId: string;
+  executeOn: string;
+  amount: number;
+  description?: string;
+  destination?: { branch: string; number: string; checkDigit: string };
+  pix?: {
+    payerTaxId: string;
+    payee: { ispb: string; branch: string; accountNumber: string; taxId: string; name: string };
+  };
+}

@@ -1,4 +1,9 @@
 {
+  "/v1/schedules": {
+    "target": "http://localhost:8082",
+    "secure": false,
+    "logLevel": "debug"
+  },
   "/v1/**": {
     "target": "http://localhost:8080",
     "secure": false,
