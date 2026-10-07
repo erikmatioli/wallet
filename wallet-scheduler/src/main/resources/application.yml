@@ -1,0 +1,76 @@
+spring:
+  application:
+    name: wallet-scheduler
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/scheduler}
+    username: ${DB_USER:scheduler_app}
+    password: ${DB_PASSWORD:scheduler_app}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      connection-timeout: 3000
+  flyway:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/scheduler}
+    user: ${DB_MIGRATION_USER:scheduler_owner}
+    password: ${DB_MIGRATION_PASSWORD:scheduler_owner}
+
+server:
+  port: ${PORT:8082}
+  shutdown: graceful
+
+logging:
+  pattern:
+    # tenant_id will come from the request (and the execution job); trace_id/span_id from the
+    # OpenTelemetry Java agent (see docker-compose.yml). Without them they print empty.
+    level: "%5p [tenant_id=%X{tenant_id:-},trace_id=%X{trace_id:-},span_id=%X{span_id:-}]"
+
+scheduler:
+  wallet-core:
+    base-url: ${WALLET_CORE_URL:http://localhost:8080}
+    jwk-set-uri: ${WALLET_CORE_URL:http://localhost:8080}/.well-known/jwks.json
+    issuer: wallet-core
+  pix:
+    base-url: ${PIX_SERVICE_URL:http://localhost:8081}
+  # Where wallet-pix publishes the result of each Pix (topic pix-payment-events); this service reads
+  # its own queue on that topic. LocalStack locally.
+  bus:
+    enabled: ${SCHEDULER_BUS_ENABLED:true}
+    endpoint: ${AWS_ENDPOINT_URL:http://localhost:4566}
+    region: ${AWS_REGION:us-east-1}
+    access-key: ${AWS_ACCESS_KEY_ID:test}
+    secret-key: ${AWS_SECRET_ACCESS_KEY:test}
+    pix-events-queue: ${SCHEDULER_PIX_EVENTS_QUEUE:wallet-scheduler-pix-events}
+  # One entry per wallet-core tenant this service pays for: on the day, each schedule is paid as the
+  # tenant that created it. Defaults are the two tenants wallet-core's "dev" profile seeds.
+  tenants:
+    - client-id: ${SCHEDULER_TENANT_1_CLIENT_ID:demo-tenant}
+      client-secret: ${SCHEDULER_TENANT_1_CLIENT_SECRET:demo-secret-change-me-please}
+    - client-id: ${SCHEDULER_TENANT_2_CLIENT_ID:segundo-tenant}
+      client-secret: ${SCHEDULER_TENANT_2_CLIENT_SECRET:segundo-tenant-secret-please}
+  # The times of day a schedule is tried (ADR-001, decision 5): the first runs it, the others retry
+  # a refusal that can change within the day (insufficient funds, temporary block).
+  windows:
+    zone: America/Sao_Paulo
+    times: ["06:00", "12:00", "18:00"]
+  job:
+    poll-interval: ${SCHEDULER_POLL_INTERVAL:30s}
+    batch-size: 50
+    lease: 2m
+    unknown-retry-in: 1m
+    # A sent Pix waits this long for its result event before the job asks wallet-pix again.
+    pix-result-wait: 10m
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
