@@ -1,0 +1,59 @@
+@use '../../../../styles/dialog' as *;
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+
+  &.ok {
+    background: var(--color-success-bg);
+    color: var(--color-success-text);
+    border-color: var(--color-success-border);
+  }
+
+  &.bad {
+    background: var(--color-danger-bg);
+    color: var(--color-danger-text);
+    border-color: var(--color-danger-border);
+  }
+}
+
+.attempts {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.88rem;
+
+  li {
+    margin-bottom: 0.35rem;
+  }
+}
+
+.attempt-time {
+  color: var(--color-text-muted);
+  margin-right: 0.5rem;
+}
+
+.detail-actions {
+  gap: 0.75rem;
+}
+
+.danger-button {
+  padding: 0.6rem 1.1rem;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-danger-text);
+  border: 1px solid var(--color-danger-border);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+}

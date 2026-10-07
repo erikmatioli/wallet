@@ -1,0 +1,55 @@
+# Scheduler service. Runs NEXT TO wallet-core's compose (and wallet-pix's, for Pix schedules): it joins
+# wallet-core's network to reach postgres, otel-collector, wallet-core:8080, pix-service:8081 and
+# localstack:4566 (where its queue on the pix-payment-events topic lives, see wallet-pix/docker/localstack).
+#
+#   (cd ../wallet-core && docker compose up -d)
+#   (cd ../wallet-pix && docker compose up -d)
+#   docker compose up -d --build
+services:
+  scheduler-db-init:
+    # Creates the "scheduler" database and roles on wallet-core's Postgres, then exits.
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: wallet_owner          # wallet-core's superuser, only to create the scheduler database/roles
+      PGPASSWORD: wallet_owner
+      PGDATABASE: wallet
+    volumes:
+      - ./docker/postgres/init-scheduler-db.sh:/init-scheduler-db.sh:ro
+    command: ["sh", "/init-scheduler-db.sh"]
+    restart: "no"
+
+  wallet-scheduler:
+    build: .
+    depends_on:
+      scheduler-db-init:
+        condition: service_completed_successfully
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/scheduler
+      DB_USER: scheduler_app
+      DB_PASSWORD: scheduler_app
+      DB_MIGRATION_USER: scheduler_owner
+      DB_MIGRATION_PASSWORD: scheduler_owner
+      WALLET_CORE_URL: http://wallet-core:8080
+      # wallet-pix's compose (pix-service, LocalStack) must be up for Pix schedules; transfers do not need it.
+      PIX_SERVICE_URL: http://pix-service:8081
+      AWS_ENDPOINT_URL: http://localstack:4566
+      SCHEDULER_POLL_INTERVAL: 10s         # 30s by default; shorter locally so a test does not wait
+
+      JAVA_TOOL_OPTIONS: "-javaagent:/app/opentelemetry-javaagent.jar"
+      OTEL_SERVICE_NAME: wallet-scheduler
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_TRACES_EXPORTER: "otlp"
+      OTEL_METRICS_EXPORTER: "none"     # metrics are scraped from /actuator/prometheus
+      OTEL_LOGS_EXPORTER: "otlp"
+      OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_MDC_ATTRIBUTES: "tenant_id"
+      OTEL_TRACES_SAMPLER: "always_on"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=dev"
+    ports:
+      - "8082:8082"
+
+networks:
+  default:
+    name: wallet-core_default
+    external: true

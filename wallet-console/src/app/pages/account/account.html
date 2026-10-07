@@ -65,6 +65,10 @@
     }
   </div>
 
+  @if (account(); as acc) {
+    <app-account-schedules [accountId]="acc.id" />
+  }
+
   <h2 class="section-title">Depósito</h2>
   <form class="card inline-form" (ngSubmit)="submitDeposit()">
     <label>

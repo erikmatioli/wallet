@@ -7,9 +7,11 @@ import {
   AccountResponse,
   AuditResponse,
   BalanceResponse,
+  CreateScheduleRequest,
   MoneyMovementRequest,
   OnboardCustomerRequest,
   OnboardCustomerResponse,
+  ScheduleResponse,
   StatementResponse,
   TransactionResponse,
   TransferRequest,
@@ -20,6 +22,9 @@ import {
  * URL baked in): in dev, proxy.conf.json forwards /v1/** to the backend; in the Docker image,
  * nginx does the same reverse-proxying. The app never needs to know the backend's real address,
  * and there is no CORS configuration to keep in sync on the backend because of it.
+ *
+ * /v1/schedules is wallet-scheduler's API, not wallet-core's: the proxy and nginx route it there,
+ * and it accepts the same token.
  */
 @Injectable({ providedIn: 'root' })
 export class WalletApiService {
@@ -83,5 +88,20 @@ export class WalletApiService {
   lookupAccountByTaxId(taxId: string): Observable<AccountResponse> {
     const params = new HttpParams().set('taxId', taxId);
     return this.http.get<AccountResponse>('/v1/accounts/findByTaxId', { params });
+  }
+
+  /** A payer account's schedules, newest payment date first, each with its execution and attempts. */
+  listSchedules(payerAccountId: string): Observable<ScheduleResponse[]> {
+    return this.http.get<ScheduleResponse[]>('/v1/schedules', { params: new HttpParams().set('payerAccountId', payerAccountId) });
+  }
+
+  createSchedule(request: CreateScheduleRequest, idempotencyKey: string): Observable<ScheduleResponse> {
+    return this.http.post<ScheduleResponse>('/v1/schedules', request, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    });
+  }
+
+  cancelSchedule(id: string): Observable<ScheduleResponse> {
+    return this.http.post<ScheduleResponse>(`/v1/schedules/${id}/cancel`, null);
   }
 }

@@ -8,13 +8,14 @@ import { extractErrorMessage } from '../../core/http-error.util';
 import { AccountDetailResponse, AuditResponse, EntryResponse } from '../../core/models';
 import { counterpartyName, transactionLabel } from '../../core/transaction-labels';
 import { EntryDetail } from './entry-detail/entry-detail';
+import { AccountSchedules } from './schedules/account-schedules';
 import { ProblemBanner } from '../../shared/problem-banner/problem-banner';
 
 type TransferMethod = 'id' | 'number';
 
 @Component({
   selector: 'app-account',
-  imports: [FormsModule, RouterLink, DecimalPipe, DatePipe, ProblemBanner, EntryDetail],
+  imports: [FormsModule, RouterLink, DecimalPipe, DatePipe, ProblemBanner, EntryDetail, AccountSchedules],
   templateUrl: './account.html',
   styleUrl: './account.scss',
 })

@@ -1,0 +1,91 @@
+<dialog #dialog class="detail" (close)="selected.set(null)" (click)="closeOnBackdrop($event)">
+  @if (selected(); as s) {
+    <header class="detail-header">
+      <div>
+        <h3>{{ typeLabel(s) }} agendado</h3>
+        <span class="badge" [class.ok]="view(s).tone === 'ok'" [class.bad]="view(s).tone === 'bad'">{{ view(s).label }}</span>
+      </div>
+      <div class="detail-amount">{{ s.amount | number: '1.2-2' }}</div>
+    </header>
+
+    <dl>
+      <dt>Data do pagamento</dt>
+      <dd>{{ s.executeOn + 'T12:00:00' | date: 'dd/MM/yyyy' }}</dd>
+      @if (s.description) {
+        <dt>Descrição</dt>
+        <dd class="wrap">{{ s.description }}</dd>
+      }
+      <dt>Agendado em</dt>
+      <dd>{{ s.createdAt | date: 'dd/MM/yyyy HH:mm' }}</dd>
+      @if (s.cancelledAt) {
+        <dt>Cancelado em</dt>
+        <dd>{{ s.cancelledAt | date: 'dd/MM/yyyy HH:mm' }}</dd>
+      }
+    </dl>
+
+    <h4>Destino</h4>
+    <dl>
+      @if (s.destination; as d) {
+        <dt>Nome</dt>
+        <dd>{{ d.holderName }}</dd>
+        <dt>Agência / conta</dt>
+        <dd>{{ d.branch }} / {{ d.number }}-{{ d.checkDigit }}</dd>
+      }
+      @if (s.pixPayee; as p) {
+        <dt>Nome</dt>
+        <dd>{{ p.name }}</dd>
+        <dt>CPF/CNPJ</dt>
+        <dd>{{ p.taxIdMasked }}</dd>
+        <dt>Instituição (ISPB)</dt>
+        <dd>{{ p.ispb }}</dd>
+        <dt>Agência / conta</dt>
+        <dd>{{ p.branch }} / {{ p.accountNumber }}</dd>
+      }
+    </dl>
+
+    <h4>Resultado</h4>
+    <dl>
+      @if (s.execution.failure; as f) {
+        <dt>{{ s.execution.status === 'FAILED' ? 'Motivo' : 'Última recusa' }}</dt>
+        <dd>{{ f.message }} ({{ f.code }})</dd>
+      }
+      @if (s.execution.status === 'PENDING' && s.execution.nextAttemptAt) {
+        <dt>{{ s.execution.attemptCount > 0 ? 'Próxima tentativa' : 'Primeira tentativa' }}</dt>
+        <dd>{{ s.execution.nextAttemptAt | date: 'dd/MM/yyyy' }} às {{ time(s.execution.nextAttemptAt) }} (Brasília)</dd>
+      }
+      @if (s.execution.transactionId) {
+        <dt>{{ s.execution.status === 'FAILED' ? 'Débito estornado' : 'Transação' }}</dt>
+        <dd class="mono">{{ s.execution.transactionId }}</dd>
+      }
+      @if (s.execution.endToEndId) {
+        <dt>EndToEndId</dt>
+        <dd class="mono">{{ s.execution.endToEndId }}</dd>
+      }
+      @if (!s.execution.failure && !s.execution.transactionId && s.execution.status !== 'PENDING') {
+        <dt>Situação</dt>
+        <dd>{{ view(s).label }}</dd>
+      }
+    </dl>
+
+    @if (s.attempts.length) {
+      <h4>Tentativas</h4>
+      <ol class="attempts">
+        @for (a of s.attempts; track a.number) {
+          <li>
+            <span class="attempt-time">{{ a.startedAt | date: 'dd/MM HH:mm' }}</span>
+            <span>{{ attemptLabel(a) }}@if (a.reason) { — {{ a.reason.message }} }</span>
+          </li>
+        }
+      </ol>
+    }
+
+    <div class="detail-actions">
+      @if (canCancel(s)) {
+        <button type="button" class="danger-button" [disabled]="busy()" (click)="cancelRequested.emit(s.id)">
+          Cancelar agendamento
+        </button>
+      }
+      <button type="button" class="close-button" (click)="close()">Fechar</button>
+    </div>
+  }
+</dialog>
