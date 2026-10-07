@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -28,6 +29,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 class OutboxRelay {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxRelay.class);
+    /** Same key as TenantLoggingInterceptor (inbound adapter, which this module must not depend on). */
+    private static final String TENANT_MDC_KEY = "tenant_id";
 
     private final JdbcClient jdbc;
     private final TransactionTemplate tx;
@@ -75,7 +78,11 @@ class OutboxRelay {
                         Sql.instant(rs, "created_at")))
                 .list();
         for (OutboxMessage message : batch) {
-            publisher.publish(message);
+            // The relay runs on a scheduler thread, outside any request: put the event's own
+            // tenant in the MDC so what the publisher logs carries tenant_id like request logs do.
+            try (MDC.MDCCloseable ignored = MDC.putCloseable(TENANT_MDC_KEY, message.tenantId().toString())) {
+                publisher.publish(message);
+            }
             jdbc.sql("UPDATE outbox_event SET published_at = now() WHERE id = :id")
                     .param("id", message.id())
                     .update();
