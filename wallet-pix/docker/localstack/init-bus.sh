@@ -31,5 +31,7 @@ EVENTS=$(topic pix-payment-events)              # Pix service -> anyone interest
 subscribe "$SPI_TO_PSP" "$(queue wallet-pix-spi-inbound wallet-pix-spi-inbound-dlq)"
 subscribe "$PSP_TO_SPI" "$(queue spi-simulator-inbound)"
 subscribe "$EVENTS"     "$(queue pix-events-dev)"
+# wallet-scheduler: results of the Pix it sends (its ADR-001). Own queue and DLQ on the same topic.
+subscribe "$EVENTS"     "$(queue wallet-scheduler-pix-events wallet-scheduler-pix-events-dlq)"
 
 echo "Pix bus ready: topics spi-to-psp, psp-to-spi, pix-payment-events"
