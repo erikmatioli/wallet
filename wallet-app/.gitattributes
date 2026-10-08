@@ -1,0 +1,7 @@
+# gradlew and shell scripts run on Linux (CI, Docker): always LF, whatever the checkout's platform.
+gradlew text eol=lf
+*.sh text eol=lf
+# Windows scripts stay CRLF.
+*.bat text eol=crlf
+# The wrapper jar is binary.
+*.jar binary

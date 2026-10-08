@@ -1,0 +1,4 @@
+# The tests' own session key: app-api has no default one (each instance must be given its own).
+app:
+  session:
+    secret: test-only-secret-not-used-anywhere-else-0123456789

@@ -1,0 +1,10 @@
+build/
+.gradle/
+.kotlin/
+*.class
+*.log
+.idea/
+*.iml
+.vscode/
+.DS_Store
+*.pem

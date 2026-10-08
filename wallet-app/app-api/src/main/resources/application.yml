@@ -1,0 +1,57 @@
+spring:
+  application:
+    name: app-api
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/app}
+    username: ${DB_USER:app_app}
+    password: ${DB_PASSWORD:app_app}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      connection-timeout: 3000
+  flyway:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/app}
+    user: ${DB_MIGRATION_USER:app_owner}
+    password: ${DB_MIGRATION_PASSWORD:app_owner}
+
+server:
+  port: ${PORT:8083}
+  shutdown: graceful
+
+logging:
+  pattern:
+    # customer_id will come from the customer's token; trace_id/span_id from the OpenTelemetry agent.
+    level: "%5p [customer_id=%X{customer_id:-},trace_id=%X{trace_id:-},span_id=%X{span_id:-}]"
+
+app:
+  session:
+    # HS256 key of the customers' tokens. No default on purpose: each instance (one per tenant) must be
+    # started with its own APP_SESSION_SECRET (docker-compose.yml sets one per instance locally).
+    secret: ${APP_SESSION_SECRET}
+    ttl: 30m
+  # The tenant that owns the app: app-api calls wallet-core as it. Defaults are the "dev" profile's tenant.
+  wallet-core:
+    base-url: ${WALLET_CORE_URL:http://localhost:8080}
+    client-id: ${APP_TENANT_CLIENT_ID:demo-tenant}
+    client-secret: ${APP_TENANT_CLIENT_SECRET:demo-secret-change-me-please}
+  # wallet-pix's send API, as the same tenant (the tenant must be one of wallet-pix's participants).
+  pix:
+    base-url: ${PIX_SERVICE_URL:http://localhost:8081}
+  # wallet-scheduler's API, as the same tenant (its token carries schedules:read and schedules:write).
+  scheduler:
+    base-url: ${SCHEDULER_URL:http://localhost:8082}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
