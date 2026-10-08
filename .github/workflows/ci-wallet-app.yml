@@ -1,0 +1,101 @@
+name: CI - wallet-app
+
+# wallet-app is the repository's first Gradle build (its ADR-001), so it cannot reuse the Maven-based
+# build-test.yml: this workflow builds it with the Gradle wrapper. Same model otherwise - its own caller
+# workflow, path filters, the PR title check.
+on:
+  pull_request:
+    branches: [main]
+    # "edited" so that fixing the PR title re-runs pr-title (the default types don't include it).
+    # The build jobs skip that event: a title change doesn't change the code.
+    types: [opened, synchronize, reopened, edited]
+    paths:
+      - "wallet-app/**"
+      - ".github/workflows/ci-wallet-app.yml"
+  push:
+    branches: [main]
+    paths:
+      - "wallet-app/**"
+      - ".github/workflows/ci-wallet-app.yml"
+
+concurrency:
+  # Title edits get their own group: otherwise editing the title would cancel a build in progress.
+  group: ci-wallet-app-${{ github.ref }}-${{ github.event.action == 'edited' && 'title' || 'build' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    name: Conventional PR title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      # Same check as the other projects' workflows, which never run on wallet-app-only PRs because
+      # of their path filters. Squash-merge uses the PR title as the commit message on main.
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # GitHub cuts long titles taken from a commit subject and appends "…"; that cut text
+          # would become main's commit message. A conventional prefix alone doesn't catch it.
+          subjectPattern: ^(?!.*…$).+$
+          subjectPatternError: |
+            O título termina em "…": o GitHub cortou o assunto do commit. Escreva o título completo.
+
+  build-test:
+    name: Gradle build
+    if: github.event.action != 'edited'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wallet-app
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      # Caches Gradle's dependencies and build cache between runs.
+      - uses: gradle/actions/setup-gradle@v5
+
+      # ubuntu-latest has Docker, which app-api's tests need (Testcontainers starts a PostgreSQL).
+      - name: Verify Docker is available (required by Testcontainers)
+        run: docker info
+
+      # Compiles the three modules and runs every test: app-api against PostgreSQL, the desktop's
+      # ViewModels headless (no window is opened in CI).
+      - name: Build and test
+        run: ./gradlew build --no-daemon
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-wallet-app
+          path: wallet-app/*/build/reports/tests/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+  docker:
+    name: Docker build (app-api)
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: wallet-app
+          push: false
+          tags: wallet-app/app-api:ci

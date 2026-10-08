@@ -100,7 +100,7 @@ Representa o cliente white-label (quem contrata a plataforma, não o cliente fin
 ### 4.5 `ledger/` — o mais importante do domínio inteiro
 
 - **`EntryDirection`** — `DEBIT` ou `CREDIT`. `CREDIT` aumenta o saldo, `DEBIT` diminui.
-- **`TransactionType`** — `DEPOSIT`, `WITHDRAWAL`, `TRANSFER`.
+- **`TransactionType`** — `DEPOSIT`, `WITHDRAWAL`, `TRANSFER` e os tipos Pix (`PIX_IN`, `PIX_OUT`, `PIX_REFUND`, `PIX_RETURN_IN`, `PIX_RETURN_OUT`), cada um com uma linha de detalhe em `pix_transaction_detail` (ver ADR-010).
 - **`Leg`** — uma "perna" de uma transação: uma conta, uma direção, um valor (sempre positivo — o sinal vem da direção, não do valor).
 - **`LedgerTransaction`** — **esta é a classe para entender de verdade antes de mexer em qualquer coisa relacionada a dinheiro.** O construtor dela (o bloco compacto `public LedgerTransaction { ... }`) valida, na hora da criação:
   - tem pelo menos 2 pernas;

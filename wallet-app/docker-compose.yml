@@ -1,0 +1,106 @@
+# app-api, the desktop app's backend - one instance per tenant (ADR-001, decision 1): each fintech's app
+# has its own app-api, with its own tenant credentials, logins database and session key. Here, the two
+# tenants wallet-core's "dev" profile seeds:
+#
+#   demo-tenant    -> app-api          :8083   database "app"
+#   segundo-tenant -> app-api-segundo  :8084   database "app_segundo"
+#
+# Runs NEXT TO wallet-core's compose (start that one first): it joins wallet-core's network to reach
+# postgres, otel-collector, wallet-core, pix-service and wallet-scheduler.
+#
+#   (cd ../wallet-core && docker compose up -d)
+#   docker compose up -d --build
+#   ./gradlew :app-desktop:run                                           # demo-tenant's app
+#   WALLET_APP_API_URL=http://localhost:8084/ ./gradlew :app-desktop:run # segundo-tenant's app
+
+# Both instances run the same image, built once (by app-api); only their configuration differs.
+x-app-api: &app-api
+  image: wallet-app/app-api:local
+  environment: &app-api-env
+    DB_USER: app_app
+    DB_PASSWORD: app_app
+    DB_MIGRATION_USER: app_owner
+    DB_MIGRATION_PASSWORD: app_owner
+    WALLET_CORE_URL: http://wallet-core:8080
+    # wallet-pix's compose must be up for Pix (pix-service); everything else works without it.
+    PIX_SERVICE_URL: http://pix-service:8081
+    # wallet-scheduler's compose must be up for schedules.
+    SCHEDULER_URL: http://wallet-scheduler:8082
+
+    JAVA_TOOL_OPTIONS: "-javaagent:/app/opentelemetry-javaagent.jar"
+    OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+    OTEL_TRACES_EXPORTER: "otlp"
+    OTEL_METRICS_EXPORTER: "none"     # metrics are scraped from /actuator/prometheus
+    OTEL_LOGS_EXPORTER: "otlp"
+    OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_MDC_ATTRIBUTES: "customer_id"
+    OTEL_TRACES_SAMPLER: "always_on"
+    OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=dev"
+
+x-db-init: &db-init
+  # Creates an app-api database (APP_DB) and the roles on wallet-core's Postgres, then exits.
+  image: postgres:17-alpine
+  environment: &db-init-env
+    PGHOST: postgres
+    PGUSER: wallet_owner          # wallet-core's superuser, only to create the database/roles
+    PGPASSWORD: wallet_owner
+    PGDATABASE: wallet
+  volumes:
+    - ./docker/postgres/init-app-db.sh:/init-app-db.sh:ro
+  command: ["sh", "/init-app-db.sh"]
+  restart: "no"
+
+services:
+  # ---------------------------------------------------------------- demo-tenant's app
+  app-db-init:
+    <<: *db-init
+    environment:
+      <<: *db-init-env
+      APP_DB: app
+
+  app-api:
+    <<: *app-api
+    build: .
+    depends_on:
+      app-db-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-api-env
+      DB_URL: jdbc:postgresql://postgres:5432/app
+      APP_TENANT_CLIENT_ID: demo-tenant
+      APP_TENANT_CLIENT_SECRET: demo-secret-change-me-please
+      # Local only, and different for every instance. A real environment sets its own, never committed.
+      APP_SESSION_SECRET: local-docker-demo-tenant-secret-0123456789abcdef
+      OTEL_SERVICE_NAME: app-api-demo
+    ports:
+      - "8083:8083"
+
+  # ---------------------------------------------------------------- segundo-tenant's app
+  app-db-init-segundo:
+    <<: *db-init
+    environment:
+      <<: *db-init-env
+      APP_DB: app_segundo
+
+  app-api-segundo:
+    <<: *app-api
+    pull_policy: never            # the image is the one app-api builds, never pulled from a registry
+    depends_on:
+      app-db-init-segundo:
+        condition: service_completed_successfully
+      app-api:                    # so the image exists before this instance starts
+        condition: service_started
+    environment:
+      <<: *app-api-env
+      DB_URL: jdbc:postgresql://postgres:5432/app_segundo
+      APP_TENANT_CLIENT_ID: segundo-tenant
+      APP_TENANT_CLIENT_SECRET: segundo-tenant-secret-please
+      APP_SESSION_SECRET: local-docker-segundo-tenant-secret-0123456789ab
+      OTEL_SERVICE_NAME: app-api-segundo
+    ports:
+      - "8084:8083"
+
+networks:
+  default:
+    name: wallet-core_default
+    external: true
