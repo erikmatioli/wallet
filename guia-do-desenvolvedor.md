@@ -1,351 +1,936 @@
-# Guia do Desenvolvedor — Wallet Core
+# Guia do Desenvolvedor — Plataforma Wallet
 
-Este documento assume que você nunca viu este código antes. Não é referência de API (isso é o [README](../README.md)) nem catálogo de tabelas (isso é o [`data-model.md`](data-model.md)) — é o texto que alguém sentaria do seu lado para explicar, se pudesse. Leia de cima para baixo na primeira vez; depois, use o índice para voltar a uma parte específica.
+Este guia é para quem **nunca viu este repositório**. Ele explica o que cada produto faz, como
+os produtos conversam, por que as coisas foram feitas assim e onde mexer para mudar algo. Não
+substitui os READMEs (referência de API e comandos) nem as ADRs (o registro formal de cada
+decisão). Funciona como o colega sênior que senta ao seu lado no primeiro dia.
+
+Leia de cima para baixo na primeira vez. Depois, use o índice para voltar a uma parte.
 
 ## Índice
 
-1. [A ideia em uma página](#1-a-ideia-em-uma-página)
-2. [Por onde começar a ler o código](#2-por-onde-começar-a-ler-o-código)
-3. [Vocabulário que você precisa antes de seguir](#3-vocabulário-que-você-precisa-antes-de-seguir)
-4. [`wallet-domain` — as regras, sem framework nenhum](#4-wallet-domain--as-regras-sem-framework-nenhum)
-5. [`wallet-application` — os casos de uso](#5-wallet-application--os-casos-de-uso)
-6. [`wallet-adapter-out-persistence` — como isso vira SQL](#6-wallet-adapter-out-persistence--como-isso-vira-sql)
-7. [`wallet-adapter-in-rest` — a porta HTTP](#7-wallet-adapter-in-rest--a-porta-http)
-8. [`wallet-adapter-out-messaging` — publicação de eventos](#8-wallet-adapter-out-messaging--publicação-de-eventos)
-9. [`wallet-bootstrap` — onde tudo se conecta](#9-wallet-bootstrap--onde-tudo-se-conecta)
-10. [Seguindo uma requisição do início ao fim](#10-seguindo-uma-requisição-do-início-ao-fim)
-11. [Tarefas comuns de manutenção](#11-tarefas-comuns-de-manutenção)
-12. [Testes: o que existe e por que](#12-testes-o-que-existe-e-por-quê)
-13. [Erros comuns e onde procurar](#13-erros-comuns-e-onde-procurar)
+1. [A plataforma em uma página](#1-a-plataforma-em-uma-página)
+2. [Vocabulário: o que você precisa saber antes](#2-vocabulário-o-que-você-precisa-saber-antes)
+3. [Linguagens e tecnologias, camada por camada](#3-linguagens-e-tecnologias-camada-por-camada)
+4. [A arquitetura que se repete em todo lugar: hexagonal](#4-a-arquitetura-que-se-repete-em-todo-lugar-hexagonal)
+5. [Subindo tudo na sua máquina](#5-subindo-tudo-na-sua-máquina)
+6. [Quem fala com quem: HTTP, barramento e bancos](#6-quem-fala-com-quem-http-barramento-e-bancos)
+7. [wallet-core — o dono do dinheiro](#7-wallet-core--o-dono-do-dinheiro)
+8. [wallet-pix — Pix com o Banco Central](#8-wallet-pix--pix-com-o-banco-central)
+9. [wallet-scheduler — agendamentos](#9-wallet-scheduler--agendamentos)
+10. [wallet-console — o console do operador](#10-wallet-console--o-console-do-operador)
+11. [wallet-app — o app do cliente final](#11-wallet-app--o-app-do-cliente-final)
+12. [Fluxos de ponta a ponta](#12-fluxos-de-ponta-a-ponta)
+13. [As decisões que valem para todos os projetos](#13-as-decisões-que-valem-para-todos-os-projetos)
+14. [Observabilidade: achando o que aconteceu](#14-observabilidade-achando-o-que-aconteceu)
+15. [Onde alterar: receitas de manutenção](#15-onde-alterar-receitas-de-manutenção)
+16. [Testes, CI e release](#16-testes-ci-e-release)
+17. [Problemas comuns e onde procurar](#17-problemas-comuns-e-onde-procurar)
+18. [Roteiro de estudo](#18-roteiro-de-estudo)
 
 ---
 
-## 1. A ideia em uma página
+## 1. A plataforma em uma página
 
-Este sistema é o **core de uma carteira digital**: ele cadastra clientes, abre uma conta de pagamento para cada um (no formato que o Banco Central usa), e controla o saldo dessa conta através de um **livro-razão** (ledger) de lançamentos contábeis — nunca através de um campo `saldo` que alguém dá `UPDATE` direto.
+É uma **carteira digital white label**: uma empresa (a "fintech", que aqui chamamos de
+**tenant**) contrata a plataforma e oferece contas de pagamento aos seus clientes. Vários tenants
+usam a mesma instalação, e um nunca enxerga os dados do outro.
 
-A regra que never pode quebrar: **dinheiro nunca é criado nem destruído, só se move entre contas**. Todo depósito, saque ou transferência gera pelo menos dois lançamentos (um débito, um crédito) que somam zero. Isso é chamado de **partida dobrada** (double-entry bookkeeping) e é a mesma técnica que bancos de verdade usam há séculos — não é invenção deste projeto.
+O repositório é um **monorepo** com cinco produtos. Cada um tem build, deploy, banco e release
+próprios:
 
-A arquitetura é **hexagonal** (ports & adapters): o núcleo (`wallet-domain` + `wallet-application`) não sabe que existe Spring, banco de dados ou HTTP. Ele só conhece interfaces (“portas”). Quem implementa essas portas com tecnologia de verdade são os **adapters**, e quem liga tudo isso é o `wallet-bootstrap`. Isso existe por um motivo prático, não estético: as regras de negócio mais críticas do sistema (como calcular um saldo, como validar um CPF) podem ser testadas em milissegundos, sem subir um banco, sem subir o Spring — e ficam impossíveis de contaminar com detalhe de infraestrutura sem querer.
+| Produto | O que faz | Linguagem | Porta local |
+|---|---|---|---|
+| `wallet-core` | Clientes, contas, saldo, extrato e **o ledger** (o livro-razão onde o dinheiro mora) | Java 25 + Spring Boot 4 (Maven) | 8080 |
+| `wallet-pix` | Recebe e envia Pix conversando com o SPI (o sistema do Banco Central) por filas | Java 25 + Spring Boot 4 (Maven) | 8081 (+ simulador 8090) |
+| `wallet-scheduler` | Agenda transferências e Pix para uma data e executa no dia | Kotlin + Spring Boot 4 (Maven) | 8082 |
+| `wallet-console` | Tela web **do operador** da fintech | TypeScript + Angular 21 | 4200 |
+| `wallet-app` | App desktop **do cliente final** e seu backend (`app-api`) | Kotlin: Compose Desktop + Spring Boot 4 (Gradle) | 8083 / 8084 |
 
 ```
-                       ┌──────────────────────────── wallet-bootstrap ────────────────────────────┐
-                       │  liga tudo: @SpringBootApplication, UseCaseConfig, application.yml         │
-                       └───────────────────────────────────────────────────────────────────────────┘
-                                   │                        │                          │
-         ┌─────────────────────────▼───────┐   ┌────────────▼─────────────┐  ┌─────────▼────────────────┐
-         │  wallet-adapter-in-rest          │   │  wallet-application      │  │ wallet-adapter-out-*      │
-         │  Controllers, segurança (JWT)    │──▶│  Casos de uso (portas)   │◀─│ persistence: JDBC/Flyway  │
-         └──────────────────────────────────┘   └────────────┬──────────────┘  │ messaging: publisher      │
-                                                             │                └───────────────────────────┘
-                                                ┌────────────▼─────────────┐
-                                                │  wallet-domain            │
-                                                │  Java puro: Money, Account,│
-                                                │  LedgerTransaction, etc.   │
-                                                └───────────────────────────┘
+                 OPERADOR DA FINTECH                       CLIENTE FINAL
+                        │                                        │
+                ┌───────▼────────┐                     ┌─────────▼─────────┐
+                │ wallet-console │  Angular            │ app-desktop       │  Kotlin/Compose
+                │ (nginx :4200)  │                     │ (janela Windows)  │
+                └───────┬────────┘                     └─────────┬─────────┘
+                        │ HTTP + JWT do tenant                   │ HTTP + token do cliente
+                        │                                ┌───────▼────────┐
+                        │                                │ app-api (BFF)  │ :8083 demo / :8084 segundo
+                        │                                └──┬─────┬────┬──┘
+                        │     ┌─────────────────────────────┘     │    │
+          ┌─────────────▼─────▼──┐   HTTP    ┌──────────────┐     │    │
+          │     wallet-core      │◀──────────│  wallet-pix  │◀────┘    │
+          │ ledger · contas · JWT│◀──┐       │ pix-service  │          │
+          └──────────────────────┘   │       └──┬────────▲──┘          │
+                        ▲            │          │ SNS/SQS│             │
+                        │ HTTP       │   ┌──────▼────────┴──┐          │
+          ┌─────────────┴────────┐   │   │  barramento      │          │
+          │  wallet-scheduler    │───┘   │  (LocalStack)    │◀── spi-simulator (finge ser o BCB)
+          │  agendamentos        │◀──────│ pix-payment-events│
+          └──────────────────────┘ fila  └──────────────────┘
+                        ▲                                                │
+                        └────────────────────────────────────────────────┘
 ```
 
-As setas sempre apontam para dentro. `wallet-domain` não depende de nada do projeto. `wallet-application` só depende de `wallet-domain`. Os adapters dependem de `wallet-application`, nunca uns dos outros diretamente. Essa regra é verificada automaticamente pelo `ArchitectureTest` (seção 12) — se você quebrar essa direção, o build falha, não é só um "por favor não faça isso" em comentário.
-
-## 2. Por onde começar a ler o código
-
-Não comece pelo `WalletCoreApplication.java` (é só um `main()`, não ensina nada). A ordem que realmente ensina o sistema:
-
-1. **`wallet-domain/.../shared/Money.java`** — o tipo mais usado no projeto inteiro, e o mais simples.
-2. **`wallet-domain/.../ledger/LedgerTransaction.java`** — o coração conceitual: o que é uma transação balanceada.
-3. **`wallet-application/.../service/MoveMoneyService.java`** — o caso de uso mais importante, onde a teoria vira código que mexe em banco de dados.
-4. **`wallet-adapter-out-persistence/.../JdbcAccountRepository.java`**, método `applyDelta` — onde a concorrência é realmente resolvida (um `UPDATE` SQL).
-5. **`wallet-adapter-in-rest/.../AccountController.java`** — onde isso tudo vira uma resposta HTTP.
-
-Depois desses cinco arquivos, o resto do sistema é variação sobre o mesmo padrão. As seções 4 a 9 abaixo seguem essa mesma lógica: primeiro o que é mais central, depois o que é mais periférico.
-
-## 3. Vocabulário que você precisa antes de seguir
-
-Se algum desses termos for novo, vale ler esta seção com calma — o resto do documento assume que você já sabe o que eles significam.
-
-- **Record** (`record Money(long cents) {}`) — um recurso do Java (desde a versão 16) para criar uma classe imutável de dados com uma linha: gera automaticamente o construtor, os getters (`money.cents()`, sem `get`), `equals`, `hashCode` e `toString`. Quase todo tipo em `wallet-domain` é um record.
-- **Sealed interface** (`sealed interface DomainEvent permits CustomerOnboarded, TransactionPosted`) — declara explicitamente "só estas classes podem implementar esta interface". Combinado com `switch`, o compilador consegue avisar se você esqueceu de tratar um caso novo.
-- **Porta (port)** — uma interface que descreve *o que* o sistema precisa fazer, sem dizer *como*. `TransactionRunner` é uma porta: "execute este trabalho dentro de uma transação". Quem implementa é um adapter.
-- **Adapter** — uma implementação concreta de uma porta, amarrada a uma tecnologia específica. `JdbcTransactionRunner` é o adapter de `TransactionRunner` que usa PostgreSQL via JDBC.
-- **Partida dobrada (double-entry)** — cada movimento de dinheiro é registrado como pelo menos dois lançamentos (uma perna de débito, uma de crédito) cuja soma é zero. Ver seção 4.5.
-- **Idempotência** — repetir a mesma requisição (com a mesma `Idempotency-Key`) não deve produzir o efeito duas vezes. Ver seção 5.2 (`MoveMoneyService`).
-- **Row Level Security (RLS)** — um recurso do PostgreSQL que filtra automaticamente as linhas visíveis numa consulta, com base numa configuração da sessão (`app.tenant_id`, neste projeto). É como o isolamento entre tenants é garantido no nível do banco, não só no código Java.
-- **Outbox pattern** — gravar um evento na mesma transação do fato que ele representa (numa tabela `outbox_event`), e publicá-lo depois, de forma assíncrona. Evita o problema de "salvei o dado mas esqueci de publicar o evento" (ou vice-versa).
-
-## 4. `wallet-domain` — as regras, sem framework nenhum
-
-Pacote raiz: `br.com.walletcore.domain`. Nenhuma classe aqui importa Spring, JDBC ou qualquer coisa fora do JDK. Se você tentar importar algo assim, o `ArchitectureTest` quebra o build.
-
-### 4.1 `shared/` — os tipos que todo mundo usa
-
-- **`Money`** — um valor em reais guardado como `long cents` (nunca `double`/`float`: ponto flutuante binário não representa dinheiro exatamente). `Money.ofDecimal(new BigDecimal("10.50"))` converte de decimal para centavos e valida que não tem mais de 2 casas. Métodos `plus`/`minus`/`negate` fazem aritmética exata (usam `Math.addExact` etc., que lançam exceção em overflow em vez de dar resultado errado silenciosamente).
-- **`UuidV7`** — gera UUIDs ordenáveis por tempo (RFC 9562 v7), em vez do `UUID.randomUUID()` padrão (que é v4, totalmente aleatório). Isso importa para performance de índice: inserir UUIDs aleatórios num índice B-tree do Postgres espalha as escritas por toda a árvore; UUIDs v7 mantêm as escritas concentradas no "final" da árvore, como um auto-incremento.
-- **`TenantId`, `CustomerId`, `AccountId`, `TransactionId`** — cada um é um record que embrulha um `UUID`. Por que não usar `UUID` puro em todo lugar? Para o compilador impedir você de passar um `AccountId` onde um `CustomerId` era esperado — são tipos diferentes, mesmo carregando o mesmo formato de dado por baixo. `TenantId` é o único que tem um método extra, `TenantId.of(String)`, usado para parsear o `tenant_id` que vem de dentro do JWT.
-
-### 4.2 `tenant/Tenant.java`
-
-Representa o cliente white-label (quem contrata a plataforma, não o cliente final). O método estático `Tenant.create(...)` é o único jeito de construir um `Tenant` novo — ele valida formato de `clientId`, `ispb`, `branch` antes de deixar o objeto existir. Isso é um padrão que se repete em todo o domínio: **construtores privados/validação centralizada em fábricas estáticas**, para que seja impossível ter um `Tenant` inválido "solto" no sistema.
-
-### 4.3 `customer/`
-
-- **`TaxId`** — CPF ou CNPJ, com validação completa do dígito verificador (inclusive o formato alfanumérico de CNPJ que a Receita Federal introduziu). `TaxId.parse("529.982.247-25")` remove a máscara, valida, e devolve um `TaxId` com `type()` = `CPF` ou `CNPJ`. O método `masked()` devolve só os 4 últimos dígitos — é o que aparece em log, nunca o documento completo.
-- **`Customer`** — o cliente final. `Customer.onboard(...)` é a fábrica: recebe tenant, nome, `TaxId` já validado, e devolve um `Customer` novo com status `ACTIVE`.
-
-### 4.4 `account/`
-
-- **`AccountType`** — hoje só tem um valor, `PAYMENT` (código BCB `TRAN`, conta de pagamento). É um enum e não uma constante solta porque o dia que existir um segundo tipo de conta, o compilador força você a decidir o que fazer em cada `switch` que usa isso.
-- **`PaymentAccountNumber`** — ISPB + agência + número + dígito verificador + tipo. `PaymentAccountNumber.generate(ispb, branch, sequence, type)` monta o número a partir de uma sequência numérica (que vem do banco, ver seção 6) e calcula o dígito com módulo 11. **Atenção:** o Banco Central não define um algoritmo único de dígito — cada instituição usa o seu. Se isso for para produção de verdade, o algoritmo em `computeCheckDigit` precisa ser substituído pelo que a sua instituição realmente usa.
-- **`Account`** — não é só a conta do cliente. Repare no campo `kind`: `CUSTOMER` (conta de um cliente, nunca pode ficar negativa) ou `SETTLEMENT` (conta interna, pode ficar negativa, existe só para servir de contrapartida contábil de depósitos/saques — ver seção 4.5). `Account.openPayment(...)` e `Account.openSettlement(...)` são as duas fábricas, uma para cada tipo.
-
-### 4.5 `ledger/` — o mais importante do domínio inteiro
-
-- **`EntryDirection`** — `DEBIT` ou `CREDIT`. `CREDIT` aumenta o saldo, `DEBIT` diminui.
-- **`TransactionType`** — `DEPOSIT`, `WITHDRAWAL`, `TRANSFER`.
-- **`Leg`** — uma "perna" de uma transação: uma conta, uma direção, um valor (sempre positivo — o sinal vem da direção, não do valor).
-- **`LedgerTransaction`** — **esta é a classe para entender de verdade antes de mexer em qualquer coisa relacionada a dinheiro.** O construtor dela (o bloco compacto `public LedgerTransaction { ... }`) valida, na hora da criação:
-  - tem pelo menos 2 pernas;
-  - as pernas são de contas diferentes (não dá para debitar e creditar a mesma conta);
-  - **a soma dos débitos é igual à soma dos créditos** — essa é a regra de partida dobrada, e ela é impossível de violar em memória: se você tentar criar um `LedgerTransaction` desbalanceado, ele lança `BusinessRuleException` na hora, antes de qualquer coisa tocar o banco.
-
-  As três fábricas explicam o desenho contábil:
-  - `LedgerTransaction.deposit(...)` — débito na conta de **settlement**, crédito na conta do **cliente**. Isto é: quando dinheiro "entra" na plataforma, ele sai de uma conta interna e vai para o cliente — nunca é criado do nada.
-  - `LedgerTransaction.withdrawal(...)` — o inverso: débito no cliente, crédito no settlement.
-  - `LedgerTransaction.transfer(...)` — débito na origem, crédito no destino, ambas contas de cliente.
-
-  O método `legsInLockOrder()` ordena as pernas por `accountId` — isso é o que garante que uma transferência A→B e outra B→A, acontecendo ao mesmo tempo, sempre travam as contas na mesma ordem (a de menor id primeiro), o que torna deadlock matematicamente impossível. Guarde esse detalhe; ele volta a aparecer na seção 6.
-
-- **`LedgerEntry`** — diferente de `LedgerTransaction` (que é a intenção validada em memória), este é o **fato gravado** no banco: uma linha imutável, com `sequence` (posição dessa entrada na história daquela conta especificamente, sem buracos) e `balanceAfter` (o saldo logo depois desse lançamento). É por causa desses dois campos que o saldo pode ser reconstruído do zero, só lendo os `LedgerEntry` em ordem — ver `AuditLedgerService` na seção 5.4.
-
-### 4.6 `event/`
-
-- **`DomainEvent`** — interface sealed, só duas implementações permitidas: `CustomerOnboarded` e `TransactionPosted`. Repare que os campos desses eventos são só identificadores e números — nunca CPF, nunca nome. Isso é proposital: o evento pode acabar sendo consumido por um sistema externo, fora do perímetro de segurança do banco.
-
-### 4.7 `exception/`
-
-Cinco classes: `DomainException` (base, carrega um `code` estável tipo `"INSUFFICIENT_FUNDS"`) e quatro subclasses (`ValidationException`, `NotFoundException`, `ConflictException`, `BusinessRuleException`). O `code` de cada uma é o que a API HTTP transforma em corpo de erro (`ApiExceptionHandler`, seção 7) — se você lançar uma exceção nova, o `code` que você escolher é o que o cliente da API vai ver.
+A regra mais importante do sistema inteiro: **só o `wallet-core` mexe em saldo**. O Pix, o
+agendador, o console e o app pedem ao core para mover dinheiro, sempre pela API dele. Ninguém mais
+tem uma tabela de saldo. Assim, as garantias de dinheiro (não ficar negativo, não duplicar, poder
+reconstruir o saldo) só precisam estar certas num lugar.
 
 ---
 
-## 5. `wallet-application` — os casos de uso
+## 2. Vocabulário: o que você precisa saber antes
 
-Pacote raiz: `br.com.walletcore.application`. Ainda sem framework — os `service/*.java` são classes Java comuns, instanciadas manualmente pelo `UseCaseConfig` (seção 9), não por `@Service` do Spring.
+**Do negócio**
 
-### 5.1 Como o pacote está organizado
+- **Tenant** — a fintech cliente da plataforma. Tem credenciais (`client_id` / `client_secret`),
+  um **ISPB** (o número de 8 dígitos que identifica a instituição no Pix) e uma agência. O perfil
+  `dev` do core cria dois: `demo-tenant` (ISPB `12345678`) e `segundo-tenant` (`87654321`).
+- **Cliente** — a pessoa (CPF) ou empresa (CNPJ) que tem conta numa fintech.
+- **Conta de pagamento (`TRAN`)** — o tipo de conta do padrão do Banco Central para carteiras
+  digitais: ISPB + agência + número + dígito.
+- **Conta de liquidação (settlement)** — conta **interna** do tenant, usada como contrapartida
+  quando dinheiro entra ou sai da plataforma. O cliente nunca a vê.
+- **Partida dobrada** — todo movimento gera pelo menos um débito e um crédito que somam zero.
+  Dinheiro nunca é criado nem destruído, só muda de conta.
+- **Ledger** — o livro-razão: a lista imutável de lançamentos. O saldo é consequência dele.
+- **SPI** — o Sistema de Pagamentos Instantâneos do Banco Central, por onde todo Pix passa.
+- **pacs.008 / pacs.002 / pacs.004** — as mensagens ISO 20022 do Pix: ordem de pagamento, status
+  (`ACSP` aceito, `ACSC` liquidado, `RJCT` rejeitado) e devolução.
+- **EndToEndId** — o identificador único de um Pix, do começo ao fim.
+- **Estorno × devolução** — *estorno* (`REFUND`): o SPI rejeitou o envio, o Pix nunca existiu e o
+  débito é desfeito. *Devolução* (`RETURN`): o Pix foi liquidado e depois o recebedor mandou o
+  dinheiro de volta.
 
-- **`port/in/`** — uma interface por caso de uso (o que o "mundo de fora" pode pedir ao sistema). Ex.: `MoveMoneyUseCase`.
-- **`port/out/`** — uma interface por dependência externa que um caso de uso precisa (banco, hash de senha, publicação de evento, métricas). Ex.: `AccountRepository`.
-- **`service/`** — as implementações dos casos de uso, que dependem só das portas `out`, nunca de uma tecnologia concreta.
+**Técnico**
 
-Cada porta `in` costuma declarar, dentro dela mesma, os records de `Command`/`Result` daquele caso de uso — por exemplo, `MoveMoneyUseCase.DepositCommand` é um record aninhado dentro da interface `MoveMoneyUseCase`. Isso mantém "o que esse caso de uso recebe e devolve" no mesmo arquivo que "o que esse caso de uso faz".
+- **Idempotência** — repetir a mesma requisição não repete o efeito. Aqui, todo pedido que mexe em
+  dinheiro leva o header `Idempotency-Key`. A mesma chave com o mesmo corpo devolve a resposta
+  original. A mesma chave com outro corpo dá `409 IDEMPOTENCY_KEY_REUSED`.
+- **JWT** — um token assinado que diz quem você é (`tenant_id`) e o que pode fazer (`scope`).
+  Quem recebe confere a assinatura com a chave pública publicada no **JWKS**
+  (`/.well-known/jwks.json`).
+- **Escopo (scope)** — uma permissão dentro do token: `ledger:write`, `pix:send`,
+  `schedules:read`…
+- **RLS (Row Level Security)** — recurso do PostgreSQL que esconde as linhas de outros tenants
+  direto no banco, mesmo que o código esqueça um `WHERE tenant_id = ...`.
+- **Outbox** — gravar a mensagem a publicar numa tabela, **na mesma transação** do fato. Um
+  processo separado (o *relay*) publica depois. Assim nunca existe "gravei, mas não publiquei" nem
+  "publiquei, mas não gravei".
+- **SNS / SQS** — serviços de mensageria da AWS. **SNS** é um *tópico*: quem publica não sabe quem
+  lê. **SQS** é uma *fila*: guarda as mensagens até alguém consumi-las. Um tópico entrega uma cópia
+  para cada fila assinante (*fan-out*). Localmente, quem faz o papel da AWS é o **LocalStack**.
+- **DLQ (dead-letter queue)** — fila para onde vai uma mensagem que falhou várias vezes (aqui, 5),
+  para alguém analisar em vez de ela ficar em loop para sempre.
+- **Visibility timeout** — quando um consumidor lê uma mensagem do SQS, ela fica invisível por um
+  tempo. Se ele não apagar a mensagem (porque falhou), ela reaparece e é entregue de novo.
+- **At-least-once** — "pelo menos uma vez": mensagens podem chegar repetidas. Por isso todo
+  consumidor **deduplica**, e todo efeito é idempotente.
+- **BFF (Backend for Frontend)** — um backend feito para servir um frontend específico. O
+  `app-api` é o BFF do app desktop.
+- **Arquitetura hexagonal** — ver a [seção 4](#4-a-arquitetura-que-se-repete-em-todo-lugar-hexagonal).
 
-### 5.2 `MoveMoneyService` — deposit / withdraw / transfer
+---
 
-Este é o serviço mais denso do projeto. Ele implementa `MoveMoneyUseCase` (três métodos: `deposit`, `withdraw`, `transfer`) e todos os três convergem para um único método privado, `post(...)`. Ler `post()` é ler o algoritmo inteiro:
+## 3. Linguagens e tecnologias, camada por camada
 
-```java
-private TransactionResult post(LedgerTransaction lt, String key, String fingerprint, AccountId settlementId) {
-    // 1. idempotência: essa chave já foi usada?
-    Optional<StoredTransaction> existing = journal.insertIfAbsent(lt, key, fingerprint);
-    if (existing.isPresent()) {
-        // já existe: ou é um replay (devolve o resultado antigo) ou é conflito (chave reusada com payload diferente → 409)
-        ...
-    }
-    // 2. para cada perna da transação, em ordem determinística de conta (legsInLockOrder):
-    for (Leg leg : lt.legsInLockOrder()) {
-        // aplica o delta atomicamente no banco (ver JdbcAccountRepository.applyDelta, seção 6)
-        BalanceUpdateResult result = accounts.applyDelta(...);
-        // sucesso vira um LedgerEntry; rejeição (saldo insuficiente, conta inativa...) lança exceção e desfaz tudo
-    }
-    // 3. grava os lançamentos (append-only) e enfileira o evento no outbox
-    ledger.append(entries);
-    outbox.enqueue(...);
-    metrics.transactionPosted(...);
-    return ...;
-}
+| Camada | Tecnologia | Onde aparece | O que estudar primeiro |
+|---|---|---|---|
+| Banco | PostgreSQL 17, Flyway (migrations), RLS | todos os backends | `UPDATE ... RETURNING`, `ON CONFLICT`, `FOR UPDATE SKIP LOCKED`, índices únicos |
+| Backend Java | Java 25, Spring Boot 4.1, `JdbcClient` (SQL explícito, **sem JPA**) | core, pix | `record`, `sealed interface`, `switch` com pattern matching, virtual threads |
+| Backend Kotlin | Kotlin 2.3, Spring Boot 4.1 | scheduler, app-api | `data class`, `sealed interface`, `value class`, null safety, `when` |
+| Mensageria | AWS SDK v2 (SNS/SQS) direto, sem Spring Cloud AWS | pix, scheduler | tópico × fila, raw delivery, visibility timeout, DLQ |
+| Segurança | Spring Security: Basic → JWT RS256 (core); HS256 próprio (app-api) | todos | `SecurityFilterChain`, `JwtDecoder`, escopos |
+| Frontend web | Angular 21: componentes standalone, **signals**, sem Zone.js; Vitest | console | `signal()`, `computed()`, `HttpClient`, interceptors, lazy routes |
+| Desktop | Compose Multiplatform for Desktop, Ktor client, kotlinx.serialization, coroutines | app-desktop | `@Composable`, `StateFlow`, `LaunchedEffect`, `suspend` |
+| Build | Maven (core, pix, scheduler), npm (console), **Gradle** (app — o plugin do Compose só existe para Gradle) | — | ciclo `verify`, version catalog |
+| Testes | JUnit 5, AssertJ, **fakes em memória (sem mocks)**, Testcontainers, ArchUnit | todos os backends | por que fake e não mock (seção 16) |
+| Observabilidade | OpenTelemetry (agente Java), Micrometer/Prometheus, Jaeger, Loki, Grafana | todos os backends | trace, span, métrica, MDC |
+| Infra local | Docker Compose, LocalStack 4.12 | todos | redes externas do compose |
+
+> **Por que duas linguagens no backend?** O core e o Pix nasceram em Java. O agendador e o app
+> foram escritos em Kotlin **por escolha de aprendizado** (ADR-001 do scheduler), mantendo
+> exatamente a mesma arquitetura, banco, testes e observabilidade. Compare um caso de uso Java
+> (`wallet-pix/.../SendPixService.java`) com um Kotlin (`wallet-scheduler/.../ScheduleService.kt`)
+> e você verá a mesma estrutura em sintaxes diferentes.
+
+### Equivalências Java ↔ Kotlin que você vai ver o tempo todo
+
+| Ideia | Java | Kotlin |
+|---|---|---|
+| Classe de dados imutável | `record Money(long cents) {}` | `data class Money(val cents: Long)` |
+| Tipo que embrulha um valor, sem custo | `record AccountId(UUID value)` | `@JvmInline value class AccountId(val value: UUID)` |
+| Conjunto fechado de casos | `sealed interface X permits A, B` | `sealed interface X` + `class A : X` |
+| Tratar todos os casos | `switch (x) { case A a -> ...; }` | `when (x) { is A -> ... }` |
+| Pode ser nulo | `Optional<T>` | `T?` |
+| Injeção de dependência | construtor | construtor primário |
+
+---
+
+## 4. A arquitetura que se repete em todo lugar: hexagonal
+
+Todos os backends (core, pix-service, scheduler, app-api) seguem **arquitetura hexagonal**, também
+chamada *ports & adapters*. Entender isso uma vez vale para os quatro.
+
+```
+                    ┌────────────────────────────────────────┐
+  HTTP, fila, job ─▶│ adapter.in   (controllers, listeners)  │
+                    └───────────────┬────────────────────────┘
+                                    ▼ chama
+                    ┌────────────────────────────────────────┐
+                    │ application  (casos de uso + PORTAS)   │  sem Spring
+                    └───────┬───────────────────┬────────────┘
+                            ▼ usa               │ define interfaces (portas)
+                    ┌───────────────┐           ▼ implementadas por
+                    │ domain        │   ┌──────────────────────────────────┐
+                    │ regras puras  │   │ adapter.out (JDBC, HTTP, SNS)    │──▶ banco, outros serviços
+                    └───────────────┘   └──────────────────────────────────┘
+                    config: liga tudo (Spring @Bean)
 ```
 
-Tudo isso roda dentro de **uma única transação de banco** (`tx.inTransaction(...)`, chamado por quem invoca `deposit`/`withdraw`/`transfer`) — se qualquer passo falhar, tudo é desfeito, nunca existe uma transação "meio postada".
+- **`domain`** — as regras de negócio, só com a linguagem pura. Ex.: "uma transação precisa ter
+  débitos = créditos", "só dá para cancelar o agendamento até a véspera".
+- **`application`** — os **casos de uso** (`SendPixService`, `ScheduleService`, `AuthService`). Eles
+  orquestram o domínio e falam com o mundo **só por interfaces**, as *portas* (`port.out`): "salve
+  isso", "chame o core", "que horas são".
+- **`adapter.in`** — o que **chama** a aplicação: controllers REST, consumidores de fila, jobs
+  agendados.
+- **`adapter.out`** — o que a aplicação **chama**, implementando as portas: repositórios JDBC,
+  clientes HTTP, publicadores de mensagens.
+- **`config`** / **`bootstrap`** — cria os objetos e liga as portas aos adapters.
 
-Dois detalhes que vale entender bem:
+**Por que isso importa no dia a dia:**
 
-- **`fingerprint(...)`** — um hash SHA-256 dos parâmetros do pedido (conta, valor, tipo, descrição). Serve para diferenciar "o cliente repetiu a mesma requisição de propósito" (mesma `Idempotency-Key` + mesmo fingerprint → devolve o resultado antigo, sem mexer em saldo de novo) de "o cliente reusou uma chave para um pedido diferente por engano" (mesma chave, fingerprint diferente → `409 IDEMPOTENCY_KEY_REUSED`).
-- **`rejection(...)`** — traduz um `BalanceUpdateResult.Rejected` (que vem do banco, seção 6) para a exceção de domínio certa, e é aqui que a métrica `transactionRejected` é registrada — então toda rejeição, de qualquer um dos três métodos públicos, passa por este único ponto.
+1. As regras rodam em teste sem banco e sem Spring, em milissegundos, usando **fakes** (uma
+   implementação em memória da porta).
+2. Trocar uma tecnologia (por exemplo, publicar no Kafka em vez de logar) muda **um adapter**, nada
+   mais.
+3. A direção das dependências é verificada pelo **ArchUnit**: se o domínio importar Spring, o
+   build quebra. Não é convenção, é teste.
 
-### 5.3 `OnboardCustomerService`
-
-Mais simples que o anterior: valida o `TaxId`, confere que o tenant existe e está ativo, confere que não existe outro cliente com o mesmo documento, gera o número da conta (`accounts.nextAccountSequence()` + `PaymentAccountNumber.generate`), insere cliente e conta, enfileira o evento `CustomerOnboarded`, registra a métrica. Tudo dentro de uma transação.
-
-### 5.4 `AuditLedgerService` — o replay
-
-Implementa o "recriar o saldo a partir dos eventos" que é a proposta central do projeto. Percorre (`ledger.forEachInSequence`) todos os `LedgerEntry` de uma conta, em ordem, e para cada um:
-1. Confere que `sequence` é exatamente o próximo esperado (sem buraco).
-2. Soma o `signedCents()` daquele lançamento a um saldo "replay" que começa em zero.
-3. Confere que esse saldo replay bate com o `balanceAfter` gravado naquele lançamento.
-
-No final, compara o saldo replay acumulado com `account.balance()` (o que está gravado na projeção) e a última sequência com `account.version()`. Qualquer divergência vira uma string na lista `findings`; se a lista estiver vazia, `consistent = true`. É esse relatório que tanto o endpoint `GET /v1/accounts/{id}/audit` quanto o `AuditSweepJob` (seção 9) consomem.
-
-### 5.5 `QueryAccountService`, `ProvisionTenantService`, `SettlementRouter`
-
-- **`QueryAccountService`** — só leitura (`tx.readOnly`, nunca `inTransaction`). O método privado `load()` é reusado tanto por `getAccount` quanto por `getStatement`, e filtra `kind == CUSTOMER` — contas de settlement nunca são visíveis pela API, mesmo que alguém adivinhe o UUID.
-- **`ProvisionTenantService`** — cria um tenant novo e abre N contas de settlement para ele (`settlementShards`, tipicamente 4). Usado hoje só pelo `DevDataSeeder` (seção 9); não existe endpoint HTTP para isso ainda (ver README, "fora do escopo").
-- **`SettlementRouter`** — escolhe qual das N contas de settlement de um tenant vai ser a contrapartida de um depósito/saque específico, usando o hash do `TransactionId` (`transactionId.value().hashCode() % número de shards`). Existe para que um tenant com muito tráfego não sirialize todos os depósitos numa única linha de banco (que é exatamente o gargalo que uma única conta de settlement teria). Mantém um cache em memória (`ConcurrentHashMap`) dos ids de settlement por tenant, para não consultar o banco a cada transação.
+**Diferença de forma:** no `wallet-core`, cada camada é um **módulo Maven** separado
+(`wallet-domain`, `wallet-application`, `wallet-adapter-*`, `wallet-bootstrap`). Nos outros
+backends, é **um módulo só, com pacotes** (`domain`, `application`, `adapter.in`, `adapter.out`,
+`config`), e o ArchUnit garante as mesmas fronteiras.
 
 ---
 
-## 6. `wallet-adapter-out-persistence` — como isso vira SQL
+## 5. Subindo tudo na sua máquina
 
-Pacote raiz: `br.com.walletcore.adapter.out.persistence`. Aqui sim tem Spring (`@Component`, `@Repository`) e JDBC. Cada classe implementa uma porta `out` de `wallet-application`.
+Pré-requisitos: Docker Desktop, JDK 25, Maven 3.9+, Node 22+ (console). O Gradle vem pelo wrapper
+(`./gradlew`).
 
-### 6.1 `JdbcTransactionRunner` — o mais importante deste módulo
+**A ordem importa**, porque todos os composes entram na rede do `wallet-core`
+(`wallet-core_default`) e usam o Postgres dele:
 
-Implementa `TransactionRunner`. Toda vez que um serviço de aplicação chama `tx.inTransaction(tenantId, () -> ...)` ou `tx.readOnly(...)`, é este código que roda. Três responsabilidades numa classe só:
-
-1. **Isolamento por tenant via Row Level Security**: antes de rodar o trabalho, `bindTenant(tenantId)` executa `SELECT set_config('app.tenant_id', ...)` — é essa configuração de sessão que as políticas de RLS do Postgres leem (ver `data-model.md`, seção 7). Sem essa linha, nenhuma linha das tabelas protegidas fica visível.
-2. **Retry de falha transitória**: `withRetry(...)` reexecuta a transação inteira (não só a query que falhou) até 4 vezes, com backoff exponencial + jitter, se o Postgres sinalizar `TransientDataAccessException` (deadlock, timeout de lock, blip de conexão). Funciona porque toda a lógica de dentro é idempotente — reexecutar `bindTenant` + o trabalho do zero não tem efeito colateral extra.
-3. **Observabilidade**: `observed(...)` embrulha tudo num `Observation` do Micrometer, que vira ao mesmo tempo um span de trace e um timer/counter de métrica — ver `docs/adr/007-observabilidade.md` se quiser o porquê dessa escolha.
-
-### 6.2 `JdbcAccountRepository.applyDelta(...)` — onde a concorrência é resolvida de verdade
-
-Este método é a resposta prática para "como garantir que duas movimentações simultâneas na mesma carteira não se atropelam". Uma única instrução SQL:
-
-```sql
-UPDATE account
-   SET balance_cents = balance_cents + :delta,
-       version        = version + 1,
-       updated_at     = now()
- WHERE tenant_id = :tenant
-   AND id         = :id
-   AND kind        = :kind
-   AND status      = 'ACTIVE'
-   AND (allow_negative OR balance_cents + :delta >= 0)
-RETURNING balance_cents, version
+```bash
+cd wallet-core      && docker compose up -d           # Postgres, wallet-core, OTel, Jaeger, Prometheus, Loki, Grafana
+cd ../wallet-pix    && docker compose up -d --build   # LocalStack (filas), pix-service, spi-simulator
+cd ../wallet-scheduler && docker compose up -d --build
+cd ../wallet-app    && docker compose up -d --build   # app-api do demo-tenant (8083) e do segundo-tenant (8084)
+cd ../wallet-console && npm ci && npm start           # console em http://localhost:4200
+cd ../wallet-app    && ./gradlew :app-desktop:run     # app do cliente (demo-tenant)
 ```
 
-O PostgreSQL trava a linha durante esse `UPDATE`; se outra transação tentar o mesmo `UPDATE` ao mesmo tempo, ela **espera** e, quando a primeira commitar, reavalia o `WHERE` contra o valor já atualizado — então nunca acontece de duas movimentações lerem o mesmo saldo antigo e "perderem" uma atualização uma da outra (o clássico *lost update*). Se o `WHERE` não bater (saldo insuficiente, conta inativa, conta não existe), a query não atualiza nenhuma linha, e o método volta a consultar (`findById`) só para decidir qual dos três motivos foi — isso vira um `BalanceUpdateResult.Rejected` com o motivo certo.
+| O quê | Endereço | Credencial de dev |
+|---|---|---|
+| wallet-core | http://localhost:8080 | `demo-tenant` / `demo-secret-change-me-please`; `segundo-tenant` / `segundo-tenant-secret-please` |
+| pix-service | http://localhost:8081 | token do core com `pix:send` |
+| spi-simulator | http://localhost:8090 | — |
+| wallet-scheduler | http://localhost:8082 | token do core com `schedules:*` |
+| app-api | http://localhost:8083 (demo) / 8084 (segundo) | CPF e senha do cliente |
+| console | http://localhost:4200 | as credenciais do tenant |
+| Grafana | http://localhost:3000 | pasta "Wallet Core" |
+| Jaeger | http://localhost:16686 | — |
+| Prometheus | http://localhost:9090 | — |
+| LocalStack | http://localhost:4566 | `test` / `test` |
 
-O `version` retornado por essa query é exatamente o `sequence` que o `LedgerEntry` daquela movimentação vai usar (ver `MoveMoneyService.post`, seção 5.2) — é assim que a sequência por conta nunca tem buraco, mesmo sob concorrência.
+**Para parar sem perder dados:** `docker compose stop` ou `docker compose down`, **nunca com `-v`**
+(o `-v` apaga o volume do Postgres, e com ele todos os bancos).
 
-### 6.3 As outras classes `Jdbc*Repository`
-
-Seguem todas o mesmo padrão: implementam uma porta `out`, usam `JdbcClient` (a API moderna do Spring para SQL explícito, sem ORM) com métodos `.sql(...).param(...).query(...)`. Vale destacar:
-
-- **`JdbcLedgerRepository.forEachInSequence(...)`** — não carrega todos os lançamentos de uma conta de uma vez em memória; pagina em blocos de 1000 (`REPLAY_CHUNK`), o que é o que permite o `AuditLedgerService` (seção 5.4) rodar mesmo numa conta com histórico grande, sem estourar memória.
-- **`JdbcTransactionJournal.insertIfAbsent(...)`** — é aqui que a idempotência vira SQL: `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`. Se duas requisições com a mesma chave chegarem ao mesmo tempo, a segunda espera a primeira commitar (o índice único força isso) e depois lê o que a primeira gravou.
-- **`JdbcTenantRepository`** — a única que não passa por Row Level Security (a tabela `tenant` não tem RLS, porque ela é a raiz da hierarquia — não existe "tenant do tenant" para filtrar por). Tem o método `findAllActiveIds()`, usado pelo `AuditSweepJob` (seção 9) para saber quais tenants varrer.
-
-### 6.4 `OutboxRelay` — publicando os eventos gravados
-
-Roda a cada 500ms (`@Scheduled`), pega até 100 linhas de `outbox_event` ainda não publicadas (`FOR UPDATE SKIP LOCKED` — permite mais de uma instância do relay rodar em paralelo sem disputar a mesma linha), entrega cada uma ao `EventPublisher` (seção 8), e marca `published_at`. Mantém um `Gauge` (`wallet.outbox.pending`) com a contagem de pendências, para alertar se esse número crescer sem parar.
-
-### 6.5 A migration (`V1__core_schema.sql`)
-
-Não repito aqui — está inteiramente documentada em [`data-model.md`](data-model.md), que é o lugar certo para consultar quando a dúvida for "que coluna existe em tal tabela" ou "por que essa constraint existe".
-
----
-
-## 7. `wallet-adapter-in-rest` — a porta HTTP
-
-Pacote raiz: `br.com.walletcore.adapter.in.rest`. É aqui que uma requisição HTTP vira uma chamada a um caso de uso, e vice-versa.
-
-### 7.1 `security/` — Basic para pegar token, JWT para tudo mais
-
-- **`SecurityConfig`** — define duas cadeias de filtro. A primeira (`tokenEndpointChain`) protege só `/v1/auth/token` com HTTP Basic. A segunda (`apiChain`) protege todo o resto com Bearer JWT, e declara, rota por rota, qual *scope* é necessário (`hasAuthority("SCOPE_ledger:write")`, por exemplo). Qualquer rota não listada explicitamente é negada (`anyRequest().denyAll()`) — uma rota nova só fica acessível se alguém adicionar a linha aqui de propósito.
-- **`TenantUserDetailsService`** + **`TenantPrincipal`** — o Spring Security precisa de um `UserDetails` para validar o Basic; `TenantPrincipal` embrulha um `Tenant` do domínio para servir esse papel, sem que o domínio precise saber que Spring Security existe.
-- **`PasswordEncoderSecretHasher`** — implementa a porta `SecretHasher` (de `wallet-application`) usando `PasswordEncoder` do Spring (bcrypt). É por isso que `wallet-application` consegue "pedir para hashear um segredo" sem importar Spring Security.
-- **`JwtConfig`** — gera (ou carrega de arquivo PEM, se configurado) o par de chaves RSA usado para assinar os JWTs, e monta os beans `JwtEncoder`/`JwtDecoder`. **Sem uma chave configurada, ele gera uma chave efêmera a cada start e avisa em log** — isso é só para desenvolvimento; em produção as chaves precisam vir de um secret manager.
-- **`TokenController`** — dois endpoints: `POST /v1/auth/token` (autenticado por Basic, gera o JWT com `tenant_id` e `scope` como claims) e `GET /.well-known/jwks.json` (expõe a chave pública, para quem quiser validar o token de forma independente).
-
-### 7.2 Os controllers de negócio
-
-- **`CustomerController`** — um único endpoint, `POST /v1/customers`, que chama `OnboardCustomerUseCase`.
-- **`AccountController`** — `GET /balance`, `GET /statement`, `POST /deposits`, `POST /withdrawals`, `GET /audit`. Repare no método estático `respond(TransactionResult)`, compartilhado com `TransferController` — ele decide entre `201 Created` (transação nova) e `200 OK` + header `Idempotent-Replayed: true` (transação repetida).
-- **`TransferController`** — `POST /v1/transfers`. Valida que o corpo trouxe exatamente um jeito de identificar o destino (`destinationAccountId` OU `destination` por número, nunca os dois, nunca nenhum).
-- **`CurrentTenant`** — uma classe utilitária de uma linha: extrai o `TenantId` do claim `tenant_id` dentro do JWT já validado. Sempre é o JWT que decide o tenant, nunca um parâmetro da requisição — é assim que fica impossível um tenant acessar dados de outro só trocando um id na URL.
-
-### 7.3 `ApiExceptionHandler`
-
-Um `@RestControllerAdvice` central: traduz cada `DomainException` para o HTTP status certo (`NotFoundException` → 404, `ConflictException` → 409, `BusinessRuleException` → 422, `ValidationException` → 400), usando sempre o formato `application/problem+json` (RFC 9457) com um campo `code` estável. Se você criar uma exceção de domínio nova, ela já cai automaticamente num desses baldes pelo `switch` no topo do handler — só authorize um `code` novo, não precisa mexer neste arquivo.
-
-### 7.4 `TenantLoggingInterceptor` + `WebMvcConfig`
-
-Depois que o JWT já foi validado, este interceptor coloca `tenant_id` no MDC do SLF4J (o mecanismo do log que permite anexar contexto extra a cada linha). Roda como `HandlerInterceptor` — não como `Filter` de servlet — de propósito, para não competir em ordem com a cadeia de filtros do Spring Security. `WebMvcConfig` é só o registro desse interceptor.
+**Dinheiro para testar:** ninguém tem cash-in. Faça um depósito pelo console ou simule um Pix
+chegando (`POST localhost:8090/simulate/incoming`, ou `python wallet-pix/scripts/pixdev.py incoming ...`).
 
 ---
 
-## 8. `wallet-adapter-out-messaging` — publicação de eventos
+## 6. Quem fala com quem: HTTP, barramento e bancos
 
-O módulo mais simples do projeto: uma classe só, **`LoggingEventPublisher`**, que implementa `EventPublisher` logando a mensagem em vez de mandar para um broker de verdade. É o ponto de extensão óbvio quando alguém quiser plugar Kafka/SNS/SQS — troca essa implementação, nada mais no sistema muda, porque tudo o mais fala com a porta `EventPublisher`, não com esta classe.
+### 6.1 Chamadas HTTP (síncronas)
 
----
+| Quem chama | Quem recebe | Para quê | Token usado | Escopo exigido |
+|---|---|---|---|---|
+| console | core `/v1/**` | tudo do operador | JWT do tenant (login com client id/secret) | vários |
+| console | scheduler `/v1/schedules` | agendamentos | o mesmo JWT do core | `schedules:read` / `schedules:write` |
+| pix-service | core | holder-check, `pix-credits`, `pix-debits`, `reversals` | JWT do tenant dono do ISPB | `accounts:read`, `pix:receive`, `pix:send` |
+| scheduler | core | buscar conta, transferir | JWT do tenant dono do agendamento | `accounts:read`, `ledger:write` |
+| scheduler | pix-service | enviar Pix agendado | JWT do tenant | `pix:send` |
+| app-api | core | abrir conta, saldo, extrato, transferência | JWT do **seu** tenant | vários |
+| app-api | pix-service | enviar Pix, consultar status | JWT do seu tenant | `pix:send` |
+| app-api | scheduler | agendamentos | JWT do seu tenant | `schedules:*` |
+| app-desktop | app-api `/app/v1/**` | tudo do cliente | **token do cliente** (emitido pelo app-api) | — |
 
-## 9. `wallet-bootstrap` — onde tudo se conecta
+Repare num padrão: **quem emite o token de tenant é sempre o `wallet-core`**
+(`POST /v1/auth/token`, com Basic). O pix-service, o scheduler e o console só **validam** esse
+token pelo JWKS do core. O único token diferente é o do cliente final, que o `app-api` emite e só
+ele aceita (seção 11).
 
-Pacote raiz: `br.com.walletcore.bootstrap` (mais a classe solta `WalletCoreApplication` em `br.com.walletcore`).
+O tenant **sempre vem do token, nunca do corpo da requisição**. É isso que impede um tenant de
+mexer nos dados de outro trocando um id.
 
-- **`WalletCoreApplication`** — o `@SpringBootApplication` de sempre. `@EnableScheduling` está aqui porque o `OutboxRelay` e o `AuditSweepJob` usam `@Scheduled`.
-- **`UseCaseConfig`** — **este arquivo é o que literalmente transforma os serviços "puros" de `wallet-application` em beans Spring.** Cada `@Bean` chama o construtor de um `XxxService` passando as portas que o Spring já injetou (que por sua vez são os adapters JDBC/REST). Se você criar um caso de uso novo, é aqui que ele precisa ser registrado.
-- **`DevDataSeeder`** — só ativo no profile `dev` (`@Profile("dev")`). Roda uma vez na inicialização e cria o tenant `demo-tenant` (via `ProvisionTenantUseCase`) se ele ainda não existir — é de onde vêm as credenciais que você usa para testar localmente.
-- **`observability/MicrometerMetricsRecorder`** — implementa a porta `MetricsRecorder` usando `Counter` do Micrometer. Cada método (`transactionPosted`, `transactionRejected`, `customerOnboarded`, `auditCompleted`) vira um contador Prometheus com as tags certas.
-- **`observability/AuditSweepJob`** — roda a cada 5 minutos, itera os tenants ativos (`TenantRepository.findAllActiveIds()`) e, para cada um, reaudita uma amostra das contas mais recentemente movimentadas (`AccountRepository.findRecentlyActiveCustomerAccountIds`), chamando `AuditLedgerUseCase.audit(...)` — o mesmo caso de uso que o endpoint HTTP usa. Qualquer inconsistência vira log `ERROR` + métrica, que é o que os alertas do Prometheus (`docker/prometheus/alerts.yml`) observam.
-- **`ArchitectureTest`** e **`WalletCoreConcurrencyTest`** — ver seção 12.
+### 6.2 Barramento (assíncrono): tópicos e filas
 
----
+Os tópicos e filas são criados por `wallet-pix/docker/localstack/init-bus.sh` quando o LocalStack
+sobe.
 
-## 10. Seguindo uma requisição do início ao fim
+| Tópico SNS | Quem publica | Fila SQS assinante | Quem lê a fila | Conteúdo |
+|---|---|---|---|---|
+| `spi-to-psp` | spi-simulator (o "Banco Central") | `wallet-pix-spi-inbound` (DLQ `wallet-pix-spi-inbound-dlq`) | pix-service (`SpiInboundHandler`) | pacs.008 chegando, pacs.002, pacs.004 |
+| `psp-to-spi` | pix-service (via outbox) | `spi-simulator-inbound` | spi-simulator | pacs.008 saindo, pacs.002 ACSP/RJCT das nossas respostas |
+| `pix-payment-events` | pix-service (via outbox) | `wallet-scheduler-pix-events` (DLQ `wallet-scheduler-pix-events-dlq`) | wallet-scheduler (`PixEventsListener`) | `PixEvent`: resultado final de cada Pix |
+| `pix-payment-events` | — | `pix-events-dev` | ninguém (só para você inspecionar) | cópia dos mesmos eventos |
 
-A melhor forma de realmente entender o sistema é seguir um `POST /v1/accounts/{id}/deposits` classe por classe:
+Configuração das filas: visibility timeout de 15 s; as DLQs recebem a mensagem depois de 5
+tentativas.
 
-1. **`SecurityConfig`** já validou o JWT antes de qualquer controller rodar (é um filtro, roda antes do Spring MVC despachar a requisição).
-2. **`TenantLoggingInterceptor.preHandle`** coloca `tenant_id` no MDC de log.
-3. **`AccountController.deposit(...)`** recebe a requisição, extrai o tenant via **`CurrentTenant.from(jwt)`**, converte o `BigDecimal` do JSON para **`Money.ofDecimal(...)`**, monta um **`MoveMoneyUseCase.DepositCommand`** e chama `moveMoney.deposit(command)`.
-4. **`MoveMoneyService.deposit(...)`** valida a `Idempotency-Key` e o valor, calcula o `fingerprint`, escolhe uma conta de settlement via **`SettlementRouter.pick(...)`**, monta um **`LedgerTransaction.deposit(...)`** (que já valida sozinho que está balanceado) e chama `tx.inTransaction(...)`.
-5. **`JdbcTransactionRunner.inTransaction(...)`** abre a transação, chama `bindTenant` (RLS), e roda o trabalho dentro de retry + Observation.
-6. Dentro da transação, `post(...)` chama **`JdbcTransactionJournal.insertIfAbsent(...)`** (idempotência), depois, para cada perna, **`JdbcAccountRepository.applyDelta(...)`** (o `UPDATE` atômico da seção 6.2).
-7. Ainda dentro da mesma transação: **`JdbcLedgerRepository.append(...)`** grava os `LedgerEntry`, **`JdbcOutboxRepository.enqueue(...)`** grava o evento `TransactionPosted` na tabela `outbox_event`.
-8. A transação commita. Fora dela, `MicrometerMetricsRecorder.transactionPosted(...)` já foi chamado (dentro do `post()`, mas o efeito — incrementar um contador em memória — não depende de transação de banco).
-9. `AccountController.respond(...)` monta o `201 Created` com o corpo `TransactionResponse`.
-10. Em paralelo, sem bloquear a resposta acima: **`OutboxRelay`** (rodando no seu próprio ciclo de `@Scheduled`) eventualmente pega essa linha do outbox e chama **`LoggingEventPublisher.publish(...)`**.
+**Os eventos do `pix-payment-events`** (`wallet-pix/pix-messages/.../PixEvents.java`):
 
-Se você entender essas dez etapas, você entende a espinha dorsal do sistema inteiro — todo o resto (onboarding, transferência, consulta de saldo) é uma variação bem próxima disso.
-
-## 11. Tarefas comuns de manutenção
-
-**Adicionar um campo novo em `Customer`:**
-1. Adicione o campo no record `Customer` (`wallet-domain`) e ajuste `Customer.onboard(...)` para validá-lo.
-2. Adicione a coluna numa migration Flyway **nova** (`V2__...sql` — nunca edite `V1` depois que ela já rodou em algum ambiente).
-3. Ajuste `JdbcCustomerRepository.insert(...)` e o `map(...)` de leitura, se houver.
-4. Se o campo deve aparecer na API, ajuste `ApiModels.CustomerResponse` e o `CustomerController`.
-
-**Adicionar um endpoint novo:**
-1. Se for um caso de uso novo: crie a porta `in` em `wallet-application/port/in/`, implemente em `service/`, registre em `UseCaseConfig`.
-2. Crie/ajuste o `@RestController`, adicione o record de request/response em `ApiModels`.
-3. Adicione a rota e o `scope` necessário em `SecurityConfig.apiChain(...)` — sem isso, a rota fica `403` por padrão (`anyRequest().denyAll()`).
-
-**Adicionar uma métrica de negócio nova:**
-1. Adicione o método na porta `MetricsRecorder` (`wallet-application`).
-2. Implemente em `MicrometerMetricsRecorder` (`wallet-bootstrap`).
-3. Chame esse método no serviço de aplicação certo, no ponto exato onde o fato acontece.
-
-**Investigar por que um teste de concorrência falhou:**
-Comece por `WalletCoreConcurrencyTest` (seção 12) — o nome do método já diz o que ele testa. Se falhou, o próximo passo quase sempre é olhar `JdbcAccountRepository.applyDelta` (a query que devia ter travado a linha) ou `LedgerTransaction.legsInLockOrder()` (a ordem de lock que devia evitar o deadlock).
-
-## 12. Testes: o que existe e por quê
-
-- **`wallet-domain/src/test`** — testes unitários puros (`MoneyTest`, `TaxIdTest`, `PaymentAccountNumberTest`, `LedgerTransactionTest`). Rodam em milissegundos, sem nenhuma dependência externa.
-- **`wallet-application/src/test`** — **`InMemoryFixture`** é a peça central: implementa todas as portas `out` (`AccountRepository`, `LedgerRepository`, etc.) com `HashMap`/`List` em memória, em vez de banco de verdade. `MoveMoneyServiceTest` usa esse fixture para testar toda a lógica de negócio (depósito, saque, transferência, idempotência, saldo insuficiente) sem precisar de Postgres nem Spring.
-- **`wallet-bootstrap/.../ArchitectureTest`** — usa a biblioteca ArchUnit para verificar, automaticamente, as regras da seção 1 (domínio não depende de framework, aplicação não depende de adapter, `adapter.in` não depende de `adapter.out`). Roda como parte normal de `mvn verify`.
-- **`wallet-bootstrap/.../WalletCoreConcurrencyTest`** — o único que precisa de Docker (sobe um PostgreSQL descartável via Testcontainers). Testa coisas que só fazem sentido contra um banco de verdade: 100 depósitos + 100 saques simultâneos na mesma carteira, saques concorrentes que não podem estourar o saldo, transferências A↔B simultâneas sem deadlock, a mesma `Idempotency-Key` disparada em paralelo, isolamento entre tenants via RLS, e a imutabilidade do ledger (tenta `UPDATE`/`DELETE` direto e espera que falhe).
-
-Para rodar tudo: `mvn verify` na raiz de `wallet-core/` (precisa de Docker rodando, por causa do último item acima).
-
-## 13. Erros comuns e onde procurar
-
-| Sintoma | Onde olhar primeiro |
+| `type` | Quando |
 |---|---|
-| `403` numa rota nova que você criou | `SecurityConfig.apiChain(...)` — provavelmente falta a linha da rota |
-| `INSUFFICIENT_FUNDS` inesperado | Confira se a conta é `CUSTOMER` (nunca fica negativa) vs `SETTLEMENT` (pode); `Account.Kind` |
-| Saldo "sumindo" ou duplicando em teste de carga | `JdbcAccountRepository.applyDelta` — confira se o `WHERE` da query não foi alterado |
-| `IDEMPOTENCY_KEY_REUSED` (409) inesperado | O `fingerprint` mudou entre duas chamadas com a mesma chave — confira `MoveMoneyService.fingerprint(...)` e os parâmetros que entram nele |
-| Auditoria (`/audit`) reportando inconsistência | Veja `docs/adr/007-observabilidade.md`; comece pelo `AuditLedgerService`, confira se algum código está gravando `LedgerEntry` fora do fluxo normal de `MoveMoneyService` |
-| Teste `ArchitectureTest` falhando depois de uma mudança sua | Você importou algo de framework dentro de `wallet-domain` ou `wallet-application`, ou um adapter `in` passou a depender de um adapter `out` diretamente |
-| `WalletCoreConcurrencyTest` não roda / é pulado | Falta Docker disponível — o teste usa `Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable())` e se pula sozinho sem Docker |
+| `PIX_RECEIVED` | Pix recebido, liquidado e creditado ao cliente |
+| `PIX_RECEIVE_REJECTED` | Pix recebido que recusamos (com `reasonCode`) |
+| `PIX_SENT_COMPLETED` | Pix enviado e liquidado pelo SPI |
+| `PIX_SENT_REFUNDED` | Pix enviado rejeitado; débito estornado (com `reasonCode`) |
+| `PIX_RETURN_RECEIVED` | Chegou devolução de um Pix que enviamos |
+
+O evento leva `requestId` = a `Idempotency-Key` usada no envio. É assim que o agendador sabe de
+qual agendamento é o resultado. **Nunca** leva CPF/CNPJ nem nome.
+
+**E o `wallet-core`?** Ele grava eventos (`wallet.customer.onboarded.v1`,
+`wallet.transaction.posted.v1`) no seu outbox, mas o publicador hoje é o `LoggingEventPublisher`:
+**só loga**. Ninguém consome esses eventos ainda. Quando alguém precisar, troca-se esse adapter
+por um que publique no SNS, e nada mais no core muda.
+
+### 6.3 Bancos de dados
+
+Há **um servidor Postgres** (o do compose do core) com **um banco por produto**. Nenhum serviço lê
+o banco de outro: se precisa de um dado, chama a API.
+
+| Banco | Dono | Tabelas principais | Roles |
+|---|---|---|---|
+| `wallet` | wallet-core | `tenant`, `customer`, `account`, `financial_transaction`, `ledger_entry`, `pix_transaction_detail`, `outbox_event` | `wallet_owner` (migrations), `wallet_app` (runtime, sem `UPDATE/DELETE` no ledger) |
+| `pix` | pix-service | `pix_payment`, `inbound_message`, `outbox` | `pix_owner`, `pix_app` |
+| `scheduler` | wallet-scheduler | `schedule`, `schedule_execution`, `schedule_attempt` | `scheduler_owner`, `scheduler_app` |
+| `app` | app-api do demo-tenant | `customer_login`, `sent_pix` | `app_owner`, `app_app` |
+| `app_segundo` | app-api do segundo-tenant | as mesmas | as mesmas |
+
+**Duas roles por banco, sempre.** A role `*_owner` roda as migrations (cria tabelas). A role
+`*_app` é a que a aplicação usa, com o mínimo de permissão. Se um bug ou um ataque tentar um
+`DROP TABLE` pela aplicação, o banco recusa. Os bancos são criados por um container `*-db-init`
+que roda um script e termina. Por isso você vê `Exited (0)` no `docker ps -a`: é o normal.
+
+---
+
+## 7. wallet-core — o dono do dinheiro
+
+Guia detalhado, classe por classe: [`wallet-core/docs/guia-do-desenvolvedor.md`](wallet-core/docs/guia-do-desenvolvedor.md).
+Modelo de dados: [`wallet-core/docs/data-model.md`](wallet-core/docs/data-model.md). ADRs 001 a
+010 em `wallet-core/docs/adr/`.
+
+### 7.1 Módulos
+
+| Módulo Maven | Papel |
+|---|---|
+| `wallet-domain` | Java puro: `Money` (centavos em `long`), `TaxId`, `Account`, `LedgerTransaction`, `TransactionType`, eventos |
+| `wallet-application` | Casos de uso (`MoveMoneyService`, `OnboardCustomerService`, `QueryAccountService`, `AuditLedgerService`…) e portas |
+| `wallet-adapter-out-persistence` | JDBC, migrations Flyway, `OutboxRelay` |
+| `wallet-adapter-out-messaging` | `LoggingEventPublisher` |
+| `wallet-adapter-in-rest` | Controllers, segurança (Basic → JWT), `ApiExceptionHandler` |
+| `wallet-bootstrap` | `@SpringBootApplication`, `UseCaseConfig` (liga casos de uso às portas), jobs, testes de arquitetura e concorrência |
+
+### 7.2 API
+
+| Rota | Escopo | Usado por |
+|---|---|---|
+| `POST /v1/auth/token` (Basic, `?scope=` opcional) | — | todos |
+| `GET /.well-known/jwks.json` | público | pix, scheduler (validar tokens) |
+| `POST /v1/customers` | `customers:write` | console, app-api |
+| `GET /v1/accounts`, `/lookup`, `/findByTaxId` | `accounts:read` | console, scheduler, app-api |
+| `POST /v1/accounts/holder-check` | `accounts:read` | pix, scheduler |
+| `GET /v1/accounts/{id}`, `/balance`, `/statement` | `accounts:read` | console, app-api |
+| `POST /v1/accounts/{id}/deposits`, `/withdrawals` | `ledger:write` | console |
+| `POST /v1/transfers` | `ledger:write` | console, scheduler, app-api |
+| `POST /v1/accounts/{id}/pix-credits` | `pix:receive` | pix |
+| `POST /v1/accounts/{id}/pix-debits` | `pix:send` | pix |
+| `POST /v1/transactions/{id}/reversals` | `pix:send` | pix (estorno) |
+| `GET /v1/accounts/{id}/audit` | `ledger:audit` | console |
+
+### 7.3 Tipos de transação
+
+| Tipo | Movimento na conta do cliente | Contrapartida |
+|---|---|---|
+| `DEPOSIT` | crédito | conta de liquidação do tenant |
+| `WITHDRAWAL` | débito | conta de liquidação |
+| `TRANSFER` | débito na origem, crédito no destino | outra conta de cliente |
+| `PIX_IN` / `PIX_RETURN_IN` / `PIX_REFUND` | crédito | conta de liquidação |
+| `PIX_OUT` / `PIX_RETURN_OUT` | débito | conta de liquidação |
+
+Todo `PIX_*` tem uma linha em `pix_transaction_detail` com a contraparte (nome, CPF/CNPJ
+**mascarado**, ISPB, conta), o EndToEndId e o motivo. É o que o extrato mostra no bloco `pix` e o
+que permite filtrar o extrato por `?product=PIX` (ADR-010).
+
+### 7.4 As decisões que você precisa conhecer
+
+1. **Saldo nunca é escrito direto.** Ele muda com **um único `UPDATE ... WHERE saldo + delta >= 0
+   RETURNING`** (`JdbcAccountRepository.applyDelta`). O Postgres trava a linha e reavalia a
+   condição. Resultado: sem *lost update* e sem saldo negativo, mesmo com 200 requisições
+   simultâneas.
+2. **Contas travadas em ordem de id.** A→B e B→A ao mesmo tempo não dão deadlock
+   (`legsInLockOrder`).
+3. **Ledger append-only.** Triggers proíbem `UPDATE`/`DELETE`, a role da aplicação nem tem esse
+   privilégio, e um trigger no `COMMIT` confere que débitos = créditos.
+4. **Saldo reconstruível.** Cada lançamento guarda `sequence_no` e `balance_after`. O
+   `AuditLedgerService` refaz o saldo do zero e compara. O `AuditSweepJob` faz isso sozinho a cada
+   5 minutos e dispara alerta se achar diferença.
+5. **Idempotência no banco.** `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING` é o
+   primeiro passo da transação. Junto vai uma *impressão digital* (SHA-256 do pedido) para
+   distinguir "repetiu" de "reusou a chave com outro pedido".
+6. **Multi-tenant por RLS.** No começo de cada transação, `set_config('app.tenant_id', ...)`, e as
+   policies do Postgres filtram o resto.
+7. **Várias contas de liquidação por tenant** (*shards*), para os depósitos de um tenant não
+   disputarem a mesma linha.
+
+---
+
+## 8. wallet-pix — Pix com o Banco Central
+
+README: [`wallet-pix/README.md`](wallet-pix/README.md). Decisões: [ADR-001](wallet-pix/docs/adr/001-servico-pix-e-barramento.md).
+Roteiro de testes manual: [`guia-testes-pix.md`](wallet-pix/docs/guia-testes-pix.md).
+
+### 8.1 Módulos e pacotes
+
+| Módulo | Papel |
+|---|---|
+| `pix-messages` | Contratos: `SpiMessages` (pacs.008/002/004 em JSON com as tags ISO 20022) e `PixEvents` |
+| `pix-service` | O serviço (hexagonal por pacotes) |
+| `spi-simulator` | Finge ser o SPI. **Nunca vai para produção** |
+
+Dentro do `pix-service`:
+
+| Pacote | Classes que importam |
+|---|---|
+| `domain` | `PixPayment` (máquina de estados), `RejectionReason` (AC03, AC06…), `SpiIds` (gera EndToEndId) |
+| `application` | `ReceivePixService`, `SendPixService`, `StatusReportRouter` (decide se um pacs.002 é de entrada ou de saída), `MaxAmountPolicy`, `SpiMessageFactory`, `PixEventFactory` |
+| `adapter.in.rest` | `PixPaymentController` (`POST/GET /v1/pix/payments`) |
+| `adapter.in.sqs` | `SpiInboundHandler` (o que fazer com cada mensagem da fila) |
+| `adapter.bus` | `SqsQueueConsumer` (o loop que lê o SQS), `OutboxRelay` (publica no SNS), `TraceContext` |
+| `adapter.out.walletcore` | `WalletCoreClient` (token por tenant, chamadas ao core) |
+| `adapter.out.persistence` | `JdbcPixPaymentRepository`, `JdbcInboundMessageLog`, `JdbcOutbox` |
+
+### 8.2 Estados de um Pix (`PixPayment`)
+
+```
+RECEBIDO (INBOUND):  ACCEPTED ──ACSC──▶ CREDITED
+                     ACCEPTED ──RJCT──▶ REJECTED        (ou REJECTED direto se o holder-check falhar)
+
+ENVIADO (OUTBOUND):  SENT ──ACSC──▶ COMPLETED ──pacs.004──▶ RETURNED
+                     SENT ──RJCT──▶ REFUNDED   (débito estornado)
+```
+
+### 8.3 Como o tenant vira participante do Pix
+
+Cada tenant tem um ISPB. Em `application.yml`, `pix.participants` mapeia **ISPB → credenciais do
+tenant**. Quando chega uma mensagem para o ISPB `87654321`, o serviço pega um token do core como
+`segundo-tenant` e faz tudo como ele. A RLS do core continua valendo.
+
+Um Pix entre dois tenants nossos passa pelo serviço **duas vezes**: uma como pagador (linha
+OUTBOUND) e outra como recebedor (linha INBOUND), com o mesmo EndToEndId.
+
+### 8.4 Garantias: entrega pelo menos uma vez, efeito exatamente uma vez
+
+| Problema | Proteção |
+|---|---|
+| Mesma mensagem chega duas vezes | `inbound_message`: id da mensagem gravado com `ON CONFLICT DO NOTHING` na mesma transação |
+| Serviço cai depois de mudar o estado e antes de publicar | Outbox: a mensagem só existe se o estado foi commitado |
+| Serviço cai depois de chamar o core e antes de commitar | A mensagem é reprocessada; o core devolve a mesma transação pela `Idempotency-Key` (crédito: chave = EndToEndId; débito: `pix-debit-<chave>`) |
+| Duas entregas simultâneas | Versão otimista em `pix_payment`: uma vence, a outra vira duplicata |
+
+### 8.5 Regras do envio, em ordem
+
+1. Políticas (`PaymentPolicy`; hoje só `MaxAmountPolicy`, 5.000,00) — **antes** de chamar o core.
+2. O CPF/CNPJ do pagador tem de ser do titular (`holder-check`).
+3. Débito atômico no core (`pix-debits`, tipo `PIX_OUT`). **Sem consulta prévia de saldo**: o
+   saldo pode mudar entre a consulta e o débito, e o próprio débito já recusa.
+4. `pix_payment` como `SENT` + pacs.008 no outbox, na mesma transação → `202`.
+
+### 8.6 Simulador do SPI
+
+- Roteia entre os dois tenants do seed.
+- Faz o papel de um banco externo fictício, ISPB `99999999`: responde ACSC, ou RJCT AC03 quando o
+  valor termina em `,99` (para testar o estorno).
+- `POST /simulate/incoming` (Pix chegando), `POST /simulate/return` (devolução),
+  `GET /simulate/messages` (o que passou).
+- O estado fica em memória: reiniciar o simulador esquece os Pix em andamento.
+
+---
+
+## 9. wallet-scheduler — agendamentos
+
+README: [`wallet-scheduler/README.md`](wallet-scheduler/README.md). Decisões:
+[ADR-001](wallet-scheduler/docs/adr/001-servico-de-agendamento.md) (leia a seção "Ajustes feitos
+na implementação").
+
+### 9.1 O modelo: agendamento → execução → tentativa
+
+| Tabela | O que é | Estados |
+|---|---|---|
+| `schedule` | A intenção do cliente: conta pagadora, tipo (transferência ou Pix), destino, valor, data | `ACTIVE`, `CANCELLED`, `COMPLETED` |
+| `schedule_execution` | O agendamento rodando num dia | `PENDING`, `PROCESSING`, `EXECUTED`, `FAILED`, `CANCELLED` |
+| `schedule_attempt` | Cada chamada feita no dia, com horário, código e motivo legível | `EXECUTED`, `REFUSED` |
+
+Separar agendamento de execução já deixa espaço para a recorrência: hoje há uma execução por
+agendamento; com recorrência, haverá uma por ocorrência, sem mudar as tabelas.
+
+### 9.2 Pacotes
+
+| Pacote | Classes |
+|---|---|
+| `domain` | `Schedule`, `Execution`, `ExecutionWindows` (06:00, 12:00, 18:00 em Brasília), `FailureReasons` (código → texto e "retenta no dia?") |
+| `application` | `ScheduleService` (criar, listar, detalhar, cancelar), `ExecutionService` (rodar tentativa, fechar pelo evento do Pix) |
+| `adapter.in.rest` | `ScheduleController` (`/v1/schedules`) |
+| `adapter.in.job` | `ExecutionJob` (`@Scheduled` a cada 30 s) |
+| `adapter.in.messaging` | `PixEventsListener` (fila `wallet-scheduler-pix-events`) |
+| `adapter.out.*` | `WalletCoreClient`, `WalletCoreTokens` (cache de token por tenant), `PixServiceClient`, `JdbcScheduleRepository` |
+
+### 9.3 Como uma execução acontece
+
+1. O `ExecutionJob` acorda a cada 30 s e pega até 50 execuções vencidas com
+   **`FOR UPDATE SKIP LOCKED`**: várias instâncias podem rodar sem pegar a mesma execução. Ele toma
+   a execução por 2 minutos (*lease*).
+2. Grava a tentativa com a chave **`sched-<execução>-<número da tentativa>`** **antes** de chamar o
+   serviço.
+3. Chama o core (transferência) ou o wallet-pix (Pix) e classifica a resposta numa
+   `sealed interface`:
+   - **executou** → grava o resultado;
+   - **recusado** → se o motivo pode mudar no dia (saldo insuficiente, conta bloqueada), tenta na
+     próxima janela; senão, `FAILED` na hora;
+   - **resultado desconhecido** (timeout, 5xx) → repete **a mesma tentativa com a mesma chave**
+     1 minuto depois. Se o dinheiro já tinha saído, o serviço devolve a resposta original e nada é
+     pago duas vezes.
+4. **Pix:** o envio aceito deixa a execução `PROCESSING`. O resultado chega pela fila
+   (`PIX_SENT_COMPLETED` → `EXECUTED`; `PIX_SENT_REFUNDED` → `FAILED` com o motivo do SPI), casado
+   pelo `requestId`. Se o evento não chegar em 10 minutos, o job pergunta de novo ao wallet-pix com
+   a mesma chave.
+5. Se o evento chegar **antes** de o agendador ter gravado o `202` (o simulador é muito rápido), o
+   listener devolve a mensagem para a fila (`NotReadyYetException`), e ela volta depois do
+   visibility timeout.
+6. Se o serviço ficar fora do ar o dia inteiro: `FAILED` com `MISSED_DAY`. Nunca paga em outro dia.
+
+### 9.4 Regras de negócio
+
+- Data a partir de amanhã. Cancelamento até 23:59 da véspera (Brasília). Sem edição: cancela e cria
+  outro.
+- Dias não úteis não adiam a execução.
+- O agendador **não decide saldo**: quem decide no dia é o core ou o wallet-pix.
+- Isolamento: toda consulta filtra por `tenant_id`. Não há RLS neste banco porque o job precisa ver
+  as execuções de todos os tenants.
+
+---
+
+## 10. wallet-console — o console do operador
+
+README: [`wallet-console/README.md`](wallet-console/README.md). Decisões:
+[ADR-001](wallet-console/docs/adr/001-arquitetura-do-console.md).
+
+### 10.1 Para quem é
+
+Para o **operador da fintech**, não para o cliente final. O login é com o client id/secret do
+tenant, e o operador vê **todas** as contas daquele tenant.
+
+### 10.2 Estrutura
+
+```
+src/app/
+├── core/     AuthService, auth.interceptor (anexa o Bearer), auth.guard (protege rotas),
+│             WalletApiService (cliente HTTP tipado), models.ts (espelho dos DTOs do backend),
+│             transaction-labels.ts e schedule-labels.ts (código → texto em português)
+├── pages/    login, home (lista e busca de contas), onboard (abre conta),
+│             account (saldo, extrato, movimentos, auditoria)
+│               ├── entry-detail/  popup com o detalhe do lançamento (dados já carregados, sem nova chamada)
+│               └── schedules/     seção de agendamentos da conta
+└── shared/   problem-banner (mostra erros no formato problem+json)
+```
+
+### 10.3 Decisões
+
+- **Chamadas sempre relativas** (`/v1/...`). Em dev, o `proxy.conf.json` encaminha; no Docker, o
+  `nginx.conf`. Regra de roteamento: `/v1/schedules` → scheduler (8082); o resto de `/v1/**` e
+  `/.well-known/**` → core (8080). O prefixo mais longo vence. Resultado: **zero CORS** e nenhuma
+  URL de backend dentro do bundle.
+- **Sessão em `sessionStorage`**: some ao fechar a aba. O secret nunca é guardado.
+- **Uma `Idempotency-Key` nova por clique** (`crypto.randomUUID()`).
+- **Signals** em vez de RxJS para estado local; componentes standalone com lazy loading.
+- **Sem biblioteca de UI**: SCSS com design tokens (variáveis CSS).
+- **Microfrontend preparado, mas não federado**: não existe um shell para hospedá-lo ainda.
+
+**Ao mudar um contrato do backend**, o primeiro arquivo a atualizar é `core/models.ts`.
+
+---
+
+## 11. wallet-app — o app do cliente final
+
+README: [`wallet-app/README.md`](wallet-app/README.md). Decisões:
+[ADR-001](wallet-app/docs/adr/001-app-do-cliente.md).
+
+### 11.1 Três módulos Gradle
+
+| Módulo | Papel |
+|---|---|
+| `app-contract` | DTOs `@Serializable` (kotlinx.serialization) usados **pelos dois lados**: mudou aqui, o compilador aponta onde ajustar no servidor e no desktop |
+| `app-api` | O BFF: Spring Boot + Kotlin, hexagonal por pacotes, banco de logins |
+| `app-desktop` | Compose for Desktop: telas, ViewModels com `StateFlow`, cliente HTTP Ktor |
+
+### 11.2 Por que um BFF, e não o desktop chamando o core direto?
+
+O core só conhece **tenants**, não clientes finais. Se o desktop tivesse o client secret do tenant,
+qualquer cliente que abrisse o executável teria acesso a **todas** as contas da fintech. O
+`app-api`:
+
+- guarda o secret do tenant **só no servidor**;
+- tem o próprio login (CPF + senha com BCrypt, bloqueio após 5 erros por 15 minutos, a mesma
+  mensagem e o mesmo tempo de resposta para "CPF não existe" e "senha errada");
+- emite um **token do cliente** (JWT HS256, 30 minutos) com `account_id` e `tenant`;
+- em toda chamada, usa o `account_id` **do token**. O desktop nunca diz de qual conta é o pedido.
+
+### 11.3 Um `app-api` por tenant
+
+Cada fintech tem **a sua instância** do `app-api`, com as suas credenciais, o seu banco de logins e
+a sua chave de sessão:
+
+| Tenant | Instância | Porta | Banco |
+|---|---|---|---|
+| `demo-tenant` | `app-api` | 8083 | `app` |
+| `segundo-tenant` | `app-api-segundo` | 8084 | `app_segundo` |
+
+As duas rodam **a mesma imagem**: só a configuração muda (`APP_TENANT_CLIENT_ID`,
+`APP_TENANT_CLIENT_SECRET`, `APP_SESSION_SECRET`, `DB_URL`). O token leva o claim `tenant` e o
+issuer `app-api:<tenant>`, e cada instância recusa tokens de outra, mesmo que alguém configure as
+duas com a mesma chave por engano. `APP_SESSION_SECRET` **não tem valor padrão**: sem ele, a
+instância nem sobe.
+
+O desktop escolhe o backend por `-Dwallet.api.url=...` ou `WALLET_APP_API_URL` (padrão
+`http://localhost:8083/`) e mostra o tenant no título da janela (`GET /app/v1/info`).
+
+### 11.4 Isolamento entre clientes do mesmo tenant
+
+O wallet-pix e o scheduler separam **tenants**, mas não sabem que existem clientes finais. O
+`app-api` completa:
+
+- **Pix:** a tabela `sent_pix` guarda quem enviou cada Pix; só esse cliente consulta o status.
+- **Agendamentos:** antes de detalhar ou cancelar, confere se a conta pagadora é a do token. O
+  "pode cancelar?" (`canCancel`) é calculado no servidor, em horário de Brasília, e não pelo relógio
+  do computador do cliente.
+- **Idempotência:** os outros serviços guardam chaves **por tenant**, e todos os clientes do app são
+  o mesmo tenant. A chave enviada adiante é `app-` + 40 caracteres do SHA-256 de
+  `login:chave do desktop` (`IdempotencyKeys`): dois clientes nunca colidem, a mesma tentativa
+  repetida gera a mesma chave, e cabe no limite de 64 caracteres do wallet-pix.
+
+### 11.5 Cadastro que se recupera sozinho
+
+O login nasce `PENDING` **antes** de chamar o core e vira `ACTIVE` depois. Se o `app-api` cair no
+meio, o próximo cadastro com o mesmo CPF acha o login pendente, recebe "cliente já existe" do core
+e recupera a conta pelo CPF, sem criar outra. Um cliente que já existia no core **sem** login
+pendente foi criado fora do app (pelo console): o cadastro é recusado
+(`CUSTOMER_EXISTS_OUTSIDE_APP`), e esse cliente entra pelo **login usando o CPF, só números, como
+senha**. No primeiro login assim, `AuthService.firstAccess` confirma no core que o CPF tem conta e
+cria o login já ativo. É provisório: o CPF não é segredo (ver ADR-001, decisão 4).
+
+### 11.6 O desktop por dentro
+
+```
+Main.kt              application { } → Window; cria SessionStore e AppApiClient
+data/AppApiClient    todas as chamadas HTTP (Ktor); erro vira AppApiException;
+                     SESSION_EXPIRED encerra a sessão
+data/SessionStore    o token, só em memória (fechar o app = sair)
+ui/Navigator         pilha de telas: sealed interface Screen
+                     (Login, Signup, Home, Statement, Transfer, Pix, Schedules, NewSchedule)
+ui/App.kt            escolhe a tela pelo estado; bloqueio por inatividade (5 min sem mouse/teclado)
+ui/Format.kt         dinheiro, datas e textos (formato brasileiro)
+ui/<área>/           uma tela = um @Composable + um ViewModel com StateFlow
+```
+
+**Padrão de cada tela:**
+
+- O ViewModel expõe `StateFlow<UiState>` e funções de ação.
+- A tela faz `collectAsState()` e desenha o estado.
+- Telas de pagamento têm três passos, num `sealed interface Step`: `Form` → `Confirm` → `Done`.
+- A `Idempotency-Key` nasce no passo `Confirm`. Se der erro, a tela continua na confirmação com a
+  mesma chave: clicar "Confirmar" de novo é uma repetição, não um segundo pagamento. Voltar ao
+  formulário para mudar algo gera uma chave nova.
+
+**Empacotar:** `./gradlew :app-desktop:createDistributable` gera o `Wallet.exe` com a JVM embutida.
+A JVM do pacote só leva os módulos listados em `build.gradle.kts`. Se faltar `java.net.http`, o app
+não abre e não mostra erro; se faltar `jdk.localedata`, o dinheiro aparece em formato inglês. Esses
+dois problemas **só aparecem no executável**, nunca no `gradlew run`.
+
+---
+
+## 12. Fluxos de ponta a ponta
+
+### 12.1 Cliente abre conta pelo app
+
+```
+desktop ── POST /app/v1/signup {nome, cpf, senha} ──▶ app-api
+app-api:  grava customer_login PENDING (BCrypt da senha)
+app-api ── POST /v1/auth/token (Basic do tenant) ──▶ core     (token em cache)
+app-api ── POST /v1/customers ──▶ core: cria cliente + conta TRAN, evento no outbox
+app-api:  customer_login → ACTIVE com customer_id e account_id
+desktop ◀── 201; depois o login devolve o token do cliente
+```
+
+### 12.2 Transferência pelo app
+
+```
+desktop ── POST /app/v1/transfers (token do cliente, Idempotency-Key da confirmação) ──▶ app-api
+app-api:  account_id vem do token; chave = app-<sha256(login:chave)>
+app-api ── POST /v1/transfers (JWT do tenant, ledger:write) ──▶ core
+core:     uma transação de banco: idempotência → UPDATE do saldo das duas contas (em ordem de id)
+          → ledger_entry ×2 → outbox_event → COMMIT
+desktop ◀── comprovante
+```
+
+### 12.3 Pix enviado do demo-tenant para o segundo-tenant
+
+```
+1. app-api(demo) ── POST /v1/pix/payments (pix:send) ──▶ pix-service
+2. pix-service: política → holder-check do pagador → POST pix-debits (PIX_OUT) no core
+                → pix_payment SENT + pacs.008 no outbox → 202
+3. OutboxRelay ── pacs.008 ──▶ SNS psp-to-spi ──▶ fila spi-simulator-inbound ──▶ simulador
+4. simulador ── pacs.008 ──▶ SNS spi-to-psp ──▶ fila wallet-pix-spi-inbound ──▶ pix-service
+   (agora como RECEBEDOR, ISPB 87654321 → credenciais do segundo-tenant)
+5. pix-service: holder-check do recebedor → pix_payment INBOUND ACCEPTED → pacs.002 ACSP ──▶ simulador
+6. simulador ── pacs.002 ACSC (para os dois lados) ──▶ pix-service
+7. pix-service: lado recebedor → POST pix-credits (PIX_IN) no segundo-tenant → CREDITED → evento PIX_RECEIVED
+                lado pagador   → COMPLETED → evento PIX_SENT_COMPLETED
+8. app-api(demo) consulta GET /v1/pix/payments/{e2e} quando o desktop pergunta o status
+```
+
+Tudo isso aparece como **um trace só** no Jaeger: o `traceparent` viaja como atributo das
+mensagens SNS/SQS e atravessa o outbox.
+
+### 12.4 Pix rejeitado → estorno
+
+```
+simulador ── pacs.002 RJCT AC03 ──▶ pix-service
+pix-service ── POST /v1/transactions/{débito}/reversals ──▶ core (gera PIX_REFUND, uma única vez)
+pix-service: SENT → REFUNDED → evento PIX_SENT_REFUNDED (reasonCode AC03)
+```
+
+Para provocar: um Pix para o ISPB `99999999` com valor terminado em `,99`.
+
+### 12.5 Pix agendado
+
+```
+dia D-1:  app-api/console ── POST /v1/schedules ──▶ scheduler: valida conta, data, CPF do pagador
+dia D 06:00:  ExecutionJob → tentativa 1, chave sched-<exec>-1 → POST /v1/pix/payments → 202 → PROCESSING
+          pix-service ... (fluxo 12.3) ... evento PIX_SENT_COMPLETED (requestId = sched-<exec>-1)
+          SNS pix-payment-events ──▶ fila wallet-scheduler-pix-events ──▶ PixEventsListener
+          execução EXECUTED → agendamento COMPLETED
+Se 06:00 deu INSUFFICIENT_FUNDS: nova tentativa às 12:00 e às 18:00; depois, FAILED com o motivo.
+```
+
+---
+
+## 13. As decisões que valem para todos os projetos
+
+| Decisão | Por quê | Onde está escrito |
+|---|---|---|
+| Monorepo, mas cada produto com build, banco, CI e tag próprios | Entregar um produto sem arrastar os outros | ADR-009 do core |
+| Só o core mexe em saldo | Garantias de dinheiro num lugar só | ADR-001 do pix, ADR-001 do scheduler |
+| Hexagonal + ArchUnit | Regras testáveis sem infraestrutura; fronteiras verificadas no build | ADR-006 do core |
+| SQL explícito com `JdbcClient`, sem JPA | Concorrência e locks precisam ser visíveis no código | ADR-002/003 do core |
+| `Idempotency-Key` em todo pedido que move dinheiro | Repetir depois de timeout é seguro | READMEs |
+| Outbox para toda mensagem | Nada publicado sem estar gravado, nada gravado sem ser publicado | ADR-002 do core, ADR-001 do pix |
+| Consumidor deduplica pelo id da mensagem | O SQS entrega pelo menos uma vez | ADR-001 do pix |
+| Tenant sempre vem do token | Um tenant não acessa outro trocando um id | ADR-005 do core |
+| Escopos pequenos por finalidade (`pix:send` só debita e estorna) | Um token vazado faz o mínimo de estrago | ADR-010 do core |
+| Dinheiro em centavos (`long`), nunca `double` | Ponto flutuante não representa centavos exatamente | `Money` |
+| Duas roles por banco (owner × app) | A aplicação não consegue alterar a estrutura nem apagar o ledger | READMEs |
+| Eventos sem CPF nem nome | Eventos saem do perímetro do banco | ADR-007 do core |
+| JSON espelhando ISO 20022, e não XML, no barramento local | Legível e fácil de depurar; o XML fica num adaptador de borda | ADR-001 do pix |
+| Fakes em memória em vez de mocks | O teste verifica comportamento, e não a ordem das chamadas | seção 16 |
+| Nomes no código em inglês; textos para o usuário em português | Padrão de mercado no código; o cliente lê português | — |
+
+---
+
+## 14. Observabilidade: achando o que aconteceu
+
+Todos os backends rodam com o **agente OpenTelemetry** (`-javaagent`) e mandam tudo para o
+`otel-collector` do compose do core, que distribui:
+
+| Sinal | Para onde | Como olhar |
+|---|---|---|
+| Traces | Jaeger | http://localhost:16686, buscar pelo serviço (`wallet-core`, `pix-service`, `wallet-scheduler`, `app-api-demo`…) |
+| Logs | Loki | Grafana → Explore → Loki, ou o dashboard de logs |
+| Métricas | Prometheus (scrape de `/actuator/prometheus`) | Grafana, pasta "Wallet Core": negócio, serviço, logs e Pix |
+
+**Achar tudo de um tenant:** os logs levam `tenant_id` no MDC (no core por um interceptor; no
+scheduler também no job e no listener, que rodam fora de uma requisição). No app-api, o MDC leva
+`customer_id`, **nunca** CPF, senha ou token. Do log você pula para o trace pelo `trace_id`.
+
+**Métricas que valem alerta:**
+
+- `wallet_audit_inconsistencies_total`: o replay achou saldo divergente. É crítico.
+- `pix_queue_messages{state}` com algo na DLQ: cada mensagem ali precisa de análise.
+- `pix_outbox_pending` e `wallet_outbox_pending` crescendo: o relay parou.
+
+---
+
+## 15. Onde alterar: receitas de manutenção
+
+**Novo endpoint no core**
+
+1. Porta `in` + serviço em `wallet-application`.
+2. Registrar o caso de uso em `UseCaseConfig`.
+3. Controller + DTO em `ApiModels`.
+4. **Rota e escopo em `SecurityConfig`.** Sem isso, a rota responde 403 (`denyAll` por padrão).
+
+**Nova coluna ou tabela (qualquer serviço)**
+
+- Crie uma migration **nova** (`V<n+1>__descricao.sql`). Nunca edite uma migration que já rodou.
+- No core, inclua a policy de RLS se a tabela for por tenant.
+
+**Novo escopo**
+
+1. `Tenant.DEFAULT_SCOPES` (vale para tenants novos).
+2. Uma migration que conceda o escopo aos tenants já existentes (veja `V3`, `V5`).
+3. A regra em `SecurityConfig` do serviço que exige o escopo.
+
+**Nova regra para enviar Pix** (limite noturno, por exemplo)
+
+- Implemente `PaymentPolicy` em `wallet-pix/.../application/` e registre em `PixServiceConfig`.
+  Ela roda **antes** de qualquer débito.
+
+**Novo código de recusa do SPI**
+
+- `RejectionReason` (pix-service).
+- `FailureReasons` (scheduler), se o agendamento precisar de texto e de regra de retentativa.
+- `transaction-labels.ts` / `schedule-labels.ts` (console).
+- `CustomerMessages` (app-api).
+
+**Novo consumidor de eventos do Pix** (por exemplo, notificações)
+
+1. Uma fila nova assinando `pix-payment-events`, com DLQ, em `init-bus.sh` (e na infraestrutura
+   real).
+2. Um listener que deduplique pelo id da mensagem e copie só os campos do `PixEvent` que usa (como
+   o scheduler faz), para não acoplar o build ao `pix-messages`.
+
+**Novo tenant**
+
+1. No core: provisionar (hoje via `DevDataSeeder`; não há API administrativa).
+2. No wallet-pix: adicionar o ISPB em `pix.participants`.
+3. No scheduler: as credenciais em `scheduler.tenants`.
+4. No app: **uma nova instância** do `app-api` com o seu banco (copie o bloco `app-api-segundo` do
+   `wallet-app/docker-compose.yml`), e o desktop apontando para ela.
+
+**Nova tela no console**
+
+- Componente standalone em `pages/`, rota lazy em `app.routes.ts`, chamada em `WalletApiService`,
+  tipos em `models.ts`.
+
+**Nova tela no app desktop**
+
+1. Novo caso em `Screen` (`Navigator.kt`).
+2. ViewModel + `@Composable` na pasta da área.
+3. A chamada em `AppApiClient`.
+4. O endpoint no `app-api` (controller → serviço → porta).
+5. Os DTOs em `app-contract`.
+
+**Mudar as janelas do agendador**
+
+- `scheduler.windows.times` no `application.yml`. A regra de "último horário" vem da lista.
+
+---
+
+## 16. Testes, CI e release
+
+| Projeto | Comando | O que roda |
+|---|---|---|
+| wallet-core | `mvn verify` | domínio, casos de uso com fakes, ArchUnit, concorrência real (200 movimentos simultâneos, RLS, imutabilidade do ledger) |
+| wallet-pix | `mvn verify` | domínio, casos de uso, contrato JSON, ArchUnit, integração (8 entregas simultâneas do mesmo ACSC creditam uma vez) |
+| wallet-scheduler | `mvn verify` | domínio, casos de uso, ArchUnit, integração com Postgres e LocalStack |
+| wallet-console | `npm test -- --watch=false` | Vitest + jsdom, sem navegador |
+| wallet-app | `./gradlew build` | app-api (fakes, integração, ArchUnit, isolamento entre tenants) e ViewModels do desktop com `MockEngine` e relógio virtual |
+
+Os testes de integração usam **Testcontainers**: precisam do Docker rodando.
+
+**Fakes, não mocks.** Um fake é uma implementação de verdade da porta, em memória
+(`InMemoryFixture`, `FakeCore`, `FakeScheduler`). O teste verifica **o resultado** ("o saldo ficou
+X", "o agendamento ficou FAILED"), e não "o método Y foi chamado". Você pode refatorar à vontade
+sem quebrar testes que continuam corretos.
+
+**CI** (`.github/workflows/`):
+
+- um workflow por projeto (`ci.yml` do core, `ci-wallet-pix.yml`, `ci-wallet-scheduler.yml`,
+  `ci-wallet-console.yml`, `ci-wallet-app.yml`), cada um com filtro de pasta: só roda se o PR
+  tocar aquele projeto;
+- todos validam o título do PR em **Conventional Commits** (`feat(wallet-pix): ...`), que vira a
+  mensagem do commit na `main` (squash merge).
+
+**Release:** por tag com prefixo do projeto (ADR-009 do core). Hoje só o core tem o workflow:
+`wallet-core-vX.Y.Z` dispara o `release.yml`, que builda, testa e publica a imagem no GHCR. Os
+outros projetos já seguem a convenção de tag (`wallet-pix-vX.Y.Z`…), mas ainda não têm workflow de
+release. Fluxo de branches em [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+---
+
+## 17. Problemas comuns e onde procurar
+
+| Sintoma | Causa provável |
+|---|---|
+| `403` numa rota nova | Falta a regra em `SecurityConfig`, ou o token não tem o escopo (peça com `?scope=`) |
+| `403` na seção de agendamentos | O tenant não tem `schedules:*`: rode as migrations do core (V5) |
+| `409 IDEMPOTENCY_KEY_REUSED` | Mesma chave com corpo diferente. Gere a chave uma vez por operação, e não por tentativa |
+| `*-db-init` com `Exited (0)` | Normal: o container cria o banco e termina |
+| Serviço não acha `wallet-core` / `postgres` | O compose do core não está de pé (a rede `wallet-core_default` não existe) |
+| Pix parado em `SENT` | Simulador reiniciado (o estado é em memória) ou o LocalStack caiu; olhe a fila e a DLQ |
+| Mensagem na DLQ | O consumidor falhou 5 vezes. Leia o log do serviço pelo `trace_id` |
+| Agendamento de Pix sem fechar | Fila `wallet-scheduler-pix-events` não existe (suba o LocalStack do wallet-pix depois de atualizar o `init-bus.sh`) ou o evento ainda está no visibility timeout |
+| App desktop volta ao login sozinho | Token expirado (30 min), 5 min sem uso, ou o `app-api` foi reiniciado com outra chave/tenant |
+| `Wallet.exe` não abre | Falta um módulo da JVM em `nativeDistributions.modules` |
+| `app-api` não sobe | Falta `APP_SESSION_SECRET` |
+| Teste de integração "pulado" ou falhando ao conectar | Docker não está rodando |
+| `ArchitectureTest` falhou | Você importou framework no domínio/aplicação ou um adapter `in` usou um adapter `out` |
+| LocalStack pede token | Use a imagem fixada `localstack/localstack:4.12` |
+
+---
+
+## 18. Roteiro de estudo
+
+A ordem que mais ensina, do centro para as bordas:
+
+1. **Dinheiro e concorrência (Java + SQL).**
+   - `Money`, `LedgerTransaction` e `MoveMoneyService` no core; depois `JdbcAccountRepository.applyDelta`.
+   - Estude `UPDATE ... RETURNING`, locks de linha e `ON CONFLICT`.
+   - Rode o `WalletCoreConcurrencyTest`.
+2. **Segurança.**
+   - `SecurityConfig` e `TokenController` do core.
+   - Pegue um token com curl e decodifique em jwt.io.
+3. **Mensageria (Java).**
+   - `SendPixService` e `ReceivePixService`, depois `OutboxRelay` e `SqsQueueConsumer`.
+   - Faça um Pix pelo `pixdev.py` e acompanhe as mensagens em `GET /simulate/messages` e o trace
+     no Jaeger.
+4. **Kotlin no backend.**
+   - `Schedule.kt` e `Execution.kt` (sealed, `when`, data class), depois `ExecutionService.kt` e
+     `ExecutionJob.kt` (`SKIP LOCKED`).
+   - Compare com o Java do pix-service.
+5. **Angular.**
+   - `auth.interceptor.ts`, `wallet-api.service.ts`, depois `pages/account` (signals).
+   - Mude um rótulo e veja o teste falhar.
+6. **Kotlin no desktop.**
+   - `Navigator.kt` e `App.kt`, depois uma tela de pagamento (`ui/payments`) com o ViewModel e o
+     teste dele.
+   - Estude coroutines: `suspend`, `launch`, `StateFlow`, `runTest`.
+7. **Arquitetura de produto.**
+   - Leia as ADRs na ordem: core 001→010, pix 001, scheduler 001, console 001, app 001.
+   - Cada uma tem "alternativas consideradas": é ali que se aprende a decidir.
