@@ -109,13 +109,16 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 | `POST /v1/customers` | `customers:write` | Onboarding + abertura de conta de pagamento (201) |
 | `GET /v1/accounts` | `accounts:read` | Lista as contas do tenant, mais nova primeiro (paginação por `cursor`) |
 | `GET /v1/accounts/lookup?branch=&number=&checkDigit=` | `accounts:read` | Busca uma conta pelo número bancário em vez do id |
+| `GET /v1/accounts/findByTaxId?taxId=` | `accounts:read` | Busca a conta do cliente pelo CPF/CNPJ |
 | `POST /v1/accounts/holder-check` | `accounts:read` | Confere se agência + conta + dígito são de uma conta apta a receber e se pertencem ao CPF/CNPJ do corpo. Responde `result` (`VALID`, `ACCOUNT_NOT_FOUND`, `ACCOUNT_BLOCKED`, `ACCOUNT_CLOSED`, `TAX_ID_MISMATCH`) e `accountId` só quando `VALID`, sem dados do titular. POST para o documento não ir na URL. Usado na autorização de Pix recebidos (`../wallet-pix`) |
 | `GET /v1/accounts/{id}` | `accounts:read` | Dados da conta (ISPB, agência, número, dígito, tipo `TRAN`, saldo) |
 | `GET /v1/accounts/{id}/balance` | `accounts:read` | Saldo |
-| `GET /v1/accounts/{id}/statement?before=&limit=` | `accounts:read` | Extrato paginado por sequência (mais novo primeiro) |
+| `GET /v1/accounts/{id}/statement?before=&limit=&types=&product=` | `accounts:read` | Extrato paginado por sequência (mais novo primeiro). `types` filtra por tipo (`PIX_IN,PIX_OUT`); `product=PIX` traz todos os `PIX_*` |
 | `POST /v1/accounts/{id}/deposits` | `ledger:write` | Entrada de dinheiro |
 | `POST /v1/accounts/{id}/withdrawals` | `ledger:write` ou `pix:send` | Saída de dinheiro (nunca deixa o saldo negativo) |
-| `POST /v1/transactions/{id}/reversals` | `ledger:write` ou `pix:send` | Estorna integralmente um saque, uma única vez por saque (repetir devolve o estorno original) |
+| `POST /v1/accounts/{id}/pix-credits` | `pix:receive` | Pix recebido ou devolução recebida (`PIX_IN`, `PIX_RETURN_IN`), com o detalhe do Pix (ADR-010) |
+| `POST /v1/accounts/{id}/pix-debits` | `pix:send` | Pix enviado ou devolução enviada (`PIX_OUT`, `PIX_RETURN_OUT`), com o detalhe do Pix (ADR-010) |
+| `POST /v1/transactions/{id}/reversals` | `ledger:write` ou `pix:send` | Estorna integralmente um saque (com um depósito) ou um Pix enviado (com um `PIX_REFUND`), uma única vez (repetir devolve o estorno original) |
 | `POST /v1/transfers` | `ledger:write` | Transferência entre contas do tenant |
 | `GET /v1/accounts/{id}/audit` | `ledger:audit` | Reconstrói o saldo pelos eventos e compara com o saldo armazenado |
 
@@ -201,14 +204,14 @@ Os JSONs são a fonte da verdade: edições pela UI do Grafana valem até o pró
 
 Nenhum desses serviços é necessário para a aplicação funcionar — métricas, traces e logs só não têm para onde ir sem eles. Em produção, aponte `OTEL_EXPORTER_OTLP_ENDPOINT` para o seu próprio coletor/vendor e configure seu Prometheus (ou equivalente) para fazer scrape de `/actuator/prometheus`; os containers locais não fazem parte do deploy de produção.
 
-## 8. Estado da verificação (leia antes de usar)
+## 8. Estado da verificação
 
 | Item | Situação |
 |---|---|
-| `wallet-domain` e `wallet-application` | **Compilados e testados**: 31 testes unitários passando (CPF/CNPJ, dígito, partidas dobradas, idempotência, transferências, saldo insuficiente, auditoria detectando adulteração, paginação). Compilados com JDK 21 (`--release 21`), pois o ambiente onde o projeto foi gerado não tinha JDK 25 |
-| Adapters, bootstrap, migrations SQL, testes de concorrência | **Escritos e revisados, mas ainda não compilados nem executados**: o ambiente de geração não alcançava o Maven Central nem tinha Docker. Só houve checagem de sintaxe. Rode `mvn verify` com Docker; se algo divergir nas APIs do Spring Boot 4 / Jackson 3 / Testcontainers 2 (nomes de starters e pacotes mudaram na versão 4), o ajuste deve ser pontual |
-| Testes de concorrência (`WalletCoreConcurrencyTest`) | Cobrem 200 movimentos simultâneos na mesma carteira, saques que não podem estourar o saldo, transferências opostas sem deadlock, mesma `Idempotency-Key` em paralelo, isolamento entre tenants (RLS) e imutabilidade do ledger. São ignorados automaticamente sem Docker |
-| Observabilidade (métricas, tracing, `AuditSweepJob`, `docker-compose.yml`/Prometheus/Jaeger/Loki/Grafana) | **Escrita e revisada, ainda não executada de ponta a ponta** — mesma limitação de ambiente acima. Os nomes de métrica usados nas regras de `docker/prometheus/alerts.yml` foram conferidos contra a convenção de nomenclatura do Micrometer para Prometheus, mas vale rodar `docker compose up` e abrir a aba *Alerts* do Prometheus para confirmar que cada regra carrega sem erro de sintaxe PromQL |
+| Todos os módulos | Compilados e testados a cada PR pelo CI (`.github/workflows/ci.yml`, que roda `mvn verify` com Docker) |
+| Testes de unidade (`wallet-domain`, `wallet-application`) | Rodam sem Docker: CPF/CNPJ, dígito, partidas dobradas, idempotência, transferências, estornos, regras de Pix (ADR-010), auditoria detectando adulteração, paginação |
+| Testes de concorrência (`WalletCoreConcurrencyTest`) | Cobrem movimentos simultâneos na mesma carteira, saques que não podem estourar o saldo, transferências opostas sem deadlock, mesma `Idempotency-Key` em paralelo, isolamento entre tenants (RLS) e imutabilidade do ledger. Usam PostgreSQL via Testcontainers e são ignorados automaticamente sem Docker |
+| Uso pelos outros produtos | O `wallet-pix`, o `wallet-scheduler`, o `wallet-console` e o `app-api` do `wallet-app` chamam esta API de ponta a ponta no ambiente local (`docker compose`) |
 
 ## 9. Versionamento e CI/CD
 
@@ -229,7 +232,7 @@ Pipeline (`ci.yml` + `release.yml` + `build-test.yml` reutilizável) assume **Gi
 - Particionamento do `ledger_entry` por tempo (exige incluir a chave de partição nas constraints únicas), arquivamento e réplicas de leitura.
 - Publisher real (Kafka/SNS/SQS), DLQ e limpeza do outbox publicado.
 - Trilha de *hash chain* por conta para evidência criptográfica de adulteração (a auditoria por replay já existe; isso adicionaria uma segunda camada, independente do banco).
-- Bloqueio/reserva de saldo (holds), limites, tarifas, estorno e integração com SPI/PIX (DICT, QR Code).
+- Bloqueio/reserva de saldo (holds), limites e tarifas. Estorno e Pix já existem (ADR-010 e o projeto `../wallet-pix`); do Pix, faltam DICT e QR Code.
 - Roteamento de alertas para um canal real (Alertmanager + Slack/PagerDuty) — hoje os alertas só aparecem na aba *Alerts* do Prometheus.
 - Deploy contínuo de fato (o pipeline publica a imagem no GHCR, mas não a implanta em nenhum ambiente — depende de uma decisão de infraestrutura ainda não tomada) e cobertura de testes agregada (JaCoCo) no CI.
 
