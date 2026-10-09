@@ -14,6 +14,11 @@
       <input name="taxId" [(ngModel)]="taxId" required placeholder="000.000.000-00" />
     </label>
     <label>
+      E-mail (opcional)
+      <input name="email" type="email" [(ngModel)]="email" maxlength="254" placeholder="cliente@exemplo.com" />
+      <span class="hint">Para onde o app do cliente manda o código de acesso. Sem e-mail, o cliente não entra no app.</span>
+    </label>
+    <label>
       Referência externa (opcional)
       <input name="externalRef" [(ngModel)]="externalRef" maxlength="64" />
     </label>

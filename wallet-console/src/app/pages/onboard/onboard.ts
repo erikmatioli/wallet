@@ -17,6 +17,7 @@ export class Onboard {
   name = '';
   taxId = '';
   externalRef = '';
+  email = '';
 
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
@@ -36,6 +37,7 @@ export class Onboard {
         name: this.name.trim(),
         taxId: this.taxId.trim(),
         externalRef: this.externalRef.trim() || undefined,
+        email: this.email.trim() || undefined,
       })
       .subscribe({
         next: (res) => {
@@ -44,6 +46,7 @@ export class Onboard {
           this.name = '';
           this.taxId = '';
           this.externalRef = '';
+          this.email = '';
         },
         error: (err) => {
           this.error.set(extractErrorMessage(err));

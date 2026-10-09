@@ -16,6 +16,7 @@ export interface CustomerResponse {
   documentType: 'CPF' | 'CNPJ';
   externalRef: string | null;
   status: string;
+  email?: string | null;
 }
 
 export interface AccountResponse {
@@ -35,12 +36,16 @@ export interface AccountResponse {
 export interface AccountDetailResponse extends AccountResponse {
   customerName: string;
   documentMasked: string;
+  customerId: string;
+  /** Where the customer's app sends login codes (wallet-app ADR-003); absent when none was registered. */
+  customerEmail?: string | null;
 }
 
 export interface OnboardCustomerRequest {
   name: string;
   taxId: string;
   externalRef?: string;
+  email?: string;
 }
 
 export interface OnboardCustomerResponse {
