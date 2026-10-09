@@ -1,0 +1,53 @@
+# M-Wall: the PWA and, on the same origin, the app-api of ONE tenant (ADR-001, decision 3). The image is the
+# same for every tenant; APP_API_UPSTREAM (e.g. http://app-api:8083) picks whose app this is. The official
+# nginx image fills ${...} from the environment when it starts (/etc/nginx/templates).
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # The upstream through a variable, resolved per request by Docker's DNS: the PWA still starts (and shows
+    # its own "no connection" messages) when app-api is down.
+    resolver 127.0.0.11 valid=30s ipv6=off;
+    set $app_api ${APP_API_UPSTREAM};
+
+    # app-api's answers are the customer's data: never stored by the browser nor by the service worker.
+    location /app/v1/ {
+        proxy_pass $app_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        add_header Cache-Control "no-store" always;
+        include /etc/nginx/snippets/security-headers.conf;
+    }
+
+    # Hashed bundles can be cached forever.
+    location ~* "-[A-Z0-9]{8}\.(?:js|css)$" {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        include /etc/nginx/snippets/security-headers.conf;
+        try_files $uri =404;
+    }
+
+    # The service worker, its manifest, the web manifest and index.html are always revalidated: a new deploy
+    # reaches the phones on the next open.
+    location ~ ^/(ngsw-worker\.js|ngsw\.json|safety-worker\.js|worker-basic\.min\.js|manifest\.webmanifest|index\.html)$ {
+        add_header Cache-Control "no-cache";
+        include /etc/nginx/snippets/security-headers.conf;
+        try_files $uri =404;
+    }
+
+    location = /manifest.webmanifest {
+        default_type application/manifest+json;
+        add_header Cache-Control "no-cache";
+        include /etc/nginx/snippets/security-headers.conf;
+    }
+
+    # SPA fallback: a deep link (/extrato, /pagar/pix) serves index.html and the Angular router takes over.
+    location / {
+        add_header Cache-Control "no-cache";
+        include /etc/nginx/snippets/security-headers.conf;
+        try_files $uri $uri/ /index.html;
+    }
+}

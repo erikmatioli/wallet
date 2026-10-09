@@ -1,0 +1,30 @@
+# M-Wall, one PWA per tenant (ADR-001, decision 3), in front of wallet-app's app-api instances.
+# Start wallet-core, wallet-otp and wallet-app first (and wallet-pix / wallet-scheduler for Pix and schedules).
+#
+#   docker compose up -d --build
+#   demo-tenant:    http://localhost:8086
+#   segundo-tenant: http://localhost:8087
+services:
+  mobile:
+    build: .
+    image: wallet-mobile:local
+    environment:
+      APP_API_UPSTREAM: http://app-api:8083
+    ports:
+      - "8086:80"
+
+  mobile-segundo:
+    image: wallet-mobile:local
+    pull_policy: never            # the image is the one "mobile" builds, never pulled from a registry
+    depends_on:
+      mobile:                     # so the image exists before this instance starts
+        condition: service_started
+    environment:
+      APP_API_UPSTREAM: http://app-api-segundo:8083
+    ports:
+      - "8087:80"
+
+networks:
+  default:
+    name: wallet-core_default
+    external: true
