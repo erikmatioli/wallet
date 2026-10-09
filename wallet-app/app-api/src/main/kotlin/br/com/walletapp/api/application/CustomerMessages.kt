@@ -15,6 +15,7 @@ object CustomerMessages {
         "POLICY_MAX_AMOUNT" to "Valor acima do limite por Pix.",
         "INVALID_PAYEE" to "Dados do recebedor inválidos. Confira ISPB, agência, conta e CPF/CNPJ.",
         "VALIDATION_FAILED" to "Dados do recebedor inválidos. Confira ISPB, agência, conta e CPF/CNPJ.",
+        "INVALID_PIX_COUNTERPARTY" to "Dados do recebedor inválidos. Confira ISPB, agência, conta e CPF/CNPJ.",
         "PAYER_TAX_ID_MISMATCH" to "Não foi possível confirmar o titular da sua conta. Procure o atendimento.",
         "PAYER_ACCOUNT_BLOCKED" to "Sua conta está bloqueada.",
         "PAYER_ACCOUNT_CLOSED" to "Sua conta está encerrada.",

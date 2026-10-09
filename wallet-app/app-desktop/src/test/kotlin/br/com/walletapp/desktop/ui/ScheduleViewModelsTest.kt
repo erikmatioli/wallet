@@ -90,6 +90,10 @@ class ScheduleViewModelsTest {
         vm.edit { it.copy(date = "32/10/2026", name = "F", taxId = "1", ispb = "9", pixBranch = "1", account = "1") }
         vm.review()
         assertEquals("Informe a data no formato dd/mm/aaaa.", vm.state.value.error)
+
+        vm.edit { it.copy(date = "09/10/2026") }
+        vm.review()
+        assertEquals("Informe o CPF (11 dígitos) ou o CNPJ (14 caracteres) do recebedor.", vm.state.value.error)
         assertEquals(0, requests.size)
     }
 

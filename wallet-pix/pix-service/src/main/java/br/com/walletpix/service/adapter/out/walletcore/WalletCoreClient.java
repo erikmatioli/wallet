@@ -141,8 +141,8 @@ class WalletCoreClient implements WalletCore {
                     .body(TransactionResponse.class));
             return new DebitResult.Debited(response.id(), response.endToEndId());
         } catch (Refused e) {
-            // 422 (INSUFFICIENT_FUNDS, ACCOUNT_NOT_ACTIVE) or 409 (IDEMPOTENCY_KEY_REUSED): a
-            // business answer for the caller of the REST API; nothing was debited.
+            // 422 (INSUFFICIENT_FUNDS, ACCOUNT_NOT_ACTIVE), 409 (IDEMPOTENCY_KEY_REUSED) or 400 (invalid Pix
+            // data): an answer for the caller of the REST API; nothing was debited.
             return new DebitResult.Refused(e.code, e.detail);
         }
     }
@@ -199,7 +199,7 @@ class WalletCoreClient implements WalletCore {
     }
 
     /**
-     * 409/422 from wallet-core: a business refusal with its stable code. The debit turns it into
+     * 400/409/422 from wallet-core: a refusal (invalid data or a business rule) with its stable code. The debit turns it into
      * an answer for the REST caller; a refused credit or reversal (e.g. account blocked meanwhile)
      * stays a {@link PermanentFailure}, i.e. the message goes to the DLQ for someone to look at.
      */
@@ -227,7 +227,8 @@ class WalletCoreClient implements WalletCore {
             throw new RetryLater("wallet-core " + operation + " failed: " + e.getMessage(), e);
         } catch (HttpClientErrorException.NotFound e) {
             throw new NotFound(operation);
-        } catch (HttpClientErrorException.Conflict | HttpClientErrorException.UnprocessableContent e) {
+        } catch (HttpClientErrorException.BadRequest | HttpClientErrorException.Conflict
+                 | HttpClientErrorException.UnprocessableContent e) {
             Problem p = e.getResponseBodyAs(Problem.class);
             throw new Refused(operation, p == null || p.code() == null ? e.getStatusCode().toString() : p.code(),
                     p == null ? e.getMessage() : p.detail());

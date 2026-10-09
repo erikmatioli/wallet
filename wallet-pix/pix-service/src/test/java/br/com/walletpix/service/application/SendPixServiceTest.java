@@ -206,6 +206,20 @@ class SendPixServiceTest {
     }
 
     @Test
+    void payeeDocumentOfTheWrongSizeIsRefusedBeforeAnyDebit() {
+        assertThatThrownBy(() -> f.send.initiate(withPayeeTaxId(command("req-1", "10.00"), "111.444.777-3")))
+                .isInstanceOfSatisfying(PaymentRefused.class, e -> assertThat(e.code()).isEqualTo("INVALID_PAYEE"));
+        assertThat(f.debitCalls).isZero();
+    }
+
+    @Test
+    void alphanumericCnpjOfThePayeeKeepsItsLetters() {
+        f.send.initiate(withPayeeTaxId(command("req-1", "10.00"), "12.abc.345/01de-35"));
+
+        assertThat(f.pixRecordsByKey.get("pix-debit-req-1").counterparty().taxId()).isEqualTo("12ABC34501DE35");
+    }
+
+    @Test
     void tenantThatIsNotAParticipantIsRefused() {
         InitiateCommand c = command("req-1", "10.00");
         InitiateCommand foreign = new InitiateCommand("11111111", c.requestId(), c.payerAccountId(), c.payerTaxId(),
@@ -221,6 +235,11 @@ class SendPixServiceTest {
     private InitiateCommand command(String requestId, String amount) {
         return new InitiateCommand(OUR_ISPB, requestId, payer, "529.982.247-25", EXTERNAL_ISPB, "0042", "1234565",
                 "11144477735", "João Externo", new BigDecimal(amount), "aluguel");
+    }
+
+    private static InitiateCommand withPayeeTaxId(InitiateCommand c, String taxId) {
+        return new InitiateCommand(c.ispb(), c.requestId(), c.payerAccountId(), c.payerTaxId(), c.payeeIspb(),
+                c.payeeBranch(), c.payeeAccountNumber(), taxId, c.payeeName(), c.amount(), c.description());
     }
 
     private static AppHdr spiHdr() {

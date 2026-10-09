@@ -135,7 +135,7 @@ JSON com as tags ISO 20022 (`AppHdr`/`Document`, `GrpHdr`, `CdtTrfTxInf`, `EndTo
 
 Simplificações em relação ao catálogo real:
 - uma transação por mensagem;
-- `Id` do participante achatado (CPF/CNPJ só com dígitos);
+- `Id` do participante achatado (CPF/CNPJ sem pontuação; o CNPJ alfanumérico mantém as letras, em maiúsculas);
 - agentes identificados direto pelo ISPB.
 
 Identificadores no formato do SPI:

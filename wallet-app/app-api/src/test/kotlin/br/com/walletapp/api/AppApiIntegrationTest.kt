@@ -123,8 +123,10 @@ class AppApiIntegrationTest {
         assertThat(noToken.statusCode()).isEqualTo(401)
         assertThat(Json.decodeFromString<AppError>(noToken.body()).code).isEqualTo("SESSION_EXPIRED")
 
-        // Changing one character of the signature: the token is not ours any more.
-        val tampered = maria.token.dropLast(1) + (if (maria.token.last() == 'A') 'B' else 'A')
+        // Changing one character of the signature: the token is not ours any more. Not the last one: its
+        // low bits are base64url padding, and A/B there can decode to the very same signature.
+        val i = maria.token.length - 10
+        val tampered = maria.token.substring(0, i) + (if (maria.token[i] == 'A') 'B' else 'A') + maria.token.substring(i + 1)
         assertThat(call("GET", "/app/v1/me", token = tampered).statusCode()).isEqualTo(401)
     }
 

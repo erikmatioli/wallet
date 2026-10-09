@@ -120,6 +120,7 @@ class PixViewModel(
         val cents = Format.parseCents(f.amount)
         val error = when {
             listOf(f.name, f.taxId, f.ispb, f.branch, f.account).any(String::isBlank) -> "Preencha os dados do recebedor."
+            !Format.isTaxId(f.taxId) -> Format.TAX_ID_ERROR
             cents == null -> "Informe um valor válido, como 150,00."
             else -> null
         }
