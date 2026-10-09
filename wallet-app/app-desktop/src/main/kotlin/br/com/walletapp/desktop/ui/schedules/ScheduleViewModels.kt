@@ -103,6 +103,7 @@ class NewScheduleViewModel(private val api: AppApiClient, private val scope: Cor
             cents == null -> "Informe um valor válido, como 150,00."
             !f.pix && listOf(f.branch, f.number, f.checkDigit).any(String::isBlank) -> "Informe a conta de destino."
             f.pix && listOf(f.name, f.taxId, f.ispb, f.pixBranch, f.account).any(String::isBlank) -> "Preencha os dados do recebedor."
+            f.pix && !Format.isTaxId(f.taxId) -> Format.TAX_ID_ERROR
             else -> null
         }
         if (error != null) {

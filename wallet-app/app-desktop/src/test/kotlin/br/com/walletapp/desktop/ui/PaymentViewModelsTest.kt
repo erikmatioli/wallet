@@ -96,6 +96,20 @@ class PaymentViewModelsTest {
     }
 
     @Test
+    fun `a payee document of the wrong size never reaches the server`() {
+        val vm = PixViewModel(api { ok(pix("SENT")) }, kotlinx.coroutines.MainScope())
+        vm.edit { it.copy(name = "Fulano", taxId = "111.444.777-3", ispb = "99999999", branch = "0042", account = "1234565", amount = "15") }
+
+        vm.review()
+        assertEquals("Informe o CPF (11 dígitos) ou o CNPJ (14 caracteres) do recebedor.", vm.state.value.error)
+        assertEquals(0, requests.size)
+
+        vm.edit { it.copy(taxId = "12.abc.345/01de-35") } // alphanumeric CNPJ
+        vm.review()
+        assertNull(vm.state.value.error)
+    }
+
+    @Test
     fun `a Pix receipt follows the Pix until it is settled`() = runTest {
         var polls = 0
         val vm = PixViewModel(api {

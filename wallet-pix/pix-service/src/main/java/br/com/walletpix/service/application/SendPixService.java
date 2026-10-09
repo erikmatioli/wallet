@@ -35,7 +35,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Locale;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Outgoing Pix - we are the payer's PSP.
@@ -48,6 +50,9 @@ import java.util.UUID;
  * </ol>
  */
 public final class SendPixService {
+
+    /** CPF (11 digits) or CNPJ (14 characters, letters allowed in the first 12), as wallet-core accepts. */
+    private static final Pattern TAX_ID = Pattern.compile("[0-9]{11}|[0-9A-Z]{12}[0-9]{2}");
 
     /** What the caller asked for. {@code requestId} is the caller's Idempotency-Key. */
     public record InitiateCommand(String ispb, String requestId, UUID payerAccountId, String payerTaxId,
@@ -142,7 +147,7 @@ public final class SendPixService {
         DebitResult debit = walletCore.debit(c.ispb(), c.payerAccountId(), cents,
                 limit("Pix enviado para " + c.payeeName()), "pix-debit-" + c.requestId(),
                 PixRecord.of(SpiIds.newEndToEndId(c.ispb(), now),
-                        new Counterparty(c.payeeName(), digits(c.payeeTaxId()), c.payeeIspb(), c.payeeBranch(),
+                        new Counterparty(c.payeeName(), taxId(c.payeeTaxId()), c.payeeIspb(), c.payeeBranch(),
                                 c.payeeAccountNumber()),
                         c.description()));
         if (debit instanceof DebitResult.Refused refused) {
@@ -154,8 +159,8 @@ public final class SendPixService {
 
         PixPayment payment = PixPayment.sentOutgoing(debited.endToEndId(), c.ispb(), c.payeeIspb(),
                 SpiIds.newMessageId(c.ispb()), cents,
-                new PartyAccount(payer.holderName(), digits(c.payerTaxId()), payer.branch(), acc),
-                new PartyAccount(c.payeeName(), digits(c.payeeTaxId()), c.payeeBranch(), c.payeeAccountNumber()),
+                new PartyAccount(payer.holderName(), taxId(c.payerTaxId()), payer.branch(), acc),
+                new PartyAccount(c.payeeName(), taxId(c.payeeTaxId()), c.payeeBranch(), c.payeeAccountNumber()),
                 c.payerAccountId(), debitId, c.requestId(), c.description(), now);
         boolean committed = commit("request:" + c.requestId(), "initiate", () -> {
             payments.insert(payment);
@@ -199,6 +204,11 @@ public final class SendPixService {
                 || c.payeeTaxId() == null || c.payeeName() == null || c.payeeName().isBlank()) {
             throw new PaymentRefused("INVALID_PAYEE",
                     "payee needs ispb (8 digits), branch (4), accountNumber with check digit, taxId and name");
+        }
+        // Checked here, before the debit: wallet-core refuses the same shape (PixCounterparty), and a refusal
+        // there used to surface as an upstream failure (502) instead of a mistake in the payee's data.
+        if (!TAX_ID.matcher(taxId(c.payeeTaxId())).matches()) {
+            throw new PaymentRefused("INVALID_PAYEE", "payee taxId must be a CPF (11 digits) or CNPJ (14 characters)");
         }
         try {
             Amounts.toCents(c.amount());
@@ -285,8 +295,12 @@ public final class SendPixService {
         }
     }
 
-    private static String digits(String taxId) {
-        return taxId == null ? null : taxId.replaceAll("\\D", "");
+    /**
+     * The document without its formatting, letters kept: the alphanumeric CNPJ has letters in its first 12
+     * characters (same normalization as wallet-core's PixCounterparty).
+     */
+    private static String taxId(String raw) {
+        return raw == null ? null : raw.replaceAll("[^0-9A-Za-z]", "").toUpperCase(Locale.ROOT);
     }
 
     private static String limit(String description) {

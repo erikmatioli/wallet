@@ -12,6 +12,14 @@ import java.util.Locale
 /** How the app writes money, dates and transaction types - in pt-BR, from the contract's raw values. */
 object Format {
 
+    private val taxIdShape = Regex("""[0-9]{11}|[0-9A-Z]{12}[0-9]{2}""")
+
+    /** Shown in the form when [isTaxId] says no, before anything is sent. */
+    const val TAX_ID_ERROR = "Informe o CPF (11 dígitos) ou o CNPJ (14 caracteres) do recebedor."
+
+    /** A CPF (11 digits) or CNPJ (14 characters), formatting ignored. Only the shape: app-api checks the rest. */
+    fun isTaxId(raw: String): Boolean = taxIdShape.matches(raw.filter(Char::isLetterOrDigit).uppercase())
+
     private val brl = NumberFormat.getCurrencyInstance(Locale.of("pt", "BR"))
     private val zone = ZoneId.of("America/Sao_Paulo")
     private val dateTime = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm").withZone(zone)
