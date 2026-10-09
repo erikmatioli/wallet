@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: wallet-otp
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/otp}
+    username: ${DB_USER:otp_app}
+    password: ${DB_PASSWORD:otp_app}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      connection-timeout: 3000
+  flyway:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/otp}
+    user: ${DB_MIGRATION_USER:otp_owner}
+    password: ${DB_MIGRATION_PASSWORD:otp_owner}
+  # Where the codes are sent (ADR-001, decision 6). Locally, the Mailpit container: it keeps every
+  # message and shows them at http://localhost:8025, nothing leaves the machine.
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    properties:
+      mail.smtp.connectiontimeout: 3000
+      mail.smtp.timeout: 5000
+
+server:
+  port: ${PORT:8085}
+  shutdown: graceful
+
+logging:
+  pattern:
+    # tenant_id will come from the request; trace_id/span_id from the OpenTelemetry Java agent (see
+    # docker-compose.yml). Without them they print empty.
+    level: "%5p [tenant_id=%X{tenant_id:-},trace_id=%X{trace_id:-},span_id=%X{span_id:-}]"
+
+otp:
+  # HMAC key of codes, contexts and destinations (ADR-001, decision 4). No default on purpose: the
+  # service does not start without OTP_CODE_KEY, at least 32 bytes.
+  code-key: ${OTP_CODE_KEY}
+  wallet-core:
+    jwk-set-uri: ${WALLET_CORE_URL:http://localhost:8080}/.well-known/jwks.json
+    issuer: wallet-core
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    # The SMTP server being down must not take the service out of the load balancer: creating a
+    # challenge answers 503 then, and verifying codes still works (ADR-001, decision 6).
+    mail:
+      enabled: false
+  metrics:
+    tags:
+      application: ${spring.application.name}
