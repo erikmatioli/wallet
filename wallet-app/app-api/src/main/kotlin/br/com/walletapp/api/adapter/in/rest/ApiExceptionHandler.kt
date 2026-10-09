@@ -6,9 +6,11 @@ import br.com.walletapp.api.domain.BusinessRuleException
 import br.com.walletapp.api.domain.ConflictException
 import br.com.walletapp.api.domain.DomainException
 import br.com.walletapp.api.domain.NotFoundException
+import br.com.walletapp.api.domain.TooManyRequestsException
 import br.com.walletapp.api.domain.ValidationException
 import br.com.walletapp.contract.AppError
 import org.slf4j.LoggerFactory
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
@@ -29,6 +31,9 @@ class ApiExceptionHandler {
             is NotFoundException -> HttpStatus.NOT_FOUND
             is ConflictException -> HttpStatus.CONFLICT
             is BusinessRuleException -> HttpStatus.UNPROCESSABLE_ENTITY
+            is TooManyRequestsException -> return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, e.retryAfterSeconds.toString())
+                .body(AppError(e.code, e.message ?: e.code, e.retryAfterSeconds))
         }
         return ResponseEntity.status(status).body(AppError(e.code, e.message ?: e.code))
     }

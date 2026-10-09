@@ -106,12 +106,14 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 |---|---|---|
 | `POST /v1/auth/token[?scope=]` | Basic | Troca client id/secret por JWT (10 min). `scope` opcional só reduz os escopos (ex.: `pix:send`); pedir um que o cliente não tem dá `400 invalid_scope` |
 | `GET /.well-known/jwks.json` | público | Chaves públicas para validar o JWT |
-| `POST /v1/customers` | `customers:write` | Onboarding + abertura de conta de pagamento (201) |
+| `POST /v1/customers` | `customers:write` | Onboarding + abertura de conta de pagamento (201). `email` opcional: para onde os produtos do cliente (o app) mandam códigos de acesso |
+| `PUT /v1/customers/{id}/email` | `customers:write` | Define, troca ou (vazio) remove o e-mail do cliente (204) |
+| `GET /v1/customers/contact?taxId=` | `accounts:read` | Nome, e-mail e conta de pagamento do cliente pelo CPF/CNPJ (ADR-003 do wallet-app) |
 | `GET /v1/accounts` | `accounts:read` | Lista as contas do tenant, mais nova primeiro (paginação por `cursor`) |
 | `GET /v1/accounts/lookup?branch=&number=&checkDigit=` | `accounts:read` | Busca uma conta pelo número bancário em vez do id |
 | `GET /v1/accounts/findByTaxId?taxId=` | `accounts:read` | Busca a conta do cliente pelo CPF/CNPJ |
 | `POST /v1/accounts/holder-check` | `accounts:read` | Confere se agência + conta + dígito são de uma conta apta a receber e se pertencem ao CPF/CNPJ do corpo. Responde `result` (`VALID`, `ACCOUNT_NOT_FOUND`, `ACCOUNT_BLOCKED`, `ACCOUNT_CLOSED`, `TAX_ID_MISMATCH`) e `accountId` só quando `VALID`, sem dados do titular. POST para o documento não ir na URL. Usado na autorização de Pix recebidos (`../wallet-pix`) |
-| `GET /v1/accounts/{id}` | `accounts:read` | Dados da conta (ISPB, agência, número, dígito, tipo `TRAN`, saldo) |
+| `GET /v1/accounts/{id}` | `accounts:read` | Dados da conta (ISPB, agência, número, dígito, tipo `TRAN`, saldo), titular, `customerId` e `customerEmail` |
 | `GET /v1/accounts/{id}/balance` | `accounts:read` | Saldo |
 | `GET /v1/accounts/{id}/statement?before=&limit=&types=&product=` | `accounts:read` | Extrato paginado por sequência (mais novo primeiro). `types` filtra por tipo (`PIX_IN,PIX_OUT`); `product=PIX` traz todos os `PIX_*` |
 | `POST /v1/accounts/{id}/deposits` | `ledger:write` | Entrada de dinheiro |

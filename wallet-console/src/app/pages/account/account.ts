@@ -34,6 +34,10 @@ export class AccountPage implements OnInit {
   readonly error = signal<string | null>(null);
   readonly notice = signal<string | null>(null);
 
+  // Customer's email (wallet-app ADR-003): where the app sends the login codes.
+  readonly editingEmail = signal(false);
+  emailDraft = '';
+
   // Deposit / withdraw
   depositAmount = 0;
   depositDescription = '';
@@ -196,6 +200,28 @@ export class AccountPage implements OnInit {
             this.busy.set(false);
           },
         });
+    });
+  }
+
+  editEmail(current: string | null | undefined): void {
+    this.emailDraft = current ?? '';
+    this.editingEmail.set(true);
+  }
+
+  saveEmail(): void {
+    const acc = this.account();
+    if (!acc) return;
+    this.runAction(() => {
+      this.api.changeCustomerEmail(acc.customerId, this.emailDraft.trim()).subscribe({
+        next: () => {
+          this.editingEmail.set(false);
+          this.afterMutation(this.emailDraft.trim() ? 'E-mail salvo.' : 'E-mail removido.');
+        },
+        error: (err) => {
+          this.error.set(extractErrorMessage(err));
+          this.busy.set(false);
+        },
+      });
     });
   }
 

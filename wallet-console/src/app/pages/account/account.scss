@@ -131,3 +131,29 @@ h1 {
   color: var(--color-danger-text);
   font-size: 0.85rem;
 }
+
+.email-line {
+  display: block;
+  margin-top: 4px;
+}
+
+.email-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.email-form input {
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
+button.link {
+  background: none;
+  border: none;
+  padding: 0 4px;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

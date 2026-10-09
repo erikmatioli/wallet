@@ -9,7 +9,7 @@ sealed class DomainException(val code: String, message: String) : RuntimeExcepti
 /** Invalid input: 400. */
 class ValidationException(code: String, message: String) : DomainException(code, message)
 
-/** Wrong CPF or password, expired or invalid session: 401. */
+/** Wrong or unknown login code, expired or invalid session: 401. */
 class AuthenticationException(code: String, message: String) : DomainException(code, message)
 
 /** Not found, or not this customer's: 404. */
@@ -18,5 +18,8 @@ class NotFoundException(code: String, message: String) : DomainException(code, m
 /** Already exists: 409. */
 class ConflictException(code: String, message: String) : DomainException(code, message)
 
-/** Valid request refused by a rule (balance, locked login...): 422. */
+/** Valid request refused by a rule (balance, expired code...): 422. */
 class BusinessRuleException(code: String, message: String) : DomainException(code, message)
+
+/** Too many codes asked for (ADR-002): 429, with how long until another one may be asked. */
+class TooManyRequestsException(message: String, val retryAfterSeconds: Long) : DomainException("TOO_MANY_REQUESTS", message)

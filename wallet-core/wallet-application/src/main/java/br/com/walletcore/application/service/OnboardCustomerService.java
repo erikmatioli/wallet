@@ -11,6 +11,7 @@ import br.com.walletcore.domain.account.Account;
 import br.com.walletcore.domain.account.AccountType;
 import br.com.walletcore.domain.account.PaymentAccountNumber;
 import br.com.walletcore.domain.customer.Customer;
+import br.com.walletcore.domain.customer.Email;
 import br.com.walletcore.domain.customer.TaxId;
 import br.com.walletcore.domain.event.CustomerOnboarded;
 import br.com.walletcore.domain.exception.ConflictException;
@@ -47,7 +48,8 @@ public final class OnboardCustomerService implements OnboardCustomerUseCase {
     public Result onboard(Command c) {
         TaxId taxId = TaxId.parse(c.taxId());
         Instant now = clock.instant();
-        Customer customer = Customer.onboard(c.tenantId(), c.name(), taxId, c.externalRef(), now);
+        Customer customer = Customer.onboard(c.tenantId(), c.name(), taxId, c.externalRef(),
+                Email.parseOrNull(c.email()), now);
 
         return tx.inTransaction(c.tenantId(), () -> {
             Tenant tenant = tenants.findById(c.tenantId())

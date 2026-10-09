@@ -26,6 +26,8 @@ x-app-api: &app-api
     PIX_SERVICE_URL: http://pix-service:8081
     # wallet-scheduler's compose must be up for schedules.
     SCHEDULER_URL: http://wallet-scheduler:8082
+    # wallet-otp's compose must be up for signup and login (ADR-002): every login is a code by email.
+    APP_OTP_URL: http://wallet-otp:8085
 
     JAVA_TOOL_OPTIONS: "-javaagent:/app/opentelemetry-javaagent.jar"
     OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"

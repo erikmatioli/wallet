@@ -20,10 +20,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
-/** A narrow column centred in the window, for the two forms. */
+/** A narrow column centred in the window, for the forms. */
 @Composable
 private fun FormColumn(content: @Composable () -> Unit) {
     Column(
@@ -33,6 +32,33 @@ private fun FormColumn(content: @Composable () -> Unit) {
     ) {
         Column(Modifier.widthIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
     }
+}
+
+@Composable
+private fun Busy(busy: Boolean, label: String) {
+    if (busy) CircularProgressIndicator(Modifier.widthIn(max = 18.dp)) else Text(label)
+}
+
+/**
+ * The code that arrived by email (ADR-002), the same for login and signup. "Reenviar código" waits for the
+ * countdown; [back] goes back to change the CPF or the data.
+ */
+@Composable
+private fun CodeEntry(step: CodeStep, busy: Boolean, error: String?, onCode: (String) -> Unit, confirm: () -> Unit,
+                      resend: () -> Unit, backLabel: String, back: () -> Unit) {
+    Text(step.sentMessage, style = MaterialTheme.typography.bodyMedium)
+    OutlinedTextField(
+        step.code, onCode, label = { Text("Código de 6 dígitos") }, singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { if (step.canConfirm && !busy) confirm() }),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    Button(onClick = confirm, enabled = step.canConfirm && !busy, modifier = Modifier.fillMaxWidth()) { Busy(busy, "Confirmar") }
+    TextButton(onClick = resend, enabled = step.canResend && !busy, modifier = Modifier.fillMaxWidth()) {
+        Text(if (step.canResend) "Reenviar código" else "Reenviar código em ${step.resendIn} s")
+    }
+    TextButton(onClick = back, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(backLabel) }
 }
 
 /**
@@ -46,20 +72,24 @@ fun LoginScreen(viewModel: LoginViewModel, notice: String?, onSignup: () -> Unit
     FormColumn {
         Text("Wallet", style = MaterialTheme.typography.headlineLarge)
         notice?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        OutlinedTextField(s.cpf, viewModel::onCpf, label = { Text("CPF") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(
-            s.password, viewModel::onPassword, label = { Text("Senha") }, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { if (s.canSubmit) viewModel.submit() }),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        s.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Button(onClick = { viewModel.submit() }, enabled = s.canSubmit, modifier = Modifier.fillMaxWidth()) {
-            if (s.busy) CircularProgressIndicator(Modifier.widthIn(max = 18.dp)) else Text("Entrar")
+        val step = s.step
+        if (step == null) {
+            OutlinedTextField(
+                s.cpf, viewModel::onCpf, label = { Text("CPF") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (s.canSend) viewModel.sendCode() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            s.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Button(onClick = { viewModel.sendCode() }, enabled = s.canSend, modifier = Modifier.fillMaxWidth()) {
+                Busy(s.busy, "Receber código por e-mail")
+            }
+            TextButton(onClick = onSignup, modifier = Modifier.fillMaxWidth()) { Text("Ainda não tenho conta: abrir conta") }
+        } else {
+            Text("CPF ${s.cpf}", style = MaterialTheme.typography.titleSmall)
+            CodeEntry(step, s.busy, s.error, viewModel::onCode, { viewModel.confirm() }, { viewModel.sendCode() },
+                "Trocar CPF", viewModel::changeCpf)
         }
-        TextButton(onClick = onSignup, modifier = Modifier.fillMaxWidth()) { Text("Ainda não tenho conta: abrir conta") }
     }
 }
 
@@ -68,18 +98,28 @@ fun SignupScreen(viewModel: SignupViewModel, onBack: () -> Unit) {
     val s by viewModel.state.collectAsState()
     FormColumn {
         Text("Abrir conta", style = MaterialTheme.typography.headlineMedium)
-        OutlinedTextField(s.name, viewModel::onName, label = { Text("Nome completo") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(s.cpf, viewModel::onCpf, label = { Text("CPF") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(s.password, viewModel::onPassword, label = { Text("Senha (8+ caracteres, letras e números)") },
-            singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(s.confirmation, viewModel::onConfirmation, label = { Text("Repita a senha") },
-            singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        s.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Button(onClick = { viewModel.submit() }, enabled = s.canSubmit, modifier = Modifier.fillMaxWidth()) {
-            if (s.busy) CircularProgressIndicator(Modifier.widthIn(max = 18.dp)) else Text("Abrir minha conta")
+        val step = s.step
+        if (step == null) {
+            OutlinedTextField(s.name, viewModel::onName, label = { Text("Nome completo") }, singleLine = true,
+                modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(s.cpf, viewModel::onCpf, label = { Text("CPF") }, singleLine = true,
+                modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                s.email, viewModel::onEmail, label = { Text("E-mail") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (s.canSend) viewModel.sendCode() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text("Vamos mandar um código para este e-mail. É por ele que você vai entrar no app.",
+                style = MaterialTheme.typography.bodySmall)
+            s.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Button(onClick = { viewModel.sendCode() }, enabled = s.canSend, modifier = Modifier.fillMaxWidth()) {
+                Busy(s.busy, "Continuar")
+            }
+            TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Já tenho conta: entrar") }
+        } else {
+            CodeEntry(step, s.busy, s.error, viewModel::onCode, { viewModel.confirm() }, { viewModel.sendCode() },
+                "Corrigir os dados", viewModel::changeData)
         }
-        TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Já tenho conta: entrar") }
     }
 }

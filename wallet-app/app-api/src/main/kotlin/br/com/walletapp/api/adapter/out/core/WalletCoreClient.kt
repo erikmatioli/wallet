@@ -1,12 +1,14 @@
 package br.com.walletapp.api.adapter.out.core
 
 import br.com.walletapp.api.application.port.CoreBanking
+import br.com.walletapp.api.application.port.CoreContact
 import br.com.walletapp.api.application.port.DependencyUnavailableException
 import br.com.walletapp.api.application.port.Onboarding
 import br.com.walletapp.api.application.port.PaymentOutcome
 import br.com.walletapp.api.config.AppProperties
 import br.com.walletapp.api.domain.AccountId
 import br.com.walletapp.api.domain.Cpf
+import br.com.walletapp.api.domain.Email
 import br.com.walletapp.contract.Me
 import br.com.walletapp.contract.PixInfo
 import br.com.walletapp.contract.StatementEntry
@@ -39,7 +41,8 @@ class WalletCoreClient(builder: RestClient.Builder, props: AppProperties, privat
             setReadTimeout(core.readTimeout)
         })
         .build()
-    private data class OnboardRequest(val name: String, val taxId: String, val externalRef: String)
+    private data class OnboardRequest(val name: String, val taxId: String, val externalRef: String, val email: String)
+    private data class ContactResponse(val name: String, val email: String?, val accountId: UUID?)
     private data class OnboardResponse(val account: AccountRef)
     private data class AccountRef(val id: UUID)
     private data class AccountDetail(val branch: String, val number: String, val checkDigit: String, val status: String,
@@ -56,15 +59,26 @@ class WalletCoreClient(builder: RestClient.Builder, props: AppProperties, privat
     private data class CoreTransaction(val id: UUID, val occurredAt: Instant)
     private data class Problem(val code: String?)
 
-    override fun onboard(name: String, cpf: Cpf, externalRef: String): Onboarding = call("onboarding") { token ->
+    override fun onboard(name: String, cpf: Cpf, externalRef: String, email: Email): Onboarding = call("onboarding") { token ->
         try {
             val r = http.post().uri("/v1/customers")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
-                .body(OnboardRequest(name, cpf.digits, externalRef))
+                .body(OnboardRequest(name, cpf.digits, externalRef, email.value))
                 .retrieve().body<OnboardResponse>()!!
             Onboarding.Created(AccountId(r.account.id))
         } catch (e: HttpClientErrorException.Conflict) {
             Onboarding.AlreadyExists
+        }
+    }
+
+    override fun contact(cpf: Cpf): CoreContact? = call("customer contact") { token ->
+        try {
+            http.get().uri("/v1/customers/contact?taxId={t}", cpf.digits)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                .retrieve().body<ContactResponse>()
+                ?.let { CoreContact(it.name, it.email?.let(Email::of), it.accountId?.let(::AccountId)) }
+        } catch (e: HttpClientErrorException.NotFound) {
+            null
         }
     }
 

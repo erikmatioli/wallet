@@ -14,6 +14,18 @@
           {{ acc.documentMasked }} · {{ acc.formatted }} · {{ acc.type }} ·
           <span class="badge" [class.ok]="acc.status === 'ACTIVE'" [class.bad]="acc.status !== 'ACTIVE'">{{ acc.status }}</span>
         </span>
+        @if (editingEmail()) {
+          <form class="email-form" (ngSubmit)="saveEmail()">
+            <input name="emailDraft" type="email" [(ngModel)]="emailDraft" maxlength="254" placeholder="cliente@exemplo.com" />
+            <button type="submit" [disabled]="busy()">Salvar</button>
+            <button type="button" class="secondary" (click)="editingEmail.set(false)">Cancelar</button>
+          </form>
+        } @else {
+          <span class="hint email-line">
+            E-mail: {{ acc.customerEmail || 'não cadastrado (o cliente não consegue entrar no app)' }}
+            <button type="button" class="link" (click)="editEmail(acc.customerEmail)">{{ acc.customerEmail ? 'alterar' : 'cadastrar' }}</button>
+          </span>
+        }
       </div>
       <div class="balance">
         {{ acc.balance | number: '1.2-2' }}

@@ -143,7 +143,7 @@ class JdbcAccountRepository implements AccountRepository {
         String sql = """
                 SELECT a.id, a.customer_id, a.ispb, a.branch, a.account_number, a.check_digit, a.status,
                        a.allow_negative, a.balance_cents, a.version, a.created_at,
-                       c.name AS customer_name, c.tax_id, c.tax_id_type
+                       c.name AS customer_name, c.tax_id, c.tax_id_type, c.email AS customer_email
                   FROM account a
                   JOIN customer c ON c.id = a.customer_id
                  WHERE a.tenant_id = :tenant AND a.kind = 'CUSTOMER'
@@ -169,7 +169,7 @@ class JdbcAccountRepository implements AccountRepository {
         String sql = """
                 SELECT a.id, a.customer_id, a.ispb, a.branch, a.account_number, a.check_digit, a.status,
                        a.allow_negative, a.balance_cents, a.version, a.created_at,
-                       c.name AS customer_name, c.tax_id, c.tax_id_type
+                       c.name AS customer_name, c.tax_id, c.tax_id_type, c.email AS customer_email
                   FROM account a
                   JOIN customer c ON c.id = a.customer_id
                  WHERE a.tenant_id = :tenant AND a.kind = 'CUSTOMER' AND a.id IN (:ids)""";
@@ -276,6 +276,6 @@ class JdbcAccountRepository implements AccountRepository {
                 rs.getLong("version"),
                 Sql.instant(rs, "created_at"));
         TaxId taxId = new TaxId(rs.getString("tax_id"), TaxId.DocumentType.valueOf(rs.getString("tax_id_type")));
-        return new AccountDirectoryItem(account, rs.getString("customer_name"), taxId.masked());
+        return new AccountDirectoryItem(account, rs.getString("customer_name"), taxId.masked(), rs.getString("customer_email"));
     }
 }

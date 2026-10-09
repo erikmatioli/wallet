@@ -53,7 +53,8 @@ public final class QueryAccountService implements QueryAccountUseCase {
         // (and the accounts directory) - a single-id set is just the smallest possible batch.
         return tx.readOnly(tenantId, () -> accounts.findByIds(tenantId, Set.of(accountId)).stream()
                 .findFirst()
-                .map(item -> new AccountDetail(item.account(), item.customerName(), item.documentMasked()))
+                .map(item -> new AccountDetail(item.account(), item.customerName(), item.documentMasked(),
+                        item.customerEmail()))
                 .orElseThrow(() -> new NotFoundException("ACCOUNT_NOT_FOUND", "account not found")));
     }
 

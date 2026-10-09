@@ -9,7 +9,12 @@ public interface OnboardCustomerUseCase {
 
     Result onboard(Command command);
 
-    record Command(TenantId tenantId, String name, String taxId, String externalRef) {
+    /** @param email optional: where the customer's products may send codes (ADR-003 of wallet-app) */
+    record Command(TenantId tenantId, String name, String taxId, String externalRef, String email) {
+
+        public Command(TenantId tenantId, String name, String taxId, String externalRef) {
+            this(tenantId, name, taxId, externalRef, null);
+        }
     }
 
     record Result(Customer customer, Account account) {

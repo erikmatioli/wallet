@@ -1,0 +1,62 @@
+# OTP engine (ADR-001). Runs NEXT TO wallet-core's compose: it joins wallet-core's network to reach
+# postgres, otel-collector and wallet-core (for the JWKS). Brings its own Mailpit, which receives every
+# code sent and shows it at http://localhost:8025 - nothing leaves the machine.
+#
+#   (cd ../wallet-core && docker compose up -d)
+#   docker compose up -d --build
+services:
+  otp-db-init:
+    # Creates the "otp" database and roles on wallet-core's Postgres, then exits.
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: wallet_owner          # wallet-core's superuser, only to create the otp database/roles
+      PGPASSWORD: wallet_owner
+      PGDATABASE: wallet
+    volumes:
+      - ./docker/postgres/init-otp-db.sh:/init-otp-db.sh:ro
+    command: ["sh", "/init-otp-db.sh"]
+    restart: "no"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"   # web UI: the codes sent, http://localhost:8025
+      - "1025:1025"   # SMTP, for wallet-otp running outside Docker (in the IDE)
+
+  wallet-otp:
+    build: .
+    depends_on:
+      otp-db-init:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/otp
+      DB_USER: otp_app
+      DB_PASSWORD: otp_app
+      DB_MIGRATION_USER: otp_owner
+      DB_MIGRATION_PASSWORD: otp_owner
+      WALLET_CORE_URL: http://wallet-core:8080
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      # Local only. A real environment sets its own key, never committed.
+      OTP_CODE_KEY: local-docker-otp-code-key-0123456789abcdef
+
+      JAVA_TOOL_OPTIONS: "-javaagent:/app/opentelemetry-javaagent.jar"
+      OTEL_SERVICE_NAME: wallet-otp
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_TRACES_EXPORTER: "otlp"
+      OTEL_METRICS_EXPORTER: "none"     # metrics are scraped from /actuator/prometheus
+      OTEL_LOGS_EXPORTER: "otlp"
+      OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_MDC_ATTRIBUTES: "tenant_id"
+      OTEL_TRACES_SAMPLER: "always_on"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=dev"
+    ports:
+      - "8085:8085"
+
+networks:
+  default:
+    name: wallet-core_default
+    external: true

@@ -9,6 +9,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class AppInfo(val name: String, val version: String, val tenant: String = "")
 
-/** Every error of the app's API: a stable [code] and a [message] the desktop can show as it is. */
+/**
+ * Every error of the app's API: a stable [code] and a [message] the desktop can show as it is.
+ * [retryAfterSeconds] only for TOO_MANY_REQUESTS: how long until another code may be asked for.
+ */
 @Serializable
-data class AppError(val code: String, val message: String)
+data class AppError(val code: String, val message: String, val retryAfterSeconds: Long? = null)

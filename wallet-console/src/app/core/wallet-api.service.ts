@@ -34,6 +34,11 @@ export class WalletApiService {
     return this.http.post<OnboardCustomerResponse>('/v1/customers', request);
   }
 
+  /** Sets, changes or (with an empty string) removes the customer's email - where the app sends login codes. */
+  changeCustomerEmail(customerId: string, email: string): Observable<void> {
+    return this.http.put<void>(`/v1/customers/${customerId}/email`, { email });
+  }
+
   getAccount(accountId: string): Observable<AccountDetailResponse> {
     return this.http.get<AccountDetailResponse>(`/v1/accounts/${accountId}`);
   }

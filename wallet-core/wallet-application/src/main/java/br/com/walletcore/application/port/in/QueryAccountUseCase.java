@@ -17,7 +17,12 @@ public interface QueryAccountUseCase {
     /** Same as {@link #getAccount}, plus the owning customer's display name and masked document. */
     AccountDetail getAccountDetail(TenantId tenantId, AccountId accountId);
 
-    record AccountDetail(Account account, String customerName, String documentMasked) {
+    /** @param customerEmail the holder's email as the operator registered it; null when there is none */
+    record AccountDetail(Account account, String customerName, String documentMasked, String customerEmail) {
+
+        public AccountDetail(Account account, String customerName, String documentMasked) {
+            this(account, customerName, documentMasked, null);
+        }
     }
 
     /** Same as {@link #getAccount}, addressed by the bank-style number instead of the internal id. */

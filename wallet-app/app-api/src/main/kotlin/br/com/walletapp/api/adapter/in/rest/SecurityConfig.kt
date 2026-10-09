@@ -54,7 +54,8 @@ class SecurityConfig {
         http.authorizeHttpRequests {
             // /error: Spring forwards failed requests there; denying it would turn every 400 into a 401.
             it.requestMatchers("/actuator/**", "/error", "/app/v1/info").permitAll()
-                .requestMatchers(HttpMethod.POST, "/app/v1/signup", "/app/v1/login").permitAll()
+                .requestMatchers(HttpMethod.POST, "/app/v1/signup/start", "/app/v1/signup/confirm", "/app/v1/login/start",
+                    "/app/v1/login/confirm").permitAll()
                 .requestMatchers("/app/v1/**").authenticated()
                 .anyRequest().denyAll()
         }

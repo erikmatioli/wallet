@@ -3,8 +3,8 @@ package br.com.walletapp.api.application.port
 import br.com.walletapp.api.domain.AccountId
 import br.com.walletapp.api.domain.Cpf
 import br.com.walletapp.api.domain.CustomerLogin
+import br.com.walletapp.api.domain.Email
 import br.com.walletapp.api.domain.LoginId
-import br.com.walletapp.api.domain.Password
 import br.com.walletapp.contract.Me
 import br.com.walletapp.contract.PixPayee
 import br.com.walletapp.contract.Schedule
@@ -18,8 +18,17 @@ import br.com.walletapp.contract.TransferDestination
  */
 interface CoreBanking {
 
-    /** Creates the customer and their account. [externalRef] ties the wallet-core customer to the login. */
-    fun onboard(name: String, cpf: Cpf, externalRef: String): Onboarding
+    /**
+     * Creates the customer and their account. [externalRef] ties the wallet-core customer to the login;
+     * [email] is registered with the customer, as the operator would (ADR-003).
+     */
+    fun onboard(name: String, cpf: Cpf, externalRef: String, email: Email): Onboarding
+
+    /**
+     * The customer with this CPF as wallet-core knows them, with the email the operator registered (ADR-003);
+     * null when the tenant has no such customer.
+     */
+    fun contact(cpf: Cpf): CoreContact?
 
     /** The account of the customer with this CPF, if wallet-core has one. */
     fun accountByCpf(cpf: Cpf): AccountId?
@@ -96,6 +105,9 @@ sealed interface ScheduleOutcome {
     data class Refused(val code: String) : ScheduleOutcome
 }
 
+/** [email] null when nobody registered one; [accountId] null only for a customer with no payment account. */
+data class CoreContact(val name: String, val email: Email?, val accountId: AccountId?)
+
 sealed interface Onboarding {
     data class Created(val accountId: AccountId) : Onboarding
 
@@ -119,10 +131,32 @@ interface LoginRepository {
     fun delete(id: LoginId)
 }
 
-interface PasswordHasher {
-    fun hash(password: Password): String
+/**
+ * wallet-otp, as the tenant that owns the app (ADR-002). It sends the code and checks it; app-api decides
+ * who the customer is and which email is theirs.
+ */
+interface OtpGateway {
 
-    fun matches(raw: String, hash: String): Boolean
+    /** Sends a code to [email]. [context]: what the code confirms (for a signup, the email itself). */
+    fun send(subject: Cpf, purpose: OtpPurpose, email: Email, context: String?): OtpSend
+
+    fun verify(challengeId: String, subject: Cpf, code: String, context: String?): OtpCheck
+}
+
+enum class OtpPurpose { SIGNUP, LOGIN }
+
+sealed interface OtpSend {
+    data class Sent(val challengeId: String, val emailMasked: String) : OtpSend
+
+    /** wallet-otp's send limits: another code only after [retryAfterSeconds]. */
+    data class TooSoon(val retryAfterSeconds: Long) : OtpSend
+}
+
+sealed interface OtpCheck {
+    data object Verified : OtpCheck
+
+    /** wallet-otp's code: INVALID_CODE, CHALLENGE_EXPIRED, CHALLENGE_LOCKED, CHALLENGE_NOT_FOUND... */
+    data class Refused(val code: String) : OtpCheck
 }
 
 /** Issues the customer's token (ADR-001, decision 5): signed by app-api, never one of wallet-core's. */
