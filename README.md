@@ -4,7 +4,7 @@ Carteira digital **white label**: uma fintech (o **tenant**) contrata a platafor
 pagamento aos seus clientes. Vários tenants usam a mesma instalação, e um nunca enxerga os dados do
 outro.
 
-Este repositório é um **monorepo** com seis produtos. Cada um tem build, banco, CI e documentação
+Este repositório é um **monorepo** com sete produtos. Cada um tem build, banco, CI e documentação
 próprios, e eles só conversam pelas APIs públicas e pelo barramento.
 
 | Produto | O que faz | Stack | Porta local |
@@ -15,11 +15,13 @@ próprios, e eles só conversam pelas APIs públicas e pelo barramento.
 | [`wallet-otp`](wallet-otp/) | Códigos de uso único por e-mail: cadastro e login do app, aprovações no futuro | Kotlin, Spring Boot 4, Maven | 8085 (Mailpit 8025) |
 | [`wallet-console`](wallet-console/) | Tela web **do operador** da fintech | TypeScript, Angular 21 | 4200 |
 | [`wallet-app`](wallet-app/) | App desktop **do cliente final** e o seu backend (`app-api`) | Kotlin, Compose Desktop, Spring Boot 4, Gradle | 8083 / 8084 |
+| [`wallet-mobile`](wallet-mobile/) | **M-Wall**, o app do cliente final para celular (PWA), sobre o mesmo `app-api` | TypeScript, Angular 21, PWA | 8086 / 8087 |
 
 Quem chama quem:
 
 - **operador** → `wallet-console` → `wallet-core` e `wallet-scheduler`
-- **cliente** → app desktop → `app-api` → `wallet-core`, `wallet-pix`, `wallet-scheduler` e `wallet-otp`
+- **cliente** → app desktop ou M-Wall (PWA) → `app-api` → `wallet-core`, `wallet-pix`, `wallet-scheduler`
+  e `wallet-otp`
 - `wallet-pix` → `wallet-core` (débitos e créditos), e conversa com o SPI por filas (SNS/SQS)
 - `wallet-scheduler` → `wallet-core` e `wallet-pix` no dia do pagamento, e ouve os eventos do Pix
 - `wallet-pix`, `wallet-scheduler` e `wallet-otp` aceitam os JWTs do `wallet-core`, o único provedor de
@@ -27,7 +29,7 @@ Quem chama quem:
 
 ## Subir na sua máquina
 
-Pré-requisitos: Docker Desktop, JDK 25, Maven 3.9+ e Node 22+ (console). O Gradle do `wallet-app` vem
+Pré-requisitos: Docker Desktop, JDK 25, Maven 3.9+ e Node 22+ (console e M-Wall). O Gradle do `wallet-app` vem
 pelo wrapper.
 
 Todos os composes entram na rede do `wallet-core` e usam o PostgreSQL dele, então **o core sobe
@@ -39,6 +41,7 @@ cd ../wallet-pix     && docker compose up -d --build   # Pix: LocalStack, pix-se
 cd ../wallet-scheduler && docker compose up -d --build # agendamentos
 cd ../wallet-otp     && docker compose up -d --build   # códigos por e-mail e o Mailpit
 cd ../wallet-app     && docker compose up -d --build   # app-api do demo-tenant (8083) e do segundo-tenant (8084)
+cd ../wallet-mobile  && docker compose up -d --build   # M-Wall do demo-tenant (8086) e do segundo-tenant (8087)
 cd ../wallet-console && npm ci && npm start            # console em http://localhost:4200
 cd ../wallet-app     && ./gradlew :app-desktop:run     # app do cliente
 ```
@@ -48,6 +51,7 @@ cd ../wallet-app     && ./gradlew :app-desktop:run     # app do cliente
 | wallet-core | http://localhost:8080 | `demo-tenant` / `demo-secret-change-me-please` e `segundo-tenant` / `segundo-tenant-secret-please` (perfil `dev`) |
 | Console | http://localhost:4200 | as credenciais do tenant |
 | App do cliente | janela desktop | CPF + código que chega por e-mail |
+| M-Wall (PWA) | http://localhost:8086 e http://localhost:8087 | CPF + código que chega por e-mail |
 | Mailpit | http://localhost:8025 | os e-mails com os códigos |
 | Grafana / Jaeger / Prometheus | http://localhost:3000 / 16686 / 9090 | — |
 
@@ -65,7 +69,7 @@ Para parar sem perder dados: `docker compose stop` ou `docker compose down`, **s
 ## Convenções
 
 - **Trunk-based:** `main` sempre testável; branches curtas (`feat/*`, `fix/*`, `docs/*`, `chore/*`).
-- **Títulos de PR em Conventional Commits** (`feat(wallet-app): ...`), conferidos pelo CI.
+- **Títulos de PR em Conventional Commits** (`feat(wallet-mobile): ...`), conferidos pelo CI.
 - **Um workflow de CI por produto** em `.github/workflows/`, com filtro de pasta: um PR só roda o CI dos
   produtos que mudou.
 - **Arquitetura hexagonal** nos serviços, cobrada por testes ArchUnit: as regras de negócio não dependem
