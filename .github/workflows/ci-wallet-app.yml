@@ -63,7 +63,7 @@ jobs:
           java-version: "25"
 
       # Caches Gradle's dependencies and build cache between runs.
-      - uses: gradle/actions/setup-gradle@v5
+      - uses: gradle/actions/setup-gradle@v6
 
       # ubuntu-latest has Docker, which app-api's tests need (Testcontainers starts a PostgreSQL).
       - name: Verify Docker is available (required by Testcontainers)
