@@ -4,10 +4,13 @@ import br.com.walletapp.api.application.AccountService
 import br.com.walletapp.api.application.AuthService
 import br.com.walletapp.api.config.SessionClaims
 import br.com.walletapp.api.domain.AccountId
-import br.com.walletapp.contract.LoginRequest
+import br.com.walletapp.contract.CodeSent
+import br.com.walletapp.contract.LoginConfirmRequest
+import br.com.walletapp.contract.LoginStartRequest
 import br.com.walletapp.contract.Me
 import br.com.walletapp.contract.Session
-import br.com.walletapp.contract.SignupRequest
+import br.com.walletapp.contract.SignupConfirmRequest
+import br.com.walletapp.contract.SignupStartRequest
 import br.com.walletapp.contract.StatementPage
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
@@ -32,13 +35,22 @@ class AuthController(private val auth: AuthService) {
 
     private val log = LoggerFactory.getLogger(javaClass)
 
-    @PostMapping("/signup")
-    @ResponseStatus(HttpStatus.CREATED)
-    fun signup(@RequestBody r: SignupRequest): Session = auth.signup(r.cpf, r.name, r.password)
-        .also { log.info("customer signed up") } // no CPF, no name: the customer_id comes with the next calls
+    // Signup and login by a code sent to the customer's email (ADR-002). Nothing here logs the CPF, the
+    // name, the email or the code: the customer_id comes with the next calls.
 
-    @PostMapping("/login")
-    fun login(@RequestBody r: LoginRequest): Session = auth.login(r.cpf, r.password)
+    @PostMapping("/signup/start")
+    fun startSignup(@RequestBody r: SignupStartRequest): CodeSent = auth.startSignup(r.cpf, r.name, r.email)
+
+    @PostMapping("/signup/confirm")
+    @ResponseStatus(HttpStatus.CREATED)
+    fun confirmSignup(@RequestBody r: SignupConfirmRequest): Session =
+        auth.confirmSignup(r.challengeId, r.code, r.cpf, r.name, r.email).also { log.info("customer signed up") }
+
+    @PostMapping("/login/start")
+    fun startLogin(@RequestBody r: LoginStartRequest): CodeSent = auth.startLogin(r.cpf)
+
+    @PostMapping("/login/confirm")
+    fun confirmLogin(@RequestBody r: LoginConfirmRequest): Session = auth.confirmLogin(r.challengeId, r.cpf, r.code)
 }
 
 /**

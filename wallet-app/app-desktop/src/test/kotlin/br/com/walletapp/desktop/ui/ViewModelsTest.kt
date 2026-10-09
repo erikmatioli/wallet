@@ -13,11 +13,13 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -42,44 +44,88 @@ class ViewModelsTest {
     private fun entry(seq: Long) =
         """{"transactionId":"tx-$seq","sequence":$seq,"type":"PIX_IN","credit":true,"amountCents":1000,"balanceAfterCents":5000,"occurredAt":"2026-10-07T13:00:00Z"}"""
 
+    private val codeSent = """{"challengeId":"ch-1","message":"Se houver conta para este CPF, enviamos um código.","resendAfterSeconds":60}"""
+
+    private fun bodyOf(r: HttpRequestData) = (r.body as TextContent).text
+
     @Test
-    fun `login starts the session, and forgets what was typed`() = runTest {
+    fun `login asks for the code, then the code starts the session and nothing typed stays`() = runTest {
         val store = SessionStore()
-        val vm = LoginViewModel(api(store) { ok(session) }, store, backgroundScope)
+        val vm = LoginViewModel(api(store) {
+            if (it.url.encodedPath.endsWith("/login/start")) ok(codeSent) else ok(session)
+        }, store, backgroundScope)
         vm.onCpf("529.982.247-25")
-        vm.onPassword("senha1234")
 
-        vm.submit().join()
+        vm.sendCode().join()
+        val step = vm.state.value.step!!
+        assertEquals("Se houver conta para este CPF, enviamos um código.", step.sentMessage)
+        assertFalse(step.canResend)
 
-        val loggedIn = assertIs<SessionStore.State.LoggedIn>(store.state.value)
-        assertEquals("Maria Silva", loggedIn.session.customerName)
-        assertEquals("", vm.state.value.password)
+        vm.onCode(" 123 456 ")
+        assertEquals("123456", vm.state.value.step!!.code)
+        vm.confirm()!!.join()
+
+        assertEquals("Maria Silva", assertIs<SessionStore.State.LoggedIn>(store.state.value).session.customerName)
+        assertEquals(LoginViewModel.State(), vm.state.value)
+        assertTrue(bodyOf(requests.last()).contains("\"challengeId\":\"ch-1\""))
     }
 
     @Test
-    fun `a wrong password shows app-api's message and clears the password`() = runTest {
+    fun `a wrong code shows app-api's message, clears the code and stays on the code step`() = runTest {
         val store = SessionStore()
-        val vm = LoginViewModel(api(store) { error(HttpStatusCode.Unauthorized, "INVALID_CREDENTIALS", "CPF ou senha inválidos.") },
-            store, backgroundScope)
+        val vm = LoginViewModel(api(store) {
+            if (it.url.encodedPath.endsWith("/login/start")) ok(codeSent)
+            else error(HttpStatusCode.Unauthorized, "INVALID_CODE", "Código incorreto. Confira o e-mail e tente de novo.")
+        }, store, backgroundScope)
         vm.onCpf("52998224725")
-        vm.onPassword("errada1234")
+        vm.sendCode().join()
+        vm.onCode("000000")
 
-        vm.submit().join()
+        vm.confirm()!!.join()
 
-        assertEquals("CPF ou senha inválidos.", vm.state.value.error)
-        assertEquals("", vm.state.value.password)
+        assertEquals("Código incorreto. Confira o e-mail e tente de novo.", vm.state.value.error)
+        assertEquals("", vm.state.value.step!!.code)
         assertIs<SessionStore.State.LoggedOut>(store.state.value)
     }
 
     @Test
-    fun `signup with different passwords never reaches the server`() {
+    fun `resend is offered after the countdown, and a wait from the server restarts it`() = runTest {
         val store = SessionStore()
-        val vm = SignupViewModel(api(store) { ok(session) }, store, kotlinx.coroutines.MainScope())
-        vm.onCpf("52998224725"); vm.onName("Maria"); vm.onPassword("senha1234"); vm.onConfirmation("senha12345")
+        var calls = 0
+        val vm = LoginViewModel(api(store) {
+            if (++calls == 1) ok(codeSent)
+            else respond("""{"code":"TOO_MANY_REQUESTS","message":"Aguarde 30 segundos para pedir outro código.","retryAfterSeconds":30}""",
+                HttpStatusCode.TooManyRequests, json)
+        }, store, backgroundScope)
+        vm.onCpf("52998224725")
+        vm.sendCode().join()
+        assertEquals(60, vm.state.value.step!!.resendIn)
 
-        assertNull(vm.submit())
-        assertEquals("As senhas não são iguais.", vm.state.value.error)
-        assertTrue(requests.isEmpty())
+        testScheduler.advanceTimeBy(60_001)
+        assertTrue(vm.state.value.step!!.canResend)
+
+        vm.sendCode().join()
+        assertEquals("Aguarde 30 segundos para pedir outro código.", vm.state.value.error)
+        assertEquals(30, vm.state.value.step!!.resendIn)
+    }
+
+    @Test
+    fun `signup sends the code to the email typed, then opens the account with the same data`() = runTest {
+        val store = SessionStore()
+        val vm = SignupViewModel(api(store) {
+            if (it.url.encodedPath.endsWith("/signup/start")) ok(codeSent) else ok(session)
+        }, store, backgroundScope)
+        vm.onName("Maria Silva"); vm.onCpf("52998224725"); vm.onEmail("maria@example.com")
+
+        vm.sendCode().join()
+        assertTrue(bodyOf(requests.last()).contains("\"email\":\"maria@example.com\""))
+        vm.onCode("123456")
+        vm.confirm()!!.join()
+
+        val confirm = bodyOf(requests.last())
+        listOf("\"challengeId\":\"ch-1\"", "\"code\":\"123456\"", "\"email\":\"maria@example.com\"", "\"name\":\"Maria Silva\"")
+            .forEach { assertTrue(confirm.contains(it), confirm) }
+        assertIs<SessionStore.State.LoggedIn>(store.state.value)
     }
 
     @Test

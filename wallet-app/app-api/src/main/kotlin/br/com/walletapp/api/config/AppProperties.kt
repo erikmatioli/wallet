@@ -5,7 +5,8 @@ import java.net.URI
 import java.time.Duration
 
 @ConfigurationProperties("app")
-data class AppProperties(val session: Session, val walletCore: WalletCore, val pix: Pix, val scheduler: Scheduler) {
+data class AppProperties(val session: Session, val walletCore: WalletCore, val pix: Pix, val scheduler: Scheduler,
+                         val otp: Otp) {
 
     /**
      * @property secret the HS256 key of the customers' tokens: at least 32 bytes, only in app-api's
@@ -31,6 +32,14 @@ data class AppProperties(val session: Session, val walletCore: WalletCore, val p
     data class Scheduler(
         val baseUrl: URI,
         val connectTimeout: Duration = Duration.ofSeconds(2),
+        val readTimeout: Duration = Duration.ofSeconds(10),
+    )
+
+    /** wallet-otp's API (ADR-002): sends and checks the signup and login codes, as the same tenant. */
+    data class Otp(
+        val baseUrl: URI,
+        val connectTimeout: Duration = Duration.ofSeconds(2),
+        // Creating a challenge waits for the email to be handed to the SMTP server.
         val readTimeout: Duration = Duration.ofSeconds(10),
     )
 

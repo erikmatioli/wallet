@@ -1,9 +1,11 @@
 package br.com.walletapp.api
 
 import br.com.walletapp.api.application.FakeCore
+import br.com.walletapp.api.application.FakeOtp
 import br.com.walletapp.api.application.port.CoreBanking
 import br.com.walletapp.api.domain.AccountId
 import br.com.walletapp.contract.AppError
+import br.com.walletapp.contract.CodeSent
 import br.com.walletapp.contract.Me
 import br.com.walletapp.contract.Session
 import kotlinx.serialization.json.Json
@@ -35,8 +37,9 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * The real API on a real PostgreSQL, with the real tokens and BCrypt - only wallet-core is a fake. What
- * matters most here is ADR-001's rule: a customer only ever reaches their own account.
+ * The real API on a real PostgreSQL, with the real tokens - only wallet-core and wallet-otp are fakes (each
+ * has its own tests). What matters most here is ADR-001's rule: a customer only ever reaches their own
+ * account; and ADR-002's: the code sent by email is the only way in.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -74,6 +77,10 @@ class AppApiIntegrationTest {
         @Bean
         @Primary
         fun fakeCore(): CoreBanking = AccountEchoCore()
+
+        @Bean
+        @Primary
+        fun fakeOtp() = FakeOtp()
     }
 
     @LocalServerPort
@@ -81,6 +88,9 @@ class AppApiIntegrationTest {
 
     @Autowired
     private lateinit var encoder: JwtEncoder
+
+    @Autowired
+    private lateinit var otp: FakeOtp
     private val http = HttpClient.newHttpClient()
 
     private fun call(method: String, path: String, body: String? = null, token: String? = null): HttpResponse<String> {
@@ -90,8 +100,12 @@ class AppApiIntegrationTest {
         return http.send(r.build(), HttpResponse.BodyHandlers.ofString())
     }
 
-    private fun signup(cpf: String, name: String): Session {
-        val r = call("POST", "/app/v1/signup", """{"cpf":"$cpf","name":"$name","password":"senha1234"}""")
+    private fun signup(cpf: String, name: String, email: String = "cliente@example.com"): Session {
+        val started = call("POST", "/app/v1/signup/start", """{"cpf":"$cpf","name":"$name","email":"$email"}""")
+        assertThat(started.statusCode()).isEqualTo(200)
+        val id = Json.decodeFromString<CodeSent>(started.body()).challengeId
+        val r = call("POST", "/app/v1/signup/confirm",
+            """{"challengeId":"$id","code":"${otp.last().code}","cpf":"$cpf","name":"$name","email":"$email"}""")
         assertThat(r.statusCode()).isEqualTo(201)
         return Json.decodeFromString(r.body())
     }
@@ -136,18 +150,25 @@ class AppApiIntegrationTest {
     }
 
     @Test
-    fun `login with the password from signup, BCrypt and all, and the contract's errors`() {
-        signup("390.533.447-05", "Ana Lima")
+    fun `login with the code from the email, and the contract's errors`() {
+        signup("390.533.447-05", "Ana Lima", "ana@example.com")
 
-        val ok = call("POST", "/app/v1/login", """{"cpf":"39053344705","password":"senha1234"}""")
+        val started = call("POST", "/app/v1/login/start", """{"cpf":"39053344705"}""")
+        assertThat(started.statusCode()).isEqualTo(200)
+        val id = Json.decodeFromString<CodeSent>(started.body()).challengeId
+        assertThat(otp.last().email).isEqualTo("ana@example.com")
+
+        val wrong = call("POST", "/app/v1/login/confirm", """{"challengeId":"$id","cpf":"39053344705","code":"000000"}""")
+        assertThat(wrong.statusCode()).isEqualTo(401)
+        assertThat(Json.decodeFromString<AppError>(wrong.body()).message).isEqualTo("Código incorreto. Confira o e-mail e tente de novo.")
+
+        val ok = call("POST", "/app/v1/login/confirm", """{"challengeId":"$id","cpf":"39053344705","code":"${otp.last().code}"}""")
         assertThat(ok.statusCode()).isEqualTo(200)
         assertThat(Json.decodeFromString<Session>(ok.body()).customerName).isEqualTo("Ana Lima")
 
-        val wrong = call("POST", "/app/v1/login", """{"cpf":"39053344705","password":"errada1234"}""")
-        assertThat(wrong.statusCode()).isEqualTo(401)
-        assertThat(Json.decodeFromString<AppError>(wrong.body()).message).isEqualTo("CPF ou senha inválidos.")
-
-        val again = call("POST", "/app/v1/signup", """{"cpf":"39053344705","name":"Ana Lima","password":"senha1234"}""")
-        assertThat(again.statusCode()).isEqualTo(409)
+        val tooSoon = call("POST", "/app/v1/login/start", """{"cpf":"39053344705"}""")
+        assertThat(tooSoon.statusCode()).isEqualTo(429)
+        assertThat(tooSoon.headers().firstValue("Retry-After")).isPresent
+        assertThat(Json.decodeFromString<AppError>(tooSoon.body()).retryAfterSeconds).isPositive()
     }
 }

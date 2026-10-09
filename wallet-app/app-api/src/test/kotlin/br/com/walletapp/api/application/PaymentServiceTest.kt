@@ -49,14 +49,16 @@ class PaymentServiceTest {
     private val pix = FakePix()
     private val logins = InMemoryLogins()
     private val sentPix = InMemorySentPix()
-    private val auth = AuthService(core, logins, PlainHasher, FakeTokens, java.time.Clock.systemUTC())
+    private val otp = FakeOtp()
+    private val auth = AuthService(core, logins, otp, FakeTokens, StartThrottle(java.time.Clock.systemUTC()),
+        java.time.Clock.systemUTC())
     private val payments = PaymentService(core, pix, logins, sentPix)
 
     private val joao = AccountId(UUID.randomUUID())
     private val payee = PixPayee("99999999", "0042", "1234565", "111.444.777-35", "Fulano Externo")
 
     private fun customer(cpf: String): Pair<LoginId, AccountId> {
-        auth.signup(cpf, "Cliente $cpf", "senha1234")
+        auth.signUp(otp, cpf, "Cliente $cpf")
         val login = logins.find(Cpf.parse(cpf))!!
         return login.id to login.accountId!!
     }

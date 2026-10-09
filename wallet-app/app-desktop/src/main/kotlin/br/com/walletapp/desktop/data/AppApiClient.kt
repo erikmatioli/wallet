@@ -2,14 +2,17 @@ package br.com.walletapp.desktop.data
 
 import br.com.walletapp.contract.AppError
 import br.com.walletapp.contract.AppInfo
-import br.com.walletapp.contract.LoginRequest
+import br.com.walletapp.contract.CodeSent
+import br.com.walletapp.contract.LoginConfirmRequest
+import br.com.walletapp.contract.LoginStartRequest
 import br.com.walletapp.contract.Me
 import br.com.walletapp.contract.PixReceipt
 import br.com.walletapp.contract.PixRequest
 import br.com.walletapp.contract.Schedule
 import br.com.walletapp.contract.ScheduleRequest
 import br.com.walletapp.contract.Session
-import br.com.walletapp.contract.SignupRequest
+import br.com.walletapp.contract.SignupConfirmRequest
+import br.com.walletapp.contract.SignupStartRequest
 import br.com.walletapp.contract.StatementPage
 import br.com.walletapp.contract.TransferDestination
 import br.com.walletapp.contract.TransferReceipt
@@ -36,8 +39,11 @@ import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 
-/** An answer of app-api that is not a success: its [code], and a [message] made to be shown as it is. */
-class AppApiException(val code: String, message: String) : RuntimeException(message)
+/**
+ * An answer of app-api that is not a success: its [code], and a [message] made to be shown as it is.
+ * [retryAfterSeconds] only for TOO_MANY_REQUESTS: when another code may be asked for.
+ */
+class AppApiException(val code: String, message: String, val retryAfterSeconds: Long? = null) : RuntimeException(message)
 
 /**
  * The only door to the outside: app-api, nothing else (ADR-001, decision 1). Every call is a `suspend`
@@ -61,11 +67,19 @@ class AppApiClient(baseUrl: String, private val session: SessionStore, engine: H
 
     suspend fun info(): AppInfo = http.get("app/v1/info").read()
 
-    suspend fun signup(cpf: String, name: String, password: String): Session =
-        http.post("app/v1/signup") { jsonBody(SignupRequest(cpf, name, password)) }.read()
+    // Signup and login by a code sent to the customer's email (ADR-002): "start" sends it, "confirm" checks it.
 
-    suspend fun login(cpf: String, password: String): Session =
-        http.post("app/v1/login") { jsonBody(LoginRequest(cpf, password)) }.read()
+    suspend fun startSignup(cpf: String, name: String, email: String): CodeSent =
+        http.post("app/v1/signup/start") { jsonBody(SignupStartRequest(cpf, name, email)) }.read()
+
+    suspend fun confirmSignup(challengeId: String, code: String, cpf: String, name: String, email: String): Session =
+        http.post("app/v1/signup/confirm") { jsonBody(SignupConfirmRequest(challengeId, code, cpf, name, email)) }.read()
+
+    suspend fun startLogin(cpf: String): CodeSent =
+        http.post("app/v1/login/start") { jsonBody(LoginStartRequest(cpf)) }.read()
+
+    suspend fun confirmLogin(challengeId: String, cpf: String, code: String): Session =
+        http.post("app/v1/login/confirm") { jsonBody(LoginConfirmRequest(challengeId, cpf, code)) }.read()
 
     suspend fun me(): Me = http.get("app/v1/me") { auth() }.read()
 
@@ -119,6 +133,6 @@ class AppApiClient(baseUrl: String, private val session: SessionStore, engine: H
         val error = runCatching { json.decodeFromString<AppError>(bodyAsText()) }.getOrNull()
             ?: AppError("HTTP_${status.value}", "Não foi possível falar com o servidor (${status.value}).")
         if (error.code == "SESSION_EXPIRED") session.expire(error.message)
-        throw AppApiException(error.code, error.message)
+        throw AppApiException(error.code, error.message, error.retryAfterSeconds)
     }
 }

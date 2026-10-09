@@ -1,5 +1,8 @@
 # ADR-001 (wallet-app) — App desktop do cliente final e seu backend (BFF)
 
+> **Atualização:** o login por CPF e senha (decisão 4) foi substituído pelo código enviado ao e-mail,
+> na [ADR-002](002-login-por-otp.md).
+
 **Status:** proposta
 
 ## Contexto

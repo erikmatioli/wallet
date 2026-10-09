@@ -62,13 +62,14 @@ class ScheduleServiceTest {
     private val scheduler = FakeScheduler()
     // 2026-10-07 22:00 in Brasília (01:00 UTC on the 8th): "today" must be the 7th, not the 8th.
     private val clock = Clock.fixed(Instant.parse("2026-10-08T01:00:00Z"), ZoneOffset.UTC)
-    private val auth = AuthService(core, logins, PlainHasher, FakeTokens, clock)
+    private val otp = FakeOtp()
+    private val auth = AuthService(core, logins, otp, FakeTokens, StartThrottle(clock), clock)
     private val schedules = ScheduleService(scheduler, logins, clock)
 
     private val transfer = ScheduleRequest("TRANSFER", "2026-10-08", 1_000, transfer = TransferTarget("0001", "200", "2"))
 
     private fun customer(cpf: String): Pair<LoginId, AccountId> {
-        auth.signup(cpf, "Cliente $cpf", "senha1234")
+        auth.signUp(otp, cpf, "Cliente $cpf")
         val login = logins.find(Cpf.parse(cpf))!!
         return login.id to login.accountId!!
     }

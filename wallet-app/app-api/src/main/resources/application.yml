@@ -42,6 +42,9 @@ app:
   # wallet-scheduler's API, as the same tenant (its token carries schedules:read and schedules:write).
   scheduler:
     base-url: ${SCHEDULER_URL:http://localhost:8082}
+  # wallet-otp's API (ADR-002): the signup and login codes, as the same tenant (scope otp:use).
+  otp:
+    base-url: ${APP_OTP_URL:http://localhost:8085}
 
 management:
   endpoints:

@@ -20,25 +20,23 @@ class DomainTest {
     }
 
     @Test
-    fun `password needs 8 to 72 characters with letters and digits`() {
-        assertThat(Password.of("senha1234").toString()).isEqualTo("********")
-        listOf("curta1", "somenteletras", "1234567890", "a1".repeat(37)).forEach { weak ->
-            assertThatThrownBy { Password.of(weak) }.isInstanceOf(ValidationException::class.java)
+    fun `email is lower-cased, checked and never printed in full`() {
+        val email = Email.of("  Maria.Silva@Example.COM ")
+        assertThat(email.value).isEqualTo("maria.silva@example.com")
+        assertThat(email.toString()).isEqualTo("m***@example.com")
+        listOf("maria", "maria@", "@example.com", "maria @example.com").forEach { bad ->
+            assertThatThrownBy { Email.of(bad) }.isInstanceOf(ValidationException::class.java)
         }
     }
 
     @Test
-    fun `the fifth wrong password locks the login for 15 minutes`() {
-        var login = CustomerLogin.pending(Cpf.parse("52998224725"), "Maria  Silva", "hash", now)
+    fun `a pending login has a tidy name and an email, and logs in only once active`() {
+        val login = CustomerLogin.pending(Cpf.parse("52998224725"), "Maria  Silva", Email.of("maria@example.com"), now)
         assertThat(login.name).isEqualTo("Maria Silva")
-
-        repeat(4) { login = login.failedLogin(now) }
-        assertThat(login.locked(now)).isFalse()
-        login = login.failedLogin(now)
-
-        assertThat(login.locked(now)).isTrue()
-        assertThat(login.locked(now.plus(CustomerLogin.LOCK))).isFalse()
-        assertThat(login.failedAttempts).isZero() // the count starts again after the lock
-        assertThat(login.succeededLogin().lockedUntil).isNull()
+        assertThat(login.canLogIn).isFalse()
+        assertThat(login.activated(AccountId(java.util.UUID.randomUUID())).canLogIn).isTrue()
+        assertThat(login.copy(status = LoginStatus.ACTIVE, email = null).canLogIn).isFalse() // made before ADR-002
+        assertThatThrownBy { CustomerLogin.pending(login.cpf, "M", login.email!!, now) }
+            .isInstanceOf(ValidationException::class.java)
     }
 }
