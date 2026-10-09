@@ -36,7 +36,24 @@ public final class ApiModels {
             @NotBlank @Size(max = 32) String taxId,
 
             @Schema(description = "Referência externa opcional para controle do cliente", example = "ref-ext-12345", maxLength = 64)
-            @Size(max = 64) String externalRef) {
+            @Size(max = 64) String externalRef,
+
+            @Schema(description = "E-mail opcional do cliente: para onde os produtos dele (o app) mandam códigos de acesso", example = "maria@example.com", maxLength = 254)
+            @Size(max = 254) String email) {
+    }
+
+    @Schema(description = "Novo e-mail do cliente; vazio ou nulo remove o e-mail.")
+    public record ChangeEmailRequest(
+            @Schema(description = "E-mail", example = "maria@example.com", maxLength = 254) @Size(max = 254) String email) {
+    }
+
+    @Schema(description = "Contato do cliente, como o operador cadastrou: para onde os produtos dele podem mandar códigos.")
+    public record CustomerContactResponse(
+            @Schema(description = "UUID do cliente") UUID customerId,
+            @Schema(description = "Nome do cliente", example = "Maria Oliveira") String name,
+            @Schema(description = "E-mail; ausente quando não há") String email,
+            @Schema(description = "Status do cadastro", example = "ACTIVE") String status,
+            @Schema(description = "UUID da conta de pagamento") UUID accountId) {
     }
 
     @Schema(description = "Dados para movimentação financeira (depósito ou saque).")
@@ -113,7 +130,8 @@ public final class ApiModels {
             @Schema(description = "Nome do cliente", example = "Maria Oliveira") String name,
             @Schema(description = "Tipo de documento", example = "CPF") String documentType,
             @Schema(description = "Referência externa", example = "ext-ref-99") String externalRef,
-            @Schema(description = "Status do cadastro", example = "ACTIVE") String status) {
+            @Schema(description = "Status do cadastro", example = "ACTIVE") String status,
+            @Schema(description = "E-mail do cliente; ausente quando não há", example = "maria@example.com") String email) {
     }
 
     @Schema(description = "Detalhes completos da conta incluindo o nome e documento mascarado do titular.")
@@ -129,14 +147,17 @@ public final class ApiModels {
             @Schema(description = "Saldo", example = "1250.00") BigDecimal balance,
             @Schema(description = "Moeda", example = "BRL") String currency,
             @Schema(description = "Nome do titular da conta", example = "João da Silva") String customerName,
-            @Schema(description = "Documento mascarado do titular", example = "***.686.290-**") String documentMasked) {
+            @Schema(description = "Documento mascarado do titular", example = "***.686.290-**") String documentMasked,
+            @Schema(description = "UUID do cliente titular") UUID customerId,
+            @Schema(description = "E-mail do titular; ausente quando não há", example = "maria@example.com") String customerEmail) {
 
         static AccountDetailResponse from(QueryAccountUseCase.AccountDetail d) {
             Account a = d.account();
             return new AccountDetailResponse(
                     a.id().value(), a.number().ispb(), a.number().branch(), a.number().number(),
                     a.number().checkDigit(), a.number().formatted(), a.number().type().bcbCode(), a.status().name(),
-                    a.balance().toDecimal(), Money.CURRENCY, d.customerName(), d.documentMasked());
+                    a.balance().toDecimal(), Money.CURRENCY, d.customerName(), d.documentMasked(),
+                    a.customerId() == null ? null : a.customerId().value(), d.customerEmail());
         }
     }
 

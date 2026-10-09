@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import br.com.walletcore.application.port.in.AuditLedgerUseCase;
+import br.com.walletcore.application.port.in.CustomerContactUseCase;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.DepositCommand;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.Destination;
@@ -85,6 +86,7 @@ class WalletCoreConcurrencyTest {
     @Autowired MoveMoneyUseCase moveMoney;
     @Autowired QueryAccountUseCase query;
     @Autowired AuditLedgerUseCase audit;
+    @Autowired CustomerContactUseCase contacts;
     @Autowired TransactionRunner transactionRunner;
     @Autowired JdbcClient jdbc;
 
@@ -230,6 +232,34 @@ class WalletCoreConcurrencyTest {
         assertThat(balance(tenant, wallet)).isEqualTo(Money.ofCents(5000));
         assertThatThrownBy(() -> moveMoney.deposit(new DepositCommand(tenant, wallet.id(), Money.ofCents(9999), "x",
                 "same-key"))).isInstanceOf(ConflictException.class);
+    }
+
+    /** ADR-003 of wallet-app, on the real schema and as the application role (no superuser, RLS on). */
+    @Test
+    void customerEmailIsSetByTheTenantOnlyAndTheAppRoleCanChangeNothingElse() {
+        TenantId tenantA = newTenant();
+        TenantId tenantB = newTenant();
+        var onboarded = onboardCustomer.onboard(new OnboardCustomerUseCase.Command(
+                tenantA, "Maria Silva", "52998224725", null, "Maria@Example.com"));
+        var customerId = onboarded.customer().id();
+
+        var contact = contacts.findByTaxId(tenantA, "529.982.247-25");
+        assertThat(contact.email().value()).isEqualTo("maria@example.com");
+        assertThat(contact.accountId()).isEqualTo(onboarded.account().id());
+
+        contacts.changeEmail(tenantA, customerId, "nova@example.com");
+        assertThat(contacts.findByTaxId(tenantA, "52998224725").email().value()).isEqualTo("nova@example.com");
+        assertThat(query.getAccountDetail(tenantA, onboarded.account().id()).customerEmail()).isEqualTo("nova@example.com");
+        contacts.changeEmail(tenantA, customerId, " ");
+        assertThat(contacts.findByTaxId(tenantA, "52998224725").email()).isNull();
+
+        assertThatThrownBy(() -> contacts.findByTaxId(tenantB, "52998224725")).isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> contacts.changeEmail(tenantB, customerId, "intruso@example.com"))
+                .isInstanceOf(NotFoundException.class);
+        // The application role got UPDATE on the email column only: renaming a customer is still refused.
+        assertThatThrownBy(() -> transactionRunner.inTransaction(tenantA, () ->
+                jdbc.sql("UPDATE customer SET name = 'Outro Nome'").update()))
+                .isInstanceOf(DataAccessException.class);
     }
 
     @Test

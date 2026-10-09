@@ -27,7 +27,11 @@ public interface AccountRepository {
     Optional<AccountHolder> findHolderByNumber(TenantId tenantId, String branch, String number, String checkDigit);
 
     /** Read-model row for the accounts directory: an Account joined with its customer's display name. */
-    record AccountDirectoryItem(Account account, String customerName, String documentMasked) {
+    record AccountDirectoryItem(Account account, String customerName, String documentMasked, String customerEmail) {
+
+        public AccountDirectoryItem(Account account, String customerName, String documentMasked) {
+            this(account, customerName, documentMasked, null);
+        }
     }
 
     /**

@@ -1,6 +1,7 @@
 package br.com.walletcore.bootstrap;
 
 import br.com.walletcore.application.port.in.AuditLedgerUseCase;
+import br.com.walletcore.application.port.in.CustomerContactUseCase;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase;
 import br.com.walletcore.application.port.in.OnboardCustomerUseCase;
 import br.com.walletcore.application.port.in.ProvisionTenantUseCase;
@@ -17,6 +18,7 @@ import br.com.walletcore.application.port.out.TenantRepository;
 import br.com.walletcore.application.port.out.TransactionJournal;
 import br.com.walletcore.application.port.out.TransactionRunner;
 import br.com.walletcore.application.service.AuditLedgerService;
+import br.com.walletcore.application.service.CustomerContactService;
 import br.com.walletcore.application.service.MoveMoneyService;
 import br.com.walletcore.application.service.OnboardCustomerService;
 import br.com.walletcore.application.service.ProvisionTenantService;
@@ -49,6 +51,11 @@ class UseCaseConfig {
                                                    CustomerRepository customers, AccountRepository accounts,
                                                    OutboxRepository outbox, MetricsRecorder metrics, Clock clock) {
         return new OnboardCustomerService(tx, tenants, customers, accounts, outbox, metrics, clock);
+    }
+
+    @Bean
+    CustomerContactUseCase customerContactUseCase(TransactionRunner tx, CustomerRepository customers) {
+        return new CustomerContactService(tx, customers);
     }
 
     @Bean

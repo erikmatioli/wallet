@@ -35,9 +35,12 @@ public record Tenant(
      * <p>{@code schedules:read} and {@code schedules:write} are not checked by wallet-core itself:
      * they are for wallet-scheduler's API, which accepts wallet-core's tokens (ADR-001 of
      * wallet-scheduler) - wallet-core is the one identity provider of the platform.
+     *
+     * <p>{@code otp:use} is the same for wallet-otp's API: create and verify one-time codes
+     * (ADR-001 of wallet-otp).
      */
     public static final Set<String> DEFAULT_SCOPES = Set.of("customers:write", "accounts:read", "ledger:write",
-            "ledger:audit", "pix:send", "pix:receive", "schedules:read", "schedules:write");
+            "ledger:audit", "pix:send", "pix:receive", "schedules:read", "schedules:write", "otp:use");
 
     private static final Pattern CLIENT_ID = Pattern.compile("[a-z0-9][a-z0-9-]{2,62}");
     private static final Pattern ISPB = Pattern.compile("[0-9]{8}");

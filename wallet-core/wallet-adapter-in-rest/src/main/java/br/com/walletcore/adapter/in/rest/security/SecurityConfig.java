@@ -46,6 +46,10 @@ class SecurityConfig {
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/v1/customers").hasAuthority("SCOPE_customers:write")
+                        // The customer's email (ADR-003 of wallet-app): the operator changes it like onboarding;
+                        // reading it is a read of the customer, as the account reads are.
+                        .requestMatchers(HttpMethod.PUT, "/v1/customers/*/email").hasAuthority("SCOPE_customers:write")
+                        .requestMatchers(HttpMethod.GET, "/v1/customers/contact").hasAuthority("SCOPE_accounts:read")
                         .requestMatchers(HttpMethod.GET, "/v1/accounts/*/audit").hasAuthority("SCOPE_ledger:audit")
                         // Bare "/v1/accounts" (the directory listing) explicitly, rather than relying on
                         // "/v1/accounts/**" to also match the zero-segment case: Spring Security 6 uses
