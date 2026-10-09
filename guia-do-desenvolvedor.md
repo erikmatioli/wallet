@@ -36,7 +36,7 @@ Leia de cima para baixo na primeira vez. Depois, use o índice para voltar a uma
 **tenant**) contrata a plataforma e oferece contas de pagamento aos seus clientes. Vários tenants
 usam a mesma instalação, e um nunca enxerga os dados do outro.
 
-O repositório é um **monorepo** com cinco produtos. Cada um tem build, deploy, banco e release
+O repositório é um **monorepo** com seis produtos. Cada um tem build, deploy, banco e release
 próprios:
 
 | Produto | O que faz | Linguagem | Porta local |
@@ -46,6 +46,7 @@ próprios:
 | `wallet-scheduler` | Agenda transferências e Pix para uma data e executa no dia | Kotlin + Spring Boot 4 (Maven) | 8082 |
 | `wallet-console` | Tela web **do operador** da fintech | TypeScript + Angular 21 | 4200 |
 | `wallet-app` | App desktop **do cliente final** e seu backend (`app-api`) | Kotlin: Compose Desktop + Spring Boot 4 (Gradle) | 8083 / 8084 |
+| `wallet-otp` | Códigos de uso único por e-mail: cadastro e login do app, aprovações no futuro | Kotlin + Spring Boot 4 (Maven) | 8085 (+ Mailpit 8025) |
 
 ```
                  OPERADOR DA FINTECH                       CLIENTE FINAL
@@ -72,6 +73,9 @@ próprios:
                         ▲                                                │
                         └────────────────────────────────────────────────┘
 ```
+
+Fora do desenho: o `app-api` também chama o **`wallet-otp`** (:8085), que manda os códigos de cadastro
+e login por e-mail. Localmente, os e-mails caem no Mailpit (http://localhost:8025).
 
 A regra mais importante do sistema inteiro: **só o `wallet-core` mexe em saldo**. O Pix, o
 agendador, o console e o app pedem ao core para mover dinheiro, sempre pela API dele. Ninguém mais
@@ -228,6 +232,7 @@ Pré-requisitos: Docker Desktop, JDK 25, Maven 3.9+, Node 22+ (console). O Gradl
 cd wallet-core      && docker compose up -d           # Postgres, wallet-core, OTel, Jaeger, Prometheus, Loki, Grafana
 cd ../wallet-pix    && docker compose up -d --build   # LocalStack (filas), pix-service, spi-simulator
 cd ../wallet-scheduler && docker compose up -d --build
+cd ../wallet-otp    && docker compose up -d --build   # códigos por e-mail (8085) e o Mailpit (8025)
 cd ../wallet-app    && docker compose up -d --build   # app-api do demo-tenant (8083) e do segundo-tenant (8084)
 cd ../wallet-console && npm ci && npm start           # console em http://localhost:4200
 cd ../wallet-app    && ./gradlew :app-desktop:run     # app do cliente (demo-tenant)
@@ -239,7 +244,9 @@ cd ../wallet-app    && ./gradlew :app-desktop:run     # app do cliente (demo-ten
 | pix-service | http://localhost:8081 | token do core com `pix:send` |
 | spi-simulator | http://localhost:8090 | — |
 | wallet-scheduler | http://localhost:8082 | token do core com `schedules:*` |
-| app-api | http://localhost:8083 (demo) / 8084 (segundo) | CPF e senha do cliente |
+| app-api | http://localhost:8083 (demo) / 8084 (segundo) | CPF do cliente + código que chega por e-mail |
+| wallet-otp | http://localhost:8085 | token do core com `otp:use` |
+| Mailpit | http://localhost:8025 | — (os e-mails com os códigos) |
 | console | http://localhost:4200 | as credenciais do tenant |
 | Grafana | http://localhost:3000 | pasta "Wallet Core" |
 | Jaeger | http://localhost:16686 | — |
@@ -597,8 +604,9 @@ qualquer cliente que abrisse o executável teria acesso a **todas** as contas da
 `app-api`:
 
 - guarda o secret do tenant **só no servidor**;
-- tem o próprio login (CPF + senha com BCrypt, bloqueio após 5 erros por 15 minutos, a mesma
-  mensagem e o mesmo tempo de resposta para "CPF não existe" e "senha errada");
+- tem o próprio login, **sem senha**: o cliente informa o CPF e recebe um código no e-mail
+  cadastrado, gerado pelo `wallet-otp` (ADR-002 do wallet-app). A resposta é a mesma para um CPF com
+  ou sem conta;
 - emite um **token do cliente** (JWT HS256, 30 minutos) com `account_id` e `tenant`;
 - em toda chamada, usa o `account_id` **do token**. O desktop nunca diz de qual conta é o pedido.
 
@@ -640,10 +648,13 @@ O wallet-pix e o scheduler separam **tenants**, mas não sabem que existem clien
 O login nasce `PENDING` **antes** de chamar o core e vira `ACTIVE` depois. Se o `app-api` cair no
 meio, o próximo cadastro com o mesmo CPF acha o login pendente, recebe "cliente já existe" do core
 e recupera a conta pelo CPF, sem criar outra. Um cliente que já existia no core **sem** login
-pendente foi criado fora do app (pelo console): o cadastro é recusado
-(`CUSTOMER_EXISTS_OUTSIDE_APP`), e esse cliente entra pelo **login usando o CPF, só números, como
-senha**. No primeiro login assim, `AuthService.firstAccess` confirma no core que o CPF tem conta e
-cria o login já ativo. É provisório: o CPF não é segredo (ver ADR-001, decisão 4).
+pendente foi criado fora do app (pelo console): o cadastro é recusado, porque o e-mail digitado no
+cadastro não prova quem é o dono da conta. Esse cliente usa **Entrar**: o código vai para o e-mail que o
+operador cadastrou no console, e o primeiro código conferido cria o login ligado à conta que já existe
+(ADR-003). Sem e-mail no cadastro do core, o atendimento precisa incluí-lo.
+
+O cadastro só chega aqui depois de o cliente confirmar o código enviado ao e-mail que informou: é
+isso que prova que o e-mail é dele.
 
 ### 11.6 O desktop por dentro
 
@@ -673,6 +684,16 @@ A JVM do pacote só leva os módulos listados em `build.gradle.kts`. Se faltar `
 não abre e não mostra erro; se faltar `jdk.localedata`, o dinheiro aparece em formato inglês. Esses
 dois problemas **só aparecem no executável**, nunca no `gradlew run`.
 
+### 11.7 O motor de códigos (wallet-otp)
+
+Um serviço próprio, em Kotlin, com banco `otp`, chamado pelo `app-api` com o token do tenant
+(escopo `otp:use`). Ele não conhece clientes: quem chama diz **quem** (CPF/CNPJ), **para quê**
+(`SIGNUP`, `LOGIN`, `PAYMENT_APPROVAL`) e **para onde** mandar. Regras: 6 dígitos, 5 minutos, uso
+único, 5 tentativas, um código novo invalida o anterior, 1 envio por minuto e 5 por hora por CPF, 10
+por hora por e-mail. No banco fica só o HMAC do código e o e-mail mascarado. Um "contexto" opcional
+prende o código ao que ele aprova (no cadastro, o e-mail; num pagamento, valor e recebedor).
+Detalhes no [README](wallet-otp/README.md) e na ADR-001 do wallet-otp.
+
 ---
 
 ## 12. Fluxos de ponta a ponta
@@ -680,12 +701,26 @@ dois problemas **só aparecem no executável**, nunca no `gradlew run`.
 ### 12.1 Cliente abre conta pelo app
 
 ```
-desktop ── POST /app/v1/signup {nome, cpf, senha} ──▶ app-api
-app-api:  grava customer_login PENDING (BCrypt da senha)
-app-api ── POST /v1/auth/token (Basic do tenant) ──▶ core     (token em cache)
+desktop ── POST /app/v1/signup/start {nome, cpf, e-mail} ──▶ app-api
+app-api ── POST /v1/otp/challenges (SIGNUP, contexto = e-mail) ──▶ wallet-otp ── e-mail ──▶ cliente
+desktop ── POST /app/v1/signup/confirm {challengeId, código, nome, cpf, e-mail} ──▶ app-api
+app-api ── POST /v1/otp/challenges/{id}/verify ──▶ wallet-otp: confere
+app-api:  grava customer_login PENDING com o e-mail
 app-api ── POST /v1/customers ──▶ core: cria cliente + conta TRAN, evento no outbox
-app-api:  customer_login → ACTIVE com customer_id e account_id
-desktop ◀── 201; depois o login devolve o token do cliente
+app-api:  customer_login → ACTIVE com account_id
+desktop ◀── 201 com o token do cliente
+```
+
+### 12.1b Cliente entra no app
+
+```
+desktop ── POST /app/v1/login/start {cpf} ──▶ app-api: limite de pedidos igual para todo CPF
+app-api:  CPF com login? pede o código (LOGIN) ao wallet-otp para o e-mail do login
+          Sem login, mas cliente do console com e-mail? código para o e-mail do core (ADR-003);
+            o primeiro código conferido cria o login ligado à conta existente
+          Nada disso? inventa um challengeId que nunca confere. A resposta é a mesma.
+desktop ── POST /app/v1/login/confirm {challengeId, cpf, código} ──▶ app-api ── verify ──▶ wallet-otp
+desktop ◀── 200 com o token do cliente (30 minutos)
 ```
 
 ### 12.2 Transferência pelo app
@@ -776,7 +811,7 @@ Todos os backends rodam com o **agente OpenTelemetry** (`-javaagent`) e mandam t
 
 **Achar tudo de um tenant:** os logs levam `tenant_id` no MDC (no core por um interceptor; no
 scheduler também no job e no listener, que rodam fora de uma requisição). No app-api, o MDC leva
-`customer_id`, **nunca** CPF, senha ou token. Do log você pula para o trace pelo `trace_id`.
+`customer_id`, **nunca** CPF, e-mail, código ou token. Do log você pula para o trace pelo `trace_id`.
 
 **Métricas que valem alerta:**
 
@@ -872,7 +907,7 @@ sem quebrar testes que continuam corretos.
 **CI** (`.github/workflows/`):
 
 - um workflow por projeto (`ci.yml` do core, `ci-wallet-pix.yml`, `ci-wallet-scheduler.yml`,
-  `ci-wallet-console.yml`, `ci-wallet-app.yml`), cada um com filtro de pasta: só roda se o PR
+  `ci-wallet-console.yml`, `ci-wallet-app.yml`, `ci-wallet-otp.yml`), cada um com filtro de pasta: só roda se o PR
   tocar aquele projeto;
 - todos validam o título do PR em **Conventional Commits** (`feat(wallet-pix): ...`), que vira a
   mensagem do commit na `main` (squash merge).
