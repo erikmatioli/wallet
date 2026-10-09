@@ -53,4 +53,6 @@ são compartilhadas entre as peças (hoje a sessão pertence só a este app).
 ## Consequências
 - (+) Console pequeno, sem dependências pesadas, sem mudança no backend.
 - (−) Sem listagem/busca de clientes e contas: o wallet-core ainda não expõe esses endpoints.
+  *Atualização:* o wallet-core passou a expor `GET /v1/accounts`, `/lookup` e `/findByTaxId`, e o
+  console hoje lista e busca contas na tela inicial.
 - (−) Login manual por tenant (client credentials); não há usuários individuais/perfis de operador.
