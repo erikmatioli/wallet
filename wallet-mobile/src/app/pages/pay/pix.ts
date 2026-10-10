@@ -1,7 +1,8 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { Router, RouterLink } from '@angular/router';
 import { AppApi } from '../../core/api';
 import { money, pixStatus } from '../../core/format';
+import { PixPrefill } from '../../core/send-again';
 import { PixFlow } from '../../flows/payments.flow';
 import { AmountField } from '../../ui/amount-field';
 import { Alert } from '../../ui/alert';
@@ -44,7 +45,13 @@ import { Icon } from '../../ui/icon';
             [cents]="f.amountCents"
             (centsChange)="flow.edit({ amountCents: $event })"
           />
-          <p class="muted">Para quem? Os dados da conta de quem recebe, em outra instituição.</p>
+          @if (fromStatement()) {
+            <p class="alert alert-info" role="status">
+              Dados da conta trazidos do seu extrato. Confira e complete o CPF ou CNPJ.
+            </p>
+          } @else {
+            <p class="muted">Para quem? Os dados da conta de quem recebe, em outra instituição.</p>
+          }
           <div class="field">
             <label for="name">Nome de quem recebe</label>
             <input
@@ -63,7 +70,13 @@ import { Icon } from '../../ui/icon';
               placeholder="Só números (ou letras no CNPJ alfanumérico)"
               [value]="f.taxId"
               (input)="flow.edit({ taxId: $any($event.target).value })"
+              [attr.aria-describedby]="taxIdMasked() ? 'taxId-hint' : null"
             />
+            @if (taxIdMasked(); as masked) {
+              <span class="hint" id="taxId-hint">
+                No extrato aparece só {{ masked }}. Digite o documento completo.
+              </span>
+            }
           </div>
           <div class="field">
             <label for="ispb">Instituição (ISPB)</label>
@@ -205,6 +218,20 @@ import { Icon } from '../../ui/icon';
 })
 export class PixPage {
   protected readonly flow = new PixFlow(inject(AppApi));
+  /** Opened from a statement entry ("Fazer um Pix para esta conta"): the form comes filled in. */
+  protected readonly fromStatement = signal(false);
+  protected readonly taxIdMasked = signal('');
   protected readonly money = money;
   protected readonly pixStatus = pixStatus;
+
+  constructor() {
+    const prefill = inject(Router).currentNavigation()?.extras.state?.['prefill'] as
+      PixPrefill | undefined;
+    if (prefill) {
+      const { name, ispb, branch, account } = prefill;
+      this.flow.edit({ name, ispb, branch, account });
+      this.fromStatement.set(true);
+      this.taxIdMasked.set(prefill.taxIdMasked);
+    }
+  }
 }
