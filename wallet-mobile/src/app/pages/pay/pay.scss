@@ -1,0 +1,93 @@
+// Shared by the payment flows: header with back, the confirmation card and the receipt.
+.grow {
+  flex: 1;
+}
+
+.steps {
+  display: flex;
+  gap: 6px;
+
+  span {
+    height: 4px;
+    flex: 1;
+    border-radius: 2px;
+    background: var(--mw-line);
+
+    &.on {
+      background: var(--mw-orange);
+    }
+  }
+}
+
+.confirm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  .big {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .value {
+    font-size: 2.2rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+  }
+}
+
+.receipt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 24px 16px;
+
+  .badge {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--mw-ok-soft);
+    color: var(--mw-ok);
+    margin-bottom: 4px;
+
+    &.wait {
+      background: var(--mw-wait-soft);
+      color: var(--mw-wait);
+    }
+
+    &.bad {
+      background: var(--mw-bad-soft);
+      color: var(--mw-bad);
+    }
+  }
+
+  .value {
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+
+  .details {
+    width: 100%;
+    margin-top: 12px;
+    text-align: left;
+  }
+}
+
+.mono {
+  font-family: ui-monospace, 'Cascadia Mono', Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

@@ -1,0 +1,87 @@
+// Login and signup: the brand on top, the form in a panel that rises over it.
+:host {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--mw-bg);
+}
+
+.hero {
+  background: var(--mw-card);
+  color: #fff;
+  padding: calc(32px + env(safe-area-inset-top)) 24px 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+
+  &::after {
+    // the coin of the mark, large and faint
+    content: '';
+    position: absolute;
+    width: 220px;
+    height: 220px;
+    border-radius: 50%;
+    right: -70px;
+    bottom: -110px;
+    background: rgba(255, 226, 199, 0.16);
+  }
+
+  .tagline {
+    font-size: 1.05rem;
+    font-weight: 600;
+    opacity: 0.92;
+    max-width: 22ch;
+  }
+}
+
+.panel {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: var(--mw-max);
+  margin: -44px auto 0;
+  background: var(--mw-surface);
+  border-radius: 28px 28px 0 0;
+  padding: 28px 20px calc(28px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  flex: 1;
+}
+
+@media (min-width: 640px) {
+  .panel {
+    border-radius: 28px;
+    flex: none;
+    box-shadow: var(--mw-shadow);
+    margin-bottom: 32px;
+  }
+}
+
+.title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.footer {
+  text-align: center;
+  color: var(--mw-text-2);
+}
+
+.install {
+  margin-top: auto;
+}
+
+.trust {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--mw-text-2);
+}

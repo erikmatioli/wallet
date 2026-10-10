@@ -1,0 +1,87 @@
+name: CI - wallet-mobile (M-Wall)
+
+# Same model as ci-wallet-pix.yml: its own caller workflow with path filters, so mobile-only PRs
+# get checks (none of the other workflows run for wallet-mobile/**) and other projects don't run this.
+on:
+  pull_request:
+    branches: [main]
+    # "edited" so that fixing the PR title re-runs pr-title (the default types don't include it).
+    # The build jobs skip that event: a title change doesn't change the code.
+    types: [opened, synchronize, reopened, edited]
+    paths:
+      - "wallet-mobile/**"
+      - ".github/workflows/ci-wallet-mobile.yml"
+  push:
+    branches: [main]
+    paths:
+      - "wallet-mobile/**"
+      - ".github/workflows/ci-wallet-mobile.yml"
+
+concurrency:
+  # Title edits get their own group: otherwise editing the title would cancel a build in progress.
+  group: ci-wallet-mobile-${{ github.ref }}-${{ github.event.action == 'edited' && 'title' || 'build' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    name: Conventional PR title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      # Same check as ci.yml and ci-wallet-pix.yml, which never run on wallet-mobile-only PRs
+      # because of their path filters. Squash-merge uses the PR title as the commit message on main.
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # GitHub cuts long titles taken from a commit subject and appends "…"; that cut text
+          # would become main's commit message. A conventional prefix alone doesn't catch it.
+          subjectPattern: ^(?!.*…$).+$
+          subjectPatternError: |
+            O título termina em "…": o GitHub cortou o assunto do commit. Escreva o título completo.
+
+  build-test:
+    name: Build & test
+    if: github.event.action != 'edited'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wallet-mobile
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          # Same major as the Dockerfile's build stage.
+          node-version: 22
+          cache: npm
+          cache-dependency-path: wallet-mobile/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run build
+
+      # Vitest via @angular/build:unit-test; --watch=false so the run exits instead of waiting.
+      - run: npm test -- --watch=false
+
+  docker:
+    name: Docker build
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: wallet-mobile
+          push: false
+          tags: wallet-mobile:ci

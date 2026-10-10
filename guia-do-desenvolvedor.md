@@ -36,7 +36,7 @@ Leia de cima para baixo na primeira vez. Depois, use o índice para voltar a uma
 **tenant**) contrata a plataforma e oferece contas de pagamento aos seus clientes. Vários tenants
 usam a mesma instalação, e um nunca enxerga os dados do outro.
 
-O repositório é um **monorepo** com seis produtos. Cada um tem build, deploy, banco e release
+O repositório é um **monorepo** com sete produtos. Cada um tem build, deploy, banco e release
 próprios:
 
 | Produto | O que faz | Linguagem | Porta local |
@@ -46,6 +46,7 @@ próprios:
 | `wallet-scheduler` | Agenda transferências e Pix para uma data e executa no dia | Kotlin + Spring Boot 4 (Maven) | 8082 |
 | `wallet-console` | Tela web **do operador** da fintech | TypeScript + Angular 21 | 4200 |
 | `wallet-app` | App desktop **do cliente final** e seu backend (`app-api`) | Kotlin: Compose Desktop + Spring Boot 4 (Gradle) | 8083 / 8084 |
+| `wallet-mobile` | **M-Wall**: o app do cliente final para celular (PWA), sobre o mesmo `app-api` | TypeScript: Angular 21 + service worker | 8086 / 8087 |
 | `wallet-otp` | Códigos de uso único por e-mail: cadastro e login do app, aprovações no futuro | Kotlin + Spring Boot 4 (Maven) | 8085 (+ Mailpit 8025) |
 
 ```
@@ -234,6 +235,7 @@ cd ../wallet-pix    && docker compose up -d --build   # LocalStack (filas), pix-
 cd ../wallet-scheduler && docker compose up -d --build
 cd ../wallet-otp    && docker compose up -d --build   # códigos por e-mail (8085) e o Mailpit (8025)
 cd ../wallet-app    && docker compose up -d --build   # app-api do demo-tenant (8083) e do segundo-tenant (8084)
+cd ../wallet-mobile && docker compose up -d --build   # M-Wall (PWA) do demo-tenant (8086) e do segundo-tenant (8087)
 cd ../wallet-console && npm ci && npm start           # console em http://localhost:4200
 cd ../wallet-app    && ./gradlew :app-desktop:run     # app do cliente (demo-tenant)
 ```
@@ -248,6 +250,7 @@ cd ../wallet-app    && ./gradlew :app-desktop:run     # app do cliente (demo-ten
 | wallet-otp | http://localhost:8085 | token do core com `otp:use` |
 | Mailpit | http://localhost:8025 | — (os e-mails com os códigos) |
 | console | http://localhost:4200 | as credenciais do tenant |
+| M-Wall (PWA) | http://localhost:8086 (demo) / 8087 (segundo) | CPF do cliente + código que chega por e-mail |
 | Grafana | http://localhost:3000 | pasta "Wallet Core" |
 | Jaeger | http://localhost:16686 | — |
 | Prometheus | http://localhost:9090 | — |
@@ -693,6 +696,27 @@ Um serviço próprio, em Kotlin, com banco `otp`, chamado pelo `app-api` com o t
 por hora por e-mail. No banco fica só o HMAC do código e o e-mail mascarado. Um "contexto" opcional
 prende o código ao que ele aprova (no cadastro, o e-mail; num pagamento, valor e recebedor).
 Detalhes no [README](wallet-otp/README.md) e na ADR-001 do wallet-otp.
+
+### 11.8 M-Wall: o mesmo app no celular (wallet-mobile)
+
+README: [`wallet-mobile/README.md`](wallet-mobile/README.md). Decisões:
+[ADR-001](wallet-mobile/docs/adr/001-pwa-do-cliente.md).
+
+Um segundo cliente do **mesmo `app-api`**: nenhum endpoint novo. É um PWA em Angular 21 (a stack do
+console), instalável pela tela inicial do celular, com nome e identidade próprios, M-Wall, em laranja.
+
+- **Mesma origem:** um nginx serve o PWA e encaminha `/app/v1/**` para o `app-api` do tenant
+  (`APP_API_UPSTREAM`). Sem CORS e sem URL de backend no bundle; um container por tenant (8086 e 8087).
+- **O service worker só guarda o app** (HTML, JS, CSS, fonte, ícones), nunca uma resposta de
+  `/app/v1`: saldo e extrato não ficam no aparelho.
+- **Sessão só em memória**, como no desktop: recarregar a página ou fechar o app pede o código de novo.
+  5 minutos sem toque também encerram, inclusive quando o app volta do segundo plano.
+- **Os ViewModels viram "flows":** `src/app/flows/*.flow.ts` são classes com signals, sem DOM, testadas
+  com Vitest e uma API falsa. As telas só desenham o estado. Os mesmos três passos nos pagamentos, com a
+  `Idempotency-Key` nascendo na confirmação.
+- **O contrato é repetido** em `src/app/core/contract.ts`. O kotlinx.serialization **omite campo com
+  valor padrão** (`attempts = emptyList()`, `resendAfterSeconds = 60`): no TypeScript esses campos são
+  opcionais e quem lê aplica o mesmo padrão.
 
 ---
 

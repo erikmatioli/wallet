@@ -1,0 +1,25 @@
+{
+  "name": "M-Wall",
+  "short_name": "M-Wall",
+  "description": "Sua conta no celular: saldo, extrato, Pix, transferências e agendamentos.",
+  "id": "/",
+  "start_url": "/inicio",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "theme_color": "#F26A1B",
+  "background_color": "#FAF7F4",
+  "categories": ["finance"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Pix", "url": "/pagar/pix", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Extrato", "url": "/extrato", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
