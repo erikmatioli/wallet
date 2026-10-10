@@ -34,6 +34,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import br.com.walletapp.contract.StatementEntry
 import br.com.walletapp.desktop.ui.Format
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import br.com.walletapp.contract.DayBalance
+import java.time.LocalDate
+import java.time.ZoneId
 
 private val credit = Color(0xFF1B7F3B)
 private val debit = Color(0xFFB42318)
@@ -64,6 +72,7 @@ fun HomeScreen(viewModel: HomeViewModel, onStatement: () -> Unit, onTransfer: ()
                         style = MaterialTheme.typography.bodySmall)
                 }
             }
+            s.history?.takeIf { it.days.size > 1 }?.let { BalanceChart(it.days) }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onTransfer) { Text("Transferir") }
                 Button(onClick = onPix) { Text("Pix") }
@@ -84,7 +93,11 @@ fun StatementScreen(viewModel: StatementViewModel) {
 
     // LazyColumn only composes the rows that are visible: long statements stay light.
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
-        items(s.entries, key = { it.sequence }) { entry -> EntryRow(entry, onClick = { viewModel.open(entry) }) }
+        val today = LocalDate.now(ZoneId.of("America/Sao_Paulo"))
+        s.days.forEach { day ->
+            item(key = "day-${day.day}") { DayHeader(day, today) }
+            items(day.entries, key = { it.sequence }) { entry -> EntryRow(entry, onClick = { viewModel.open(entry) }) }
+        }
         item {
             Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 when {
@@ -97,6 +110,53 @@ fun StatementScreen(viewModel: StatementViewModel) {
         }
     }
     s.selected?.let { EntryDetail(it, onClose = viewModel::close) }
+}
+
+/** The day, and its closing balance - "so far" when the day is today. */
+@Composable
+private fun DayHeader(day: StatementDay, today: LocalDate) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(Format.dayTitle(day.day, today), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        Text(
+            (if (day.day == today) "Saldo até agora " else "Saldo do dia ") + Format.money(day.closingCents),
+            style = MaterialTheme.typography.labelLarge,
+        )
+    }
+    HorizontalDivider()
+}
+
+/** The balance at the end of each of the last days, as a line (wallet-core's ADR-012). */
+@Composable
+private fun BalanceChart(days: List<DayBalance>) {
+    val line = MaterialTheme.colorScheme.primary
+    val values = days.map { it.balanceCents }
+    val min = values.min()
+    val max = values.max()
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Evolução do saldo - últimos ${days.size} dias", style = MaterialTheme.typography.labelLarge)
+            Canvas(Modifier.fillMaxWidth().height(96.dp)) {
+                fun point(i: Int): Offset {
+                    val x = i * size.width / (days.size - 1)
+                    val y = if (max == min) size.height / 2 else (max - values[i]) * size.height / (max - min)
+                    return Offset(x, y)
+                }
+                val path = Path().apply {
+                    moveTo(point(0).x, point(0).y)
+                    for (i in 1 until days.size) lineTo(point(i).x, point(i).y)
+                }
+                drawPath(path, color = line, style = Stroke(width = 2.5.dp.toPx()))
+                drawCircle(color = line, radius = 3.5.dp.toPx(), center = point(days.size - 1))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(Format.date(days.first().date), style = MaterialTheme.typography.bodySmall)
+                Text(Format.date(days.last().date), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
 }
 
 @Composable
@@ -131,9 +191,12 @@ private fun EntryDetail(entry: StatementEntry, onClose: () -> Unit) {
                 Detail("Saldo após", Format.money(entry.balanceAfterCents))
                 entry.description?.let { Detail("Descrição", it) }
                 entry.counterpartyName?.let { Detail(if (entry.credit) "De" else "Para", it) }
+                entry.counterpartyAccount?.let { Detail("Agência e conta", Format.account(it.branch, it.number, it.checkDigit)) }
                 entry.pix?.let { pix ->
                     pix.counterpartyTaxIdMasked?.let { Detail("CPF/CNPJ", it) }
                     pix.counterpartyInstitution?.let { Detail("Instituição (ISPB)", it) }
+                    pix.counterpartyBranch?.let { Detail("Agência", it) }
+                    pix.counterpartyAccount?.let { Detail("Conta com dígito", it) }
                     pix.reasonCode?.let { Detail("Motivo", it) }
                     Detail("EndToEndId", pix.endToEndId)
                 }

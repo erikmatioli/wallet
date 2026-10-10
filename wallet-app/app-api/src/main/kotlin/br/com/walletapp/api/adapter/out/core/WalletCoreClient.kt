@@ -26,6 +26,9 @@ import org.springframework.web.client.body
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
+import br.com.walletapp.api.domain.BusinessRuleException
+import br.com.walletapp.contract.DayBalance
+import java.time.LocalDate
 
 /**
  * wallet-core, as the tenant that owns the app. Its token never leaves app-api. wallet-core's JSON is
@@ -56,6 +59,8 @@ class WalletCoreClient(builder: RestClient.Builder, props: AppProperties, privat
     private data class CorePix(val endToEndId: String, val counterparty: CorePixCounterparty?, val reasonCode: String?)
     private data class CorePixCounterparty(val name: String?, val taxIdMasked: String?, val ispb: String?,
                                            val branch: String?, val account: String?)
+    private data class CoreDailyBalances(val days: List<CoreDay>)
+    private data class CoreDay(val date: LocalDate, val balance: BigDecimal)
     private data class CoreTransfer(val sourceAccountId: UUID, val destination: CoreNumber, val amount: BigDecimal,
                                     val description: String?)
     private data class CoreNumber(val branch: String, val number: String, val checkDigit: String)
@@ -169,6 +174,19 @@ class WalletCoreClient(builder: RestClient.Builder, props: AppProperties, privat
     private fun accountNumber(formatted: String): CounterpartyAccount? =
         Regex("""(\d{4})-(\d+)-(\d)""").matchEntire(formatted.trim())
             ?.destructured?.let { (branch, number, digit) -> CounterpartyAccount(branch, number, digit) }
+
+    override fun dailyBalances(accountId: AccountId, from: LocalDate, to: LocalDate): List<DayBalance> =
+        call("daily balances") { token ->
+            try {
+                http.get().uri("/v1/accounts/{id}/daily-balances?from={f}&to={t}", accountId.value, from, to)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                    .retrieve().body<CoreDailyBalances>()!!
+                    .days.map { DayBalance(it.date.toString(), cents(it.balance)) }
+            } catch (e: HttpClientErrorException.UnprocessableContent) {
+                // DAY_NOT_CLOSED: app-api only asks for closed days, but its clock and wallet-core's may differ.
+                throw BusinessRuleException("DAY_NOT_CLOSED", "O saldo do dia só fecha depois da meia-noite.")
+            }
+        }
 
     /** Every call as the tenant; network failures and 5xx become "try again", which the API answers with 503. */
     private fun <T> call(operation: String, request: (String) -> T): T = try {

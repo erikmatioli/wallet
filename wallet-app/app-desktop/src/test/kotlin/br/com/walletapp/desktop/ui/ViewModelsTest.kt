@@ -145,6 +145,48 @@ class ViewModelsTest {
     }
 
     @Test
+    fun `home brings the balance history, and loads without it when it fails`() = runTest {
+        val store = SessionStore().apply { start(kotlinx.serialization.json.Json.decodeFromString(session)) }
+        var historyFails = false
+        val vm = HomeViewModel(api(store) {
+            when {
+                it.url.encodedPath.endsWith("/me") -> ok("""{"customerName":"Maria Silva","branch":"0001","accountNumber":"100","checkDigit":"1","status":"ACTIVE","balanceCents":15000}""")
+                it.url.encodedPath.endsWith("/balance-history") ->
+                    if (historyFails) error(HttpStatusCode.ServiceUnavailable, "TEMPORARILY_UNAVAILABLE", "Indisponível.")
+                    else ok("""{"from":"2026-10-08","to":"2026-10-09","days":[{"date":"2026-10-08","balanceCents":0},{"date":"2026-10-09","balanceCents":15000}]}""")
+                else -> ok("""{"entries":[]}""")
+            }
+        }, backgroundScope)
+
+        vm.load().join()
+        assertEquals(listOf(0L, 15000L), assertIs<HomeViewModel.State.Loaded>(vm.state.value).history!!.days.map { it.balanceCents })
+
+        historyFails = true
+        vm.load().join()
+        val loaded = assertIs<HomeViewModel.State.Loaded>(vm.state.value)
+        assertEquals(null, loaded.history)
+        assertEquals(15000, loaded.me.balanceCents)
+    }
+
+    @Test
+    fun `the statement is grouped by day in Brasilia, each day with its closing balance`() = runTest {
+        val store = SessionStore().apply { start(kotlinx.serialization.json.Json.decodeFromString(session)) }
+        fun line(seq: Long, at: String, after: Long) =
+            """{"transactionId":"tx-$seq","sequence":$seq,"type":"PIX_IN","credit":true,"amountCents":100,"balanceAfterCents":$after,"occurredAt":"$at"}"""
+        val vm = StatementViewModel(api(store) {
+            // Newest first. 02:00 UTC on the 9th is still the 8th in Brasília.
+            ok("""{"entries":[${line(3, "2026-10-09T15:00:00Z", 7000)},${line(2, "2026-10-09T02:00:00Z", 6000)},${line(1, "2026-10-08T12:00:00Z", 5500)}]}""")
+        }, backgroundScope)
+
+        vm.loadMore()!!.join()
+
+        val days = vm.state.value.days
+        assertEquals(listOf("2026-10-09", "2026-10-08"), days.map { it.day.toString() })
+        assertEquals(listOf(7000L, 6000L), days.map { it.closingCents })
+        assertEquals(listOf(1, 2), days.map { it.entries.size })
+    }
+
+    @Test
     fun `a failure on the home screen becomes a message, and does not take the app's scope down`() = runTest {
         val store = SessionStore().apply { start(kotlinx.serialization.json.Json.decodeFromString(session)) }
         val vm = HomeViewModel(api(store) {

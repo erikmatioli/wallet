@@ -67,6 +67,18 @@ object Format {
         runCatching { LocalDate.parse(text.trim(), dayMonthYear.withResolverStyle(java.time.format.ResolverStyle.STRICT)) }
             .getOrNull()?.toString()
 
+    /** The day an instant falls on, in Brasília. */
+    fun day(iso: String): LocalDate = LocalDate.ofInstant(Instant.parse(iso), zone)
+
+    private val weekdayDay = DateTimeFormatter.ofPattern("EEEE, dd/MM", Locale.of("pt", "BR"))
+
+    /** "Hoje", "Ontem" or "quinta-feira, 08/10": the header of a day in the statement. */
+    fun dayTitle(day: LocalDate, today: LocalDate = LocalDate.now(zone)): String = when (day) {
+        today -> "Hoje"
+        today.minusDays(1) -> "Ontem"
+        else -> weekdayDay.format(day).replaceFirstChar { it.uppercase() }
+    }
+
     /** "2026-10-08" to "08/10/2026". */
     fun date(iso: String): String = LocalDate.parse(iso).format(dayMonthYear)
 

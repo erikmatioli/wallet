@@ -11,6 +11,8 @@ import br.com.walletapp.contract.Schedule
 import br.com.walletapp.contract.ScheduleRequest
 import br.com.walletapp.contract.StatementPage
 import br.com.walletapp.contract.TransferDestination
+import br.com.walletapp.contract.DayBalance
+import java.time.LocalDate
 
 /**
  * wallet-core, called as the tenant that owns the app (ADR-001, decision 1). The reads answer in the
@@ -36,6 +38,9 @@ interface CoreBanking {
     fun me(accountId: AccountId): Me
 
     fun statement(accountId: AccountId, before: Long?, limit: Int): StatementPage
+
+    /** The closing balance of each day from [from] to [to] (wallet-core's ADR-012); all of them must be over. */
+    fun dailyBalances(accountId: AccountId, from: LocalDate, to: LocalDate): List<DayBalance>
 
     /** An account of this institution by its number, with its holder's name; null when there is none. */
     fun findByNumber(branch: String, number: String, checkDigit: String): Pair<AccountId, TransferDestination>?

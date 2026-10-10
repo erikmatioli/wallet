@@ -38,6 +38,7 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import br.com.walletapp.contract.BalanceHistory
 
 /**
  * An answer of app-api that is not a success: its [code], and a [message] made to be shown as it is.
@@ -88,6 +89,14 @@ class AppApiClient(baseUrl: String, private val session: SessionStore, engine: H
         parameter("limit", limit)
         before?.let { parameter("before", it) }
     }.read()
+
+    /** The balance at the end of each day (wallet-core's ADR-012); without dates, the last 30 closed days. */
+    suspend fun balanceHistory(from: String? = null, to: String? = null): BalanceHistory =
+        http.get("app/v1/balance-history") {
+            auth()
+            from?.let { parameter("from", it) }
+            to?.let { parameter("to", it) }
+        }.read()
 
     suspend fun transferDestination(branch: String, number: String, checkDigit: String): TransferDestination =
         http.get("app/v1/transfers/destination") {
