@@ -1,0 +1,59 @@
+name: CI ok
+
+# The one build check main requires, whatever the PR touches.
+#
+# Each product's workflow runs only when its folder changes (path filters), so no single product check
+# can be required: a wallet-mobile PR never produces "build-test / mvn verify", and the PR waits forever
+# for it. This job runs on every PR, waits for every other check of the PR's commit to finish, and fails
+# if any of them failed. A PR that touches no product (docs only) passes as soon as it starts.
+#
+# The PR title is required on its own ("Conventional PR title", pr-title.yml) and left out here: a title
+# fixed later re-runs that check, but would not re-run this one.
+#
+# After re-running a failed job by hand, re-run this one too: it remembers the failure it saw.
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-ok-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  checks: read
+  contents: read
+
+jobs:
+  ci-ok:
+    name: ci-ok
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Wait for the other checks of this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Every workflow this push triggered registers its check runs right away (as queued); a
+          # short wait first makes sure they are all listed before the first look.
+          sleep 30
+          while true; do
+            # filter=latest: one entry per check name, the most recent - a re-run replaces the old one.
+            runs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?filter=latest&per_page=100" \
+              --jq '.check_runs[] | select(.name != "ci-ok" and .name != "Conventional PR title")
+                    | [.name, .status, (.conclusion // "")] | @tsv')
+            failed=$(printf '%s\n' "$runs" | awk -F'\t' '$2 == "completed" && $3 !~ /^(success|skipped|neutral)$/')
+            pending=$(printf '%s\n' "$runs" | awk -F'\t' 'NF && $2 != "completed"' | wc -l)
+            if [ -n "$failed" ]; then
+              echo "::error::Checks that did not pass:"
+              printf '%s\n' "$failed"
+              exit 1
+            fi
+            if [ "$pending" -eq 0 ]; then
+              echo "All checks passed:"
+              printf '%s\n' "${runs:-(none: this PR touches no product)}"
+              exit 0
+            fi
+            echo "Waiting for $pending check(s)..."
+            sleep 20
+          done
