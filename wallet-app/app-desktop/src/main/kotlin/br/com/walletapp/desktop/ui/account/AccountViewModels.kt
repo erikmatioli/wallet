@@ -13,13 +13,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import br.com.walletapp.contract.BalanceHistory
+import br.com.walletapp.desktop.ui.Format
+import java.time.LocalDate
 
 /** The home screen: the account and its last few entries. */
 class HomeViewModel(private val api: AppApiClient, private val scope: CoroutineScope) {
 
     sealed interface State {
         data object Loading : State
-        data class Loaded(val me: Me, val recent: List<StatementEntry>) : State
+        /** [history] is null when it could not be loaded: the rest of the home screen still shows. */
+        data class Loaded(val me: Me, val recent: List<StatementEntry>, val history: BalanceHistory? = null) : State
         data class Failed(val message: String) : State
     }
 
@@ -36,7 +40,9 @@ class HomeViewModel(private val api: AppApiClient, private val scope: CoroutineS
                 coroutineScope {
                     val me = async { api.me() }
                     val recent = async { api.statement(limit = 5) }
-                    State.Loaded(me.await(), recent.await().entries)
+                    // The evolution chart is a nice-to-have: its failure must not fail the screen.
+                    val history = async { runCatching { api.balanceHistory() }.getOrNull() }
+                    State.Loaded(me.await(), recent.await().entries, history.await())
                 }
             } catch (e: Exception) {
                 State.Failed(message(e))
@@ -44,6 +50,12 @@ class HomeViewModel(private val api: AppApiClient, private val scope: CoroutineS
         }
     }
 }
+
+/**
+ * One day of the statement. The statement comes newest first, so the day's first line is its last entry and
+ * [closingCents] is the balance at the end of the day (wallet-core's ADR-012) - or the balance so far, today.
+ */
+data class StatementDay(val day: LocalDate, val closingCents: Long, val entries: List<StatementEntry>)
 
 /** The statement, page by page (newest first), and the entry whose detail is open. */
 class StatementViewModel(private val api: AppApiClient, private val scope: CoroutineScope) {
@@ -57,6 +69,10 @@ class StatementViewModel(private val api: AppApiClient, private val scope: Corou
         val selected: StatementEntry? = null,
     ) {
         val hasMore get() = nextBefore != null
+
+        /** The entries grouped by day in Brasília, newest first, each with its closing balance. */
+        val days: List<StatementDay> get() = entries.groupBy { Format.day(it.occurredAt) }
+            .map { (day, list) -> StatementDay(day, list.first().balanceAfterCents, list) }
     }
 
     private val _state = MutableStateFlow(State())

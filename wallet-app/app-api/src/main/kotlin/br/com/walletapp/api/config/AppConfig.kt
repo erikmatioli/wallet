@@ -33,7 +33,7 @@ class AppConfig {
                     throttle: StartThrottle, clock: Clock) = AuthService(core, logins, otp, tokens, throttle, clock)
 
     @Bean
-    fun accountService(core: CoreBanking) = AccountService(core)
+    fun accountService(core: CoreBanking, clock: Clock) = AccountService(core, clock)
 
     @Bean
     fun paymentService(core: CoreBanking, pix: PixGateway, logins: LoginRepository, sentPix: SentPixRepository) =

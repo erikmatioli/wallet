@@ -74,6 +74,10 @@ wallet:
       key-id: wallet-core-1
       # private-key-path: /run/secrets/jwt-private.pem   # PKCS#8 PEM
       # public-key-path: /run/secrets/jwt-public.pem     # X.509 PEM
+  balance:
+    # ADR-012: a day's closing balance is final this long after midnight (Brasília). Must exceed the longest
+    # posting transaction: an entry dated 23:59:59.9 may still be committing after midnight.
+    day-close-grace: ${BALANCE_DAY_CLOSE_GRACE:1m}
   outbox:
     poll-interval-ms: 500
     batch-size: 100

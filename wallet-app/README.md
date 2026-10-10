@@ -22,8 +22,8 @@ versões ficam em `gradle/libs.versions.toml`; o Kotlin é o mesmo que o Spring 
 Login (CPF ──► código do e-mail) ──► Abrir conta (nome, CPF, e-mail ──► código do e-mail)
   │
   ▼
-Início (saldo, últimos lançamentos)
-  ├── Extrato ──► Detalhe do lançamento
+Início (saldo, evolução do saldo nos últimos 30 dias, últimos lançamentos)
+  ├── Extrato (por dia, com o saldo do dia) ──► Detalhe do lançamento
   ├── Transferir ──► Confirmar ──► Comprovante
   ├── Pix ──► Confirmar ──► Comprovante (acompanha até concluir)
   └── Agendamentos ──► Detalhe (tentativas, motivo, cancelar)
@@ -41,6 +41,11 @@ operador cadastrou no console. Sem e-mail no cadastro, o cliente precisa pedir a
 ([ADR-003](docs/adr/003-clientes-do-console-no-app.md)).
 
 A sessão fica só em memória e acaba depois de 30 minutos, ou de 5 minutos sem usar o app.
+
+**Saldo do dia.** O extrato mostra, no cabeçalho de cada dia, o saldo no fim daquele dia (meia-noite de
+Brasília); hoje, o saldo até agora. O início mostra a evolução do saldo nos últimos 30 dias encerrados,
+de `GET /app/v1/balance-history?from=&to=`, que o `app-api` lê do wallet-core sem guardar nada
+([ADR-012 do wallet-core](../wallet-core/docs/adr/012-saldo-de-fechamento-sob-demanda.md)).
 
 ## Rodar localmente
 

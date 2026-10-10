@@ -1,12 +1,16 @@
 import { computed, signal } from '@angular/core';
 import { WalletApi, message } from '../core/api';
-import { Me, StatementEntry } from '../core/contract';
+import { BalanceHistory, Me, StatementEntry } from '../core/contract';
 import { dayKey } from '../core/format';
 
-/** The home screen: the account and its last few entries, loaded together. */
+/**
+ * The home screen: the account, its last few entries and how the balance moved in the last 30 days. The
+ * history is a nice-to-have: when it fails, the rest of the screen still shows.
+ */
 export class HomeFlow {
   readonly me = signal<Me | null>(null);
   readonly recent = signal<StatementEntry[]>([]);
+  readonly history = signal<BalanceHistory | null>(null);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
 
@@ -15,6 +19,7 @@ export class HomeFlow {
   async load(): Promise<void> {
     this.loading.set(true);
     this.error.set(null);
+    const history = this.api.balanceHistory().catch(() => null);
     try {
       const [me, page] = await Promise.all([this.api.me(), this.api.statement(null, 5)]);
       this.me.set(me);
@@ -24,11 +29,17 @@ export class HomeFlow {
     } finally {
       this.loading.set(false);
     }
+    this.history.set(await history);
   }
 }
 
 export interface StatementDay {
   day: string;
+  /**
+   * The balance after the day's last entry. The statement comes newest first, so it is the first line of the
+   * day - the closing balance (wallet-core's ADR-012), or the balance so far when the day is today.
+   */
+  closingCents: number;
   entries: StatementEntry[];
 }
 
@@ -49,7 +60,7 @@ export class StatementFlow {
       const day = dayKey(entry.occurredAt);
       const last = days.at(-1);
       if (last?.day === day) last.entries.push(entry);
-      else days.push({ day, entries: [entry] });
+      else days.push({ day, closingCents: entry.balanceAfterCents, entries: [entry] });
     }
     return days;
   });

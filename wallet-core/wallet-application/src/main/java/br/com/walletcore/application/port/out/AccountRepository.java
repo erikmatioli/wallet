@@ -5,6 +5,7 @@ import br.com.walletcore.domain.customer.Customer;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.TenantId;
 import br.com.walletcore.domain.customer.TaxId;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -73,6 +74,10 @@ public interface AccountRepository {
      * transaction ends. The change is only applied if the account exists, has the expected kind,
      * is ACTIVE and (unless it may overdraw) the resulting balance stays non-negative. The check
      * and the update are a single statement, so concurrent movements can never overdraw.
+     *
+     * @param occurredAt the posting's clock; the result carries the date the entry must use, never earlier
+     *                   than the account's previous entry (ADR-012)
      */
-    BalanceUpdateResult applyDelta(TenantId tenantId, AccountId accountId, Account.Kind expectedKind, long deltaCents);
+    BalanceUpdateResult applyDelta(TenantId tenantId, AccountId accountId, Account.Kind expectedKind, long deltaCents,
+                                   Instant occurredAt);
 }

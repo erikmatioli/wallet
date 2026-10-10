@@ -277,12 +277,13 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
         List<LedgerEntry> entries = new ArrayList<>(lt.legs().size());
         for (Leg leg : lt.legsInLockOrder()) {
             Account.Kind kind = leg.accountId().equals(settlementId) ? Account.Kind.SETTLEMENT : Account.Kind.CUSTOMER;
-            BalanceUpdateResult result = accounts.applyDelta(lt.tenantId(), leg.accountId(), kind, leg.signedCents());
+            BalanceUpdateResult result = accounts.applyDelta(lt.tenantId(), leg.accountId(), kind, leg.signedCents(),
+                    lt.occurredAt());
             switch (result) {
                 case BalanceUpdateResult.Applied applied -> entries.add(new LedgerEntry(
                         UuidV7.next(), lt.tenantId(), lt.id(), leg.accountId(), applied.version(), leg.direction(),
                         leg.amount(), applied.balance(), lt.type(), lt.description(), counterpartyOf(lt, leg),
-                        lt.occurredAt()));
+                        applied.occurredAt()));
                 case BalanceUpdateResult.Rejected rejected -> throw rejection(lt.tenantId(), lt.type(), rejected, leg.accountId());
             }
         }

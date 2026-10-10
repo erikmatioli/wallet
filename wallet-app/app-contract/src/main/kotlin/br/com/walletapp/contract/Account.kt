@@ -43,6 +43,18 @@ data class StatementEntry(
     val pix: PixInfo? = null,
 )
 
+/**
+ * `GET /app/v1/balance-history?from=&to=`: the balance at the end of each day (midnight in Brasília), oldest
+ * first, days without entries included (wallet-core's ADR-012). Only days that are over; [from] and [to] are
+ * the period app-api answered (by default, the last 30 closed days).
+ */
+@Serializable
+data class BalanceHistory(val from: String, val to: String, val days: List<DayBalance>)
+
+/** [date] is yyyy-MM-dd. */
+@Serializable
+data class DayBalance(val date: String, val balanceCents: Long)
+
 /** An account of this institution, as a transfer needs it. */
 @Serializable
 data class CounterpartyAccount(val branch: String, val number: String, val checkDigit: String)

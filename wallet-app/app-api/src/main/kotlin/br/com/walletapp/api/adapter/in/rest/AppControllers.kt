@@ -25,6 +25,9 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
+import br.com.walletapp.contract.BalanceHistory
+import org.springframework.format.annotation.DateTimeFormat
+import java.time.LocalDate
 
 // The request and response bodies are app-contract's @Serializable classes: Spring reads and writes
 // them with kotlinx.serialization, the same library the desktop uses.
@@ -70,6 +73,14 @@ class AccountController(private val accounts: AccountService) {
         @RequestParam(required = false) before: Long?,
         @RequestParam(defaultValue = "20") limit: Int,
     ): StatementPage = asCustomer(jwt) { accounts.statement(it, before, limit) }
+
+    /** The balance at the end of each day (wallet-core's ADR-012); dates are yyyy-MM-dd, both optional. */
+    @GetMapping("/balance-history")
+    fun balanceHistory(
+        @AuthenticationPrincipal jwt: Jwt,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) from: LocalDate?,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) to: LocalDate?,
+    ): BalanceHistory = asCustomer(jwt) { accounts.balanceHistory(it, from, to) }
 }
 
 /** Runs [block] with the token's account, and the customer (the login id) in the logging MDC. */

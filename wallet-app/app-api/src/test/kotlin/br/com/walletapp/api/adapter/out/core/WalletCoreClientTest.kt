@@ -6,6 +6,10 @@ import br.com.walletapp.contract.CounterpartyAccount
 import com.sun.net.httpserver.HttpServer
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
+import br.com.walletapp.api.domain.BusinessRuleException
+import br.com.walletapp.contract.DayBalance
+import java.time.LocalDate
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.web.client.RestClient
 import java.net.InetSocketAddress
@@ -93,5 +97,36 @@ class WalletCoreClientTest {
 
         assertThat(entry.counterpartyName).isEqualTo("Joao Souza")
         assertThat(entry.counterpartyAccount).isNull()
+    }
+
+    @Test
+    fun `daily balances come in cents, and a day not closed is a business refusal`() {
+        val account = UUID.randomUUID()
+        respond("/v1/auth/token", """{"access_token":"t","token_type":"Bearer","expires_in":600}""")
+        respond("/v1/accounts/$account/daily-balances", """
+            {"accountId":"$account","currency":"BRL","days":[
+              {"date":"2026-10-08","balance":0.00,"lastSequence":0},
+              {"date":"2026-10-09","balance":150.75,"lastSequence":9}]}
+        """.trimIndent())
+
+        val days = client().dailyBalances(AccountId(account), LocalDate.parse("2026-10-08"), LocalDate.parse("2026-10-09"))
+
+        assertThat(days).containsExactly(DayBalance("2026-10-08", 0), DayBalance("2026-10-09", 15_075))
+    }
+
+    @Test
+    fun `wallet-core saying the day is not over becomes DAY_NOT_CLOSED`() {
+        val account = UUID.randomUUID()
+        respond("/v1/auth/token", """{"access_token":"t","token_type":"Bearer","expires_in":600}""")
+        server.createContext("/v1/accounts/$account/daily-balances") { ex ->
+            val body = """{"code":"DAY_NOT_CLOSED","detail":"not yet"}""".toByteArray()
+            ex.responseHeaders.add("Content-Type", "application/problem+json")
+            ex.sendResponseHeaders(422, body.size.toLong())
+            ex.responseBody.use { it.write(body) }
+        }
+
+        assertThatThrownBy { client().dailyBalances(AccountId(account), LocalDate.parse("2026-10-09"), LocalDate.parse("2026-10-09")) }
+            .isInstanceOf(BusinessRuleException::class.java)
+            .hasMessageContaining("meia-noite")
     }
 }

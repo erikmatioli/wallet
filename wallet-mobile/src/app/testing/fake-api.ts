@@ -11,6 +11,7 @@ export function fakeApi(): { [K in keyof WalletApi]: ReturnType<typeof vi.fn> } 
     'confirmLogin',
     'me',
     'statement',
+    'balanceHistory',
     'transferDestination',
     'transfer',
     'sendPix',
