@@ -11,6 +11,7 @@ import br.com.walletcore.domain.shared.TransactionId;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -75,6 +76,17 @@ class JdbcLedgerRepository implements LedgerRepository {
             spec = spec.param("types", types.stream().map(TransactionType::name).toList());
         }
         return spec.query(JdbcLedgerRepository::map).list();
+    }
+
+    @Override
+    public Optional<LedgerEntry> findBySequence(TenantId tenantId, AccountId accountId, long sequence) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM ledger_entry"
+                        + " WHERE tenant_id = :tenant AND account_id = :account AND sequence_no = :sequence")
+                .param("tenant", tenantId.value())
+                .param("account", accountId.value())
+                .param("sequence", sequence)
+                .query(JdbcLedgerRepository::map)
+                .optional();
     }
 
     @Override

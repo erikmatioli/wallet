@@ -20,6 +20,8 @@ import br.com.walletcore.domain.ledger.LedgerEntry;
 import br.com.walletcore.domain.ledger.TransactionType;
 import br.com.walletcore.domain.shared.Money;
 import java.util.List;
+import java.time.Instant;
+import java.util.Comparator;
 import org.junit.jupiter.api.Test;
 
 class MoveMoneyServiceTest {
@@ -41,6 +43,27 @@ class MoveMoneyServiceTest {
         assertThat(f.entries.stream().mapToLong(LedgerEntry::signedCents).sum()).isZero();
         assertThat(f.sumOfAllBalances()).isZero(); // money is neither created nor destroyed
         assertThat(f.events).hasSize(1);
+    }
+
+    @Test
+    void anEntryNeverGetsAnEarlierDateThanTheAccountsPreviousOne() {
+        // ADR-012: two core instances can have clocks a few milliseconds apart. The second deposit comes
+        // from a clock 5 ms behind; within the account, its date must not go back.
+        Account a = f.openCustomerAccount();
+        Instant first = f.clock.now;
+        f.moveMoney.deposit(deposit(a, 1_000, "k1"));
+        f.clock.now = first.minusMillis(5);
+        f.moveMoney.deposit(deposit(a, 2_000, "k2"));
+        f.clock.now = first.plusSeconds(1);
+        f.moveMoney.deposit(deposit(a, 3_000, "k3"));
+
+        List<LedgerEntry> mine = f.entries.stream().filter(e -> e.accountId().equals(a.id()))
+                .sorted(Comparator.comparingLong(LedgerEntry::sequence)).toList();
+        assertThat(mine).extracting(LedgerEntry::occurredAt)
+                .containsExactly(first, first, first.plusSeconds(1)); // the late clock is lifted, never lower
+        for (int i = 1; i < mine.size(); i++) {
+            assertThat(mine.get(i).occurredAt()).isAfterOrEqualTo(mine.get(i - 1).occurredAt());
+        }
     }
 
     @Test

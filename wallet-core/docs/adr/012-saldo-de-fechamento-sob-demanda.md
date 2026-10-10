@@ -100,8 +100,8 @@ Por isso a regra passa a ser garantida na gravação:
   lançamento (`JdbcAccountRepository`; a linha já está travada, então não há escrita nova):
   `last_occurred_at = GREATEST(last_occurred_at, :agora) … RETURNING last_occurred_at`. O lançamento
   dessa conta é gravado com a data devolvida. Um relógio atrasado não põe um lançamento antes do
-  anterior; no máximo o empata. As duas pernas de uma transação podem ficar com datas a milissegundos de
-  distância; a da transação (`financial_transaction.occurred_at`) é a maior delas.
+  anterior; no máximo o empata. A transação (`financial_transaction.occurred_at`) continua com a hora do
+  relógio de quem gravou; cada perna pode ficar igual a ela ou alguns milissegundos depois.
 - Um teste de integração tenta gravar fora de ordem e falha; um teste de arquitetura impede que a data do
   lançamento venha de outro lugar que não esse cálculo.
 
@@ -130,6 +130,22 @@ Por isso a regra passa a ser garantida na gravação:
 - **Rendimentos:** a conta de pagamento não rende; não há o que informar além do saldo.
 - **Saldo em instantes que não são o fim de um dia:** a busca binária serve para qualquer instante, mas a
   API expõe só datas, que é o que os casos de uso pedem.
+
+## Ajustes feitos na implementação
+- **Dois endpoints num controller próprio** (`BalanceHistoryController`). `GET .../balance` sem `at`
+  continua sendo o saldo atual; com `at`, é o saldo de fechamento. O caso de uso também é próprio
+  (`BalanceHistoryUseCase`), separado das outras consultas de conta.
+- **A evolução começa cada dia logo depois da última sequência do dia anterior**, que já se sabe estar
+  antes do corte: um ano de dias custa no pior caso 366 buscas, cada uma num intervalo menor.
+- **O `app-api` usa uma margem de 5 minutos** depois da meia-noite para considerar o dia encerrado, maior
+  que a carência do core (1 minuto): sem pedido de período, ele nunca pede um dia que o core ainda recusaria.
+- **O console só mostra o saldo do dia com o extrato completo.** Com o filtro "Somente Pix", a primeira linha
+  visível de um dia pode não ser o último lançamento dele (um depósito posterior fica escondido).
+- **O console passa a mostrar toda data em Brasília** (`DATE_PIPE_DEFAULT_OPTIONS`, `-0300`; o Brasil não tem
+  horário de verão desde 2019). Antes, o extrato usava o fuso do navegador, e o cabeçalho "Ontem" (dia de
+  Brasília) aparecia sobre linhas com a data seguinte num navegador em outro fuso.
+- **Validado no ambiente local:** a migração V8 preencheu `last_occurred_at` das 11 contas com lançamentos;
+  o saldo de 09/10 das 7 contas do demo-tenant pela API bateu com a consulta SQL direta.
 
 ## Consequências
 - **Positivas:** nenhum dado novo para manter ou conciliar; o saldo de qualquer dia passado sai exato, a

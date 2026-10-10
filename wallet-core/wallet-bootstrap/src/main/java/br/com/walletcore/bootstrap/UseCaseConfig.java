@@ -1,6 +1,7 @@
 package br.com.walletcore.bootstrap;
 
 import br.com.walletcore.application.port.in.AuditLedgerUseCase;
+import br.com.walletcore.application.port.in.BalanceHistoryUseCase;
 import br.com.walletcore.application.port.in.CustomerContactUseCase;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase;
 import br.com.walletcore.application.port.in.OnboardCustomerUseCase;
@@ -18,6 +19,7 @@ import br.com.walletcore.application.port.out.TenantRepository;
 import br.com.walletcore.application.port.out.TransactionJournal;
 import br.com.walletcore.application.port.out.TransactionRunner;
 import br.com.walletcore.application.service.AuditLedgerService;
+import br.com.walletcore.application.service.BalanceHistoryService;
 import br.com.walletcore.application.service.CustomerContactService;
 import br.com.walletcore.application.service.MoveMoneyService;
 import br.com.walletcore.application.service.OnboardCustomerService;
@@ -26,6 +28,8 @@ import br.com.walletcore.application.service.ListAccountsService;
 import br.com.walletcore.application.service.QueryAccountService;
 import br.com.walletcore.application.service.SettlementRouter;
 import java.time.Clock;
+import java.time.Duration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -70,6 +74,14 @@ class UseCaseConfig {
     QueryAccountUseCase queryAccountUseCase(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
                                             PixDetailRepository pixDetails) {
         return new QueryAccountService(tx, accounts, ledger, pixDetails);
+    }
+
+    /** ADR-012: closing balances from the ledger. The grace must exceed the longest posting transaction. */
+    @Bean
+    BalanceHistoryUseCase balanceHistoryUseCase(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
+                                                Clock clock,
+                                                @Value("${wallet.balance.day-close-grace:1m}") Duration dayCloseGrace) {
+        return new BalanceHistoryService(tx, accounts, ledger, clock, dayCloseGrace);
     }
 
     @Bean
