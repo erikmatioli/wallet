@@ -10,6 +10,7 @@ import br.com.walletapp.api.domain.AccountId
 import br.com.walletapp.api.domain.Cpf
 import br.com.walletapp.api.domain.Email
 import br.com.walletapp.contract.Me
+import br.com.walletapp.contract.CounterpartyAccount
 import br.com.walletapp.contract.PixInfo
 import br.com.walletapp.contract.StatementEntry
 import br.com.walletapp.contract.StatementPage
@@ -50,9 +51,11 @@ class WalletCoreClient(builder: RestClient.Builder, props: AppProperties, privat
     private data class CoreStatement(val entries: List<CoreEntry>, val nextBefore: Long?)
     private data class CoreEntry(val transactionId: UUID, val sequence: Long, val type: String, val direction: String,
                                  val amount: BigDecimal, val balanceAfter: BigDecimal, val description: String?,
-                                 val occurredAt: Instant, val counterpartyCustomerName: String?, val pix: CorePix?)
+                                 val occurredAt: Instant, val counterpartyCustomerName: String?,
+                                 val counterpartyAccountFormatted: String?, val pix: CorePix?)
     private data class CorePix(val endToEndId: String, val counterparty: CorePixCounterparty?, val reasonCode: String?)
-    private data class CorePixCounterparty(val name: String?, val taxIdMasked: String?, val ispb: String?)
+    private data class CorePixCounterparty(val name: String?, val taxIdMasked: String?, val ispb: String?,
+                                           val branch: String?, val account: String?)
     private data class CoreTransfer(val sourceAccountId: UUID, val destination: CoreNumber, val amount: BigDecimal,
                                     val description: String?)
     private data class CoreNumber(val branch: String, val number: String, val checkDigit: String)
@@ -152,8 +155,20 @@ class WalletCoreClient(builder: RestClient.Builder, props: AppProperties, privat
         description = e.description?.takeIf { it.isNotBlank() },
         occurredAt = e.occurredAt.toString(),
         counterpartyName = e.counterpartyCustomerName ?: e.pix?.counterparty?.name,
-        pix = e.pix?.let { PixInfo(it.endToEndId, it.counterparty?.taxIdMasked, it.counterparty?.ispb, it.reasonCode) },
+        counterpartyAccount = e.counterpartyAccountFormatted?.let(::accountNumber),
+        pix = e.pix?.let {
+            PixInfo(it.endToEndId, it.counterparty?.taxIdMasked, it.counterparty?.ispb, it.reasonCode,
+                counterpartyBranch = it.counterparty?.branch, counterpartyAccount = it.counterparty?.account)
+        },
     )
+
+    /**
+     * wallet-core sends a transfer's counterparty account as text, "0001-00100002-9" (PaymentAccountNumber.formatted).
+     * Anything else is left out rather than guessed: the account is only there to send to it again.
+     */
+    private fun accountNumber(formatted: String): CounterpartyAccount? =
+        Regex("""(\d{4})-(\d+)-(\d)""").matchEntire(formatted.trim())
+            ?.destructured?.let { (branch, number, digit) -> CounterpartyAccount(branch, number, digit) }
 
     /** Every call as the tenant; network failures and 5xx become "try again", which the API answers with 503. */
     private fun <T> call(operation: String, request: (String) -> T): T = try {

@@ -32,15 +32,31 @@ export interface StatementEntry {
   description?: string | null;
   occurredAt: string;
   counterpartyName?: string | null;
+  /** The other customer's account in a transfer, to send to it again. For a Pix, it is in `pix`. */
+  counterpartyAccount?: CounterpartyAccount | null;
   pix?: PixInfo | null;
 }
 
-/** The Pix part of a statement entry. The counterparty's CPF/CNPJ only masked. */
+/** An account of this institution, as a transfer needs it. */
+export interface CounterpartyAccount {
+  branch: string;
+  number: string;
+  checkDigit: string;
+}
+
+/**
+ * The Pix part of a statement entry. The counterparty's CPF/CNPJ only masked: wallet-core keeps no more,
+ * so a Pix back to the same person needs the document typed again.
+ */
 export interface PixInfo {
   endToEndId: string;
   counterpartyTaxIdMasked?: string | null;
+  /** The counterparty's institution (ISPB). */
   counterpartyInstitution?: string | null;
   reasonCode?: string | null;
+  counterpartyBranch?: string | null;
+  /** The account number with its check digit, as the SPI carries it. */
+  counterpartyAccount?: string | null;
 }
 
 /** `GET /app/v1/info`: which app-api (and so which fintech) this is. */

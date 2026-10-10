@@ -1,7 +1,8 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { Router, RouterLink } from '@angular/router';
 import { AppApi } from '../../core/api';
 import { account, dateTime, money } from '../../core/format';
+import { TransferPrefill } from '../../core/send-again';
 import { TransferFlow } from '../../flows/payments.flow';
 import { AmountField } from '../../ui/amount-field';
 import { Alert } from '../../ui/alert';
@@ -43,7 +44,14 @@ import { Icon } from '../../ui/icon';
             [cents]="flow.form().amountCents"
             (centsChange)="flow.edit({ amountCents: $event })"
           />
-          <p class="muted">Para quem? Os dados da conta M-Wall de quem recebe.</p>
+          @if (recipient(); as name) {
+            <p class="alert alert-info" role="status">
+              Para {{ name }}: conta trazida do seu extrato. A confirmação mostra o titular antes de
+              transferir.
+            </p>
+          } @else {
+            <p class="muted">Para quem? Os dados da conta M-Wall de quem recebe.</p>
+          }
           <div class="row">
             <div class="field">
               <label for="branch">Agência</label>
@@ -187,7 +195,19 @@ import { Icon } from '../../ui/icon';
 })
 export class TransferPage {
   protected readonly flow = new TransferFlow(inject(AppApi));
+  /** Who the account is, when the form was opened from a statement entry ("Transferir para esta conta"). */
+  protected readonly recipient = signal('');
   protected readonly money = money;
   protected readonly account = account;
   protected readonly dateTime = dateTime;
+
+  constructor() {
+    const prefill = inject(Router).currentNavigation()?.extras.state?.['prefill'] as
+      TransferPrefill | undefined;
+    if (prefill) {
+      const { branch, number, checkDigit } = prefill;
+      this.flow.edit({ branch, number, checkDigit });
+      this.recipient.set(prefill.name || 'a conta escolhida');
+    }
+  }
 }
