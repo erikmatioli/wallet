@@ -101,6 +101,17 @@ h1 {
   white-space: nowrap;
 }
 
+.day-row td {
+  background: var(--color-bg);
+  font-weight: 600;
+  font-size: 0.85rem;
+
+  span + span {
+    float: right;
+    font-weight: 500;
+  }
+}
+
 .entry-row {
   cursor: pointer;
 

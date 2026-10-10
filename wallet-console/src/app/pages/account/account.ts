@@ -1,4 +1,4 @@
-import { Component, DestroyRef, OnInit, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -7,9 +7,11 @@ import { WalletApiService } from '../../core/wallet-api.service';
 import { extractErrorMessage } from '../../core/http-error.util';
 import { AccountDetailResponse, AuditResponse, EntryResponse } from '../../core/models';
 import { counterpartyName, transactionLabel } from '../../core/transaction-labels';
+import { brasiliaToday } from '../../core/schedule-labels';
 import { EntryDetail } from './entry-detail/entry-detail';
 import { AccountSchedules } from './schedules/account-schedules';
 import { ProblemBanner } from '../../shared/problem-banner/problem-banner';
+import { dayLabel, statementDays } from '../../core/statement-days';
 
 type TransferMethod = 'id' | 'number';
 
@@ -24,6 +26,12 @@ export class AccountPage implements OnInit {
 
   readonly account = signal<AccountDetailResponse | null>(null);
   readonly entries = signal<EntryResponse[]>([]);
+  /** The entries grouped by day in Brasília, each with the balance its first line shows. */
+  readonly days = computed(() => statementDays(this.entries()));
+  protected readonly today = brasiliaToday();
+  protected dayLabel(day: string): string {
+    return dayLabel(day, this.today);
+  }
   readonly nextBefore = signal<number | null>(null);
   /** Statement restricted to Pix entries (every PIX_* type). */
   readonly pixOnly = signal(false);
