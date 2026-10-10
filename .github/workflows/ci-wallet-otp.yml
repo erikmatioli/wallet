@@ -6,9 +6,6 @@ name: CI - wallet-otp
 on:
   pull_request:
     branches: [main]
-    # "edited" so that fixing the PR title re-runs pr-title (the default types don't include it).
-    # The build jobs skip that event: a title change doesn't change the code.
-    types: [opened, synchronize, reopened, edited]
     paths:
       - "wallet-otp/**"
       - ".github/workflows/ci-wallet-otp.yml"
@@ -21,35 +18,14 @@ on:
       - ".github/workflows/build-test.yml"
 
 concurrency:
-  # Title edits get their own group: otherwise editing the title would cancel a build in progress.
-  group: ci-wallet-otp-${{ github.ref }}-${{ github.event.action == 'edited' && 'title' || 'build' }}
+  group: ci-wallet-otp-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  pr-title:
-    name: Conventional PR title
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-    steps:
-      # Same check as the other projects' workflows, which never run on wallet-otp-only PRs
-      # because of their path filters. Squash-merge uses the PR title as the commit message on main.
-      - uses: amannn/action-semantic-pull-request@v6
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          # GitHub cuts long titles taken from a commit subject and appends "…"; that cut text
-          # would become main's commit message. A conventional prefix alone doesn't catch it.
-          subjectPattern: ^(?!.*…$).+$
-          subjectPatternError: |
-            O título termina em "…": o GitHub cortou o assunto do commit. Escreva o título completo.
-
   build-test:
-    if: github.event.action != 'edited'
     uses: ./.github/workflows/build-test.yml
     with:
       project-dir: wallet-otp

@@ -33,20 +33,6 @@ jobs:
     with:
       project-dir: wallet-core
 
-  pr-title:
-    name: Conventional PR title
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-    steps:
-      # Enforces "type(scope): description" (see CONTRIBUTING.md#commits). Squash-merging a PR
-      # uses its title as the commit message, so a conventional PR title is what actually lands
-      # in main's history - which is what makes SemVer bump decisions at release time legible.
-      - uses: amannn/action-semantic-pull-request@v6
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   docker:
     name: Docker build & scan
     needs: build-test

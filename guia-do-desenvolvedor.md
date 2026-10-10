@@ -931,10 +931,13 @@ sem quebrar testes que continuam corretos.
 **CI** (`.github/workflows/`):
 
 - um workflow por projeto (`ci.yml` do core, `ci-wallet-pix.yml`, `ci-wallet-scheduler.yml`,
-  `ci-wallet-console.yml`, `ci-wallet-app.yml`, `ci-wallet-otp.yml`), cada um com filtro de pasta: só roda se o PR
-  tocar aquele projeto;
-- todos validam o título do PR em **Conventional Commits** (`feat(wallet-pix): ...`), que vira a
-  mensagem do commit na `main` (squash merge).
+  `ci-wallet-console.yml`, `ci-wallet-app.yml`, `ci-wallet-otp.yml`, `ci-wallet-mobile.yml`), cada um com
+  filtro de pasta: só roda se o PR tocar aquele projeto;
+- `pr-title.yml` valida, em todo PR, o título em **Conventional Commits** (`feat(wallet-pix): ...`), que
+  vira a mensagem do commit na `main`;
+- `ci-ok.yml` roda em todo PR, espera os outros checks do commit e falha se algum falhou. A proteção da
+  `main` exige só `ci-ok` e `Conventional PR title`: exigir o check de um produto travaria os PRs que não
+  tocam nele.
 
 **Release:** por tag com prefixo do projeto (ADR-009 do core). Hoje só o core tem o workflow:
 `wallet-core-vX.Y.Z` dispara o `release.yml`, que builda, testa e publica a imagem no GHCR. Os

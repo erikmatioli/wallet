@@ -2,13 +2,10 @@ name: CI - wallet-app
 
 # wallet-app is the repository's first Gradle build (its ADR-001), so it cannot reuse the Maven-based
 # build-test.yml: this workflow builds it with the Gradle wrapper. Same model otherwise - its own caller
-# workflow, path filters, the PR title check.
+# workflow and path filters.
 on:
   pull_request:
     branches: [main]
-    # "edited" so that fixing the PR title re-runs pr-title (the default types don't include it).
-    # The build jobs skip that event: a title change doesn't change the code.
-    types: [opened, synchronize, reopened, edited]
     paths:
       - "wallet-app/**"
       - ".github/workflows/ci-wallet-app.yml"
@@ -19,36 +16,15 @@ on:
       - ".github/workflows/ci-wallet-app.yml"
 
 concurrency:
-  # Title edits get their own group: otherwise editing the title would cancel a build in progress.
-  group: ci-wallet-app-${{ github.ref }}-${{ github.event.action == 'edited' && 'title' || 'build' }}
+  group: ci-wallet-app-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  pr-title:
-    name: Conventional PR title
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-    steps:
-      # Same check as the other projects' workflows, which never run on wallet-app-only PRs because
-      # of their path filters. Squash-merge uses the PR title as the commit message on main.
-      - uses: amannn/action-semantic-pull-request@v6
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          # GitHub cuts long titles taken from a commit subject and appends "…"; that cut text
-          # would become main's commit message. A conventional prefix alone doesn't catch it.
-          subjectPattern: ^(?!.*…$).+$
-          subjectPatternError: |
-            O título termina em "…": o GitHub cortou o assunto do commit. Escreva o título completo.
-
   build-test:
     name: Gradle build
-    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     defaults:
       run:

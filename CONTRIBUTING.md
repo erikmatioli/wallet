@@ -30,7 +30,7 @@ docs(readme): document the observability stack
 ci: add Trivy scan to the docker job
 ```
 
-O workflow `ci.yml` valida automaticamente que o título do PR segue esse formato (job `pr-title`).
+O workflow `pr-title.yml` valida automaticamente que o título do PR segue esse formato (check `Conventional PR title`), em todo PR e a cada edição do título.
 
 ## 3. Fluxo de Pull Request
 
@@ -38,7 +38,7 @@ O workflow `ci.yml` valida automaticamente que o título do PR segue esse format
 2. Rode `mvn verify` localmente antes de abrir o PR (precisa de Docker, pela mesma razão que o CI precisa — ver README).
 3. Abra o PR contra `main`. O template já traz o checklist.
 4. Adicione um **label** (`feature`, `fix`, `docs`, `dependencies`, `breaking-change`, `observability`, ...) — é o que alimenta as release notes automáticas (`.github/release.yml`).
-5. CI roda sozinho: `build-test` (verify completo), `pr-title` (título conventional), `docker` (build da imagem + scan de vulnerabilidades via Trivy, não bloqueante).
+5. CI roda sozinho: o workflow de cada produto que o PR tocou (`build-test` e `docker`, com scan de vulnerabilidades via Trivy, não bloqueante), o `pr-title` (título conventional) e o `ci-ok`, que espera todos os outros checks do commit e falha se algum falhou.
 6. `CODEOWNERS` solicita revisão automaticamente para os caminhos sensíveis (núcleo financeiro, migrations, pipeline). Ajuste os donos reais em `.github/CODEOWNERS` antes de depender disso.
 7. Squash-merge após aprovação e CI verde. Apague a branch.
 
@@ -46,7 +46,7 @@ O workflow `ci.yml` valida automaticamente que o título do PR segue esse format
 
 Este repositório não pode configurar isso sozinho — são ajustes manuais em Settings › Branches:
 - Exigir PR antes de mergear em `main` (sem push direto).
-- Exigir que os checks `build-test` e `pr-title` estejam verdes.
+- Exigir que os checks `ci-ok` e `Conventional PR title` estejam verdes. Só esses dois: os checks de cada produto só existem quando o PR toca aquele produto (filtro de pasta), e um check exigido que não roda deixa o PR esperando para sempre. O `ci-ok` é quem garante que eles passaram.
 - Exigir squash merge (desabilitar merge commit e rebase merge, para manter um commit por PR em `main`).
 - Exigir revisão de Code Owners.
 - Em Settings › Actions › General, marcar "Read and write permissions" para o `GITHUB_TOKEN` — é o que permite `ci.yml`/`release.yml` publicarem imagens no GHCR sem precisar cadastrar um secret extra.

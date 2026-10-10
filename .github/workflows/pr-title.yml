@@ -1,0 +1,37 @@
+name: PR title
+
+# The PR title check, once for the whole monorepo. It used to be a job inside every product workflow,
+# which had two problems:
+# - a PR that touched no product (only the root README, say) got no title check at all;
+# - editing the title re-ran the product workflow just for this job, and that new run, with its build
+#   jobs skipped, hid the earlier build result from the required checks ("Waiting for status").
+# Here it runs on every PR and on every title edit, and nothing else does.
+on:
+  pull_request:
+    branches: [main]
+    # "edited" so that fixing the title re-runs the check (the default types don't include it).
+    types: [opened, synchronize, reopened, edited]
+
+concurrency:
+  group: pr-title-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-title:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    steps:
+      # Enforces "type(scope): description" (see CONTRIBUTING.md#commits): the PR title becomes the
+      # commit message on main, which is what makes SemVer decisions at release time legible.
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # GitHub cuts long titles taken from a commit subject and appends "…"; that cut text
+          # would become main's commit message. A conventional prefix alone doesn't catch it.
+          subjectPattern: ^(?!.*…$).+$
+          subjectPatternError: |
+            O título termina em "…": o GitHub cortou o assunto do commit. Escreva o título completo.
