@@ -15,13 +15,14 @@ import { HomeFlow } from '../../flows/account.flow';
 import { EntryDetail } from '../../ui/entry-detail';
 import { EntryItem } from '../../ui/entry-item';
 import { Icon } from '../../ui/icon';
+import { BalanceChart } from '../../ui/balance-chart';
 import { Logo } from '../../ui/logo';
 
 /** Home: greeting, balance card (can be hidden), shortcuts and the last entries. */
 @Component({
   selector: 'mw-home',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, Icon, Logo, EntryItem, EntryDetail],
+  imports: [RouterLink, Icon, Logo, EntryItem, EntryDetail, BalanceChart],
   template: `
     <div class="page">
       <header class="page-head">
@@ -74,6 +75,22 @@ import { Logo } from '../../ui/logo';
           <span class="grow">{{ error }}</span>
           <button type="button" class="btn-link" (click)="flow.load()">Tentar de novo</button>
         </div>
+      }
+
+      @if (flow.history(); as h) {
+        @if (h.days.length > 1) {
+          <section class="card evolution" aria-labelledby="evolution-title">
+            <div class="section-head">
+              <h2 id="evolution-title">Evolução do saldo</h2>
+              <span class="muted small">últimos {{ h.days.length }} dias</span>
+            </div>
+            @if (hidden()) {
+              <p class="muted small">Saldo escondido.</p>
+            } @else {
+              <mw-balance-chart [days]="h.days" />
+            }
+          </section>
+        }
       }
 
       <nav class="actions" aria-label="Atalhos">
@@ -205,6 +222,14 @@ import { Logo } from '../../ui/logo';
       background: var(--mw-surface);
       color: var(--mw-orange-strong);
       box-shadow: var(--mw-shadow);
+    }
+    .evolution {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .small {
+      font-size: 0.8rem;
     }
     .section-head {
       display: flex;

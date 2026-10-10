@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, firstValueFrom, timeout } from 'rxjs';
 import {
   AppError,
+  BalanceHistory,
   AppInfo,
   CodeSent,
   Me,
@@ -49,6 +50,7 @@ export type WalletApi = Pick<
   | 'confirmLogin'
   | 'me'
   | 'statement'
+  | 'balanceHistory'
   | 'transferDestination'
   | 'transfer'
   | 'sendPix'
@@ -98,6 +100,16 @@ export class AppApi {
 
   me(): Promise<Me> {
     return this.call(this.http.get<Me>('/app/v1/me', { headers: this.auth() }));
+  }
+
+  /** The balance at the end of each day; without dates, the last 30 closed days. */
+  balanceHistory(from: string | null = null, to: string | null = null): Promise<BalanceHistory> {
+    let params = new HttpParams();
+    if (from) params = params.set('from', from);
+    if (to) params = params.set('to', to);
+    return this.call(
+      this.http.get<BalanceHistory>('/app/v1/balance-history', { headers: this.auth(), params }),
+    );
   }
 
   statement(before: number | null = null, limit = 20): Promise<StatementPage> {

@@ -37,6 +37,22 @@ export interface StatementEntry {
   pix?: PixInfo | null;
 }
 
+/**
+ * `GET /app/v1/balance-history?from=&to=`: the balance at the end of each day (midnight in Brasília), oldest
+ * first, days without entries included (wallet-core's ADR-012). By default the last 30 closed days.
+ */
+export interface BalanceHistory {
+  from: string;
+  to: string;
+  days: DayBalance[];
+}
+
+/** `date` is yyyy-MM-dd. */
+export interface DayBalance {
+  date: string;
+  balanceCents: number;
+}
+
 /** An account of this institution, as a transfer needs it. */
 export interface CounterpartyAccount {
   branch: string;
