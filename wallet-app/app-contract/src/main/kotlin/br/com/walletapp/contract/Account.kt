@@ -25,6 +25,8 @@ data class StatementPage(val entries: List<StatementEntry>, val nextBefore: Long
  *
  * @property type wallet-core's type: DEPOSIT, WITHDRAWAL, TRANSFER, PIX_IN, PIX_OUT, PIX_REFUND, PIX_RETURN_IN...
  * @property counterpartyName the other customer of a transfer, or the Pix counterparty; null for deposits
+ * @property counterpartyAccount the other customer's account in a transfer, so the app can send to it again;
+ *   for a Pix the account is in [pix]
  */
 @Serializable
 data class StatementEntry(
@@ -37,14 +39,39 @@ data class StatementEntry(
     val description: String? = null,
     val occurredAt: String,
     val counterpartyName: String? = null,
+    val counterpartyAccount: CounterpartyAccount? = null,
     val pix: PixInfo? = null,
 )
 
-/** The Pix part of a statement entry. The counterparty's CPF/CNPJ only masked. */
+/**
+ * `GET /app/v1/balance-history?from=&to=`: the balance at the end of each day (midnight in Brasília), oldest
+ * first, days without entries included (wallet-core's ADR-012). Only days that are over; [from] and [to] are
+ * the period app-api answered (by default, the last 30 closed days).
+ */
+@Serializable
+data class BalanceHistory(val from: String, val to: String, val days: List<DayBalance>)
+
+/** [date] is yyyy-MM-dd. */
+@Serializable
+data class DayBalance(val date: String, val balanceCents: Long)
+
+/** An account of this institution, as a transfer needs it. */
+@Serializable
+data class CounterpartyAccount(val branch: String, val number: String, val checkDigit: String)
+
+/**
+ * The Pix part of a statement entry. The counterparty's CPF/CNPJ only masked: wallet-core keeps no more
+ * (its ADR-010), so a Pix back to the same person needs the document typed again.
+ *
+ * @property counterpartyInstitution the counterparty's institution (ISPB)
+ * @property counterpartyAccount the counterparty's account number with its check digit, as the SPI carries it
+ */
 @Serializable
 data class PixInfo(
     val endToEndId: String,
     val counterpartyTaxIdMasked: String? = null,
     val counterpartyInstitution: String? = null,
     val reasonCode: String? = null,
+    val counterpartyBranch: String? = null,
+    val counterpartyAccount: String? = null,
 )

@@ -27,6 +27,36 @@ describe('HomeFlow and StatementFlow', () => {
     expect(api.statement).toHaveBeenCalledWith(null, 5);
   });
 
+  it('the balance history comes with home, and its failure does not take home down', async () => {
+    const api = fakeApi();
+    api.me.mockResolvedValue({
+      customerName: 'Maria',
+      branch: '0001',
+      accountNumber: '00100123',
+      checkDigit: '8',
+      status: 'ACTIVE',
+      balanceCents: 100,
+    });
+    api.statement.mockResolvedValue({ entries: [] });
+    api.balanceHistory.mockResolvedValueOnce({
+      from: '2026-10-08',
+      to: '2026-10-09',
+      days: [
+        { date: '2026-10-08', balanceCents: 0 },
+        { date: '2026-10-09', balanceCents: 15000 },
+      ],
+    });
+    const flow = new HomeFlow(api);
+    await flow.load();
+    expect(flow.history()?.days.map((d) => d.balanceCents)).toEqual([0, 15000]);
+
+    api.balanceHistory.mockRejectedValueOnce(new Error('down'));
+    await flow.load();
+    expect(flow.history()).toBeNull();
+    expect(flow.me()?.balanceCents).toBe(100);
+    expect(flow.error()).toBeNull();
+  });
+
   it('a failure on home becomes a message', async () => {
     const api = fakeApi();
     api.me.mockRejectedValue(new AppApiError('ACCOUNT_NOT_FOUND', 'Conta não encontrada.'));
@@ -42,13 +72,15 @@ describe('HomeFlow and StatementFlow', () => {
     api.statement
       .mockResolvedValueOnce({
         entries: [
-          entry({ sequence: 3, occurredAt: '2026-10-09T15:00:00Z' }),
-          entry({ sequence: 2, occurredAt: '2026-10-09T02:00:00Z' }), // 23:00 of the 8th in Brasília
+          entry({ sequence: 3, occurredAt: '2026-10-09T15:00:00Z', balanceAfterCents: 7000 }),
+          entry({ sequence: 2, occurredAt: '2026-10-09T02:00:00Z', balanceAfterCents: 6000 }), // 23:00 of the 8th in Brasília
         ],
         nextBefore: 2,
       })
       .mockResolvedValueOnce({
-        entries: [entry({ sequence: 1, occurredAt: '2026-10-08T12:00:00Z' })],
+        entries: [
+          entry({ sequence: 1, occurredAt: '2026-10-08T12:00:00Z', balanceAfterCents: 5500 }),
+        ],
         nextBefore: null,
       });
     const flow = new StatementFlow(api, 2);
@@ -64,6 +96,8 @@ describe('HomeFlow and StatementFlow', () => {
       ['2026-10-09', 1],
       ['2026-10-08', 2],
     ]);
+    // The closing balance of each day is the first line of the day (the statement comes newest first).
+    expect(flow.days().map((d) => d.closingCents)).toEqual([7000, 6000]);
     expect(flow.hasMore()).toBe(false);
   });
 });

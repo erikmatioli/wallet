@@ -1,5 +1,6 @@
 package br.com.walletcore.adapter.in.rest;
 
+import br.com.walletcore.application.port.in.BalanceHistoryUseCase;
 import br.com.walletcore.application.port.in.ListAccountsUseCase;
 import br.com.walletcore.application.port.in.QueryAccountUseCase;
 import br.com.walletcore.domain.account.Account;
@@ -17,6 +18,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -282,6 +284,41 @@ public final class ApiModels {
             @Schema(description = "UUID da conta", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11") UUID accountId,
             @Schema(description = "Saldo atual disponível", example = "1250.00") BigDecimal balance,
             @Schema(description = "Moeda", example = "BRL") String currency) {
+    }
+
+    @Schema(description = "Saldo da conta no fim de um dia (meia-noite de Brasília), calculado a partir do ledger (ADR-012).")
+    public record ClosingBalanceResponse(
+            @Schema(description = "UUID da conta") UUID accountId,
+            @Schema(description = "Dia", example = "2026-12-31") LocalDate date,
+            @Schema(description = "Saldo no fim do dia", example = "1532.40") BigDecimal balance,
+            @Schema(description = "Sequência do último lançamento do dia (0 se nenhum): confere com o extrato", example = "18233")
+            long lastSequence,
+            @Schema(description = "Instante em que o dia terminou", example = "2027-01-01T03:00:00Z") Instant cutoff,
+            @Schema(description = "Moeda", example = "BRL") String currency) {
+
+        static ClosingBalanceResponse from(UUID accountId, BalanceHistoryUseCase.ClosingBalance c) {
+            return new ClosingBalanceResponse(accountId, c.date(), c.balance().toDecimal(), c.lastSequence(),
+                    c.cutoff(), Money.CURRENCY);
+        }
+    }
+
+    @Schema(description = "Saldo de fechamento dia a dia de um período (ADR-012).")
+    public record DailyBalancesResponse(
+            @Schema(description = "UUID da conta") UUID accountId,
+            @Schema(description = "Moeda", example = "BRL") String currency,
+            @Schema(description = "Um dia por item, do mais antigo para o mais novo") List<DayBalance> days) {
+
+        static DailyBalancesResponse from(UUID accountId, List<BalanceHistoryUseCase.ClosingBalance> days) {
+            return new DailyBalancesResponse(accountId, Money.CURRENCY, days.stream()
+                    .map(d -> new DayBalance(d.date(), d.balance().toDecimal(), d.lastSequence())).toList());
+        }
+    }
+
+    @Schema(description = "Saldo de fechamento de um dia.")
+    public record DayBalance(
+            @Schema(description = "Dia", example = "2026-10-09") LocalDate date,
+            @Schema(description = "Saldo no fim do dia", example = "150.00") BigDecimal balance,
+            @Schema(description = "Sequência do último lançamento até o fim do dia", example = "9") long lastSequence) {
     }
 
     @Schema(description = "Resultado da auditoria de integridade da conta.")

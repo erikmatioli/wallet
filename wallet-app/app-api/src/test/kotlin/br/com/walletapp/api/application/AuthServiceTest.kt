@@ -33,6 +33,8 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
+import br.com.walletapp.contract.DayBalance
+import java.time.LocalDate
 
 /** wallet-core as the tests need it: which CPFs it already has, and a switch to "crash" after creating. */
 class FakeCore : CoreBanking {
@@ -73,6 +75,15 @@ class FakeCore : CoreBanking {
     override fun me(accountId: AccountId) = Me("Cliente", "0001", "100", "1", "ACTIVE", 0)
 
     override fun statement(accountId: AccountId, before: Long?, limit: Int) = StatementPage(emptyList())
+
+    /** Every daily-balances call; each day answers its day of the month in cents, so the test can tell them apart. */
+    val dailyCalls = mutableListOf<Triple<AccountId, LocalDate, LocalDate>>()
+
+    override fun dailyBalances(accountId: AccountId, from: LocalDate, to: LocalDate): List<DayBalance> {
+        dailyCalls += Triple(accountId, from, to)
+        return generateSequence(from) { it.plusDays(1) }.takeWhile { !it.isAfter(to) }
+            .map { DayBalance(it.toString(), it.dayOfMonth.toLong()) }.toList()
+    }
 
     /** Accounts reachable by number, and every transfer made (with the key it came with). */
     val byNumber = mutableMapOf<String, Pair<AccountId, TransferDestination>>()

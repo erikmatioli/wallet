@@ -12,6 +12,7 @@ import br.com.walletcore.application.port.out.StoredTransaction;
 import br.com.walletcore.application.port.out.TransactionJournal;
 import br.com.walletcore.application.port.out.TransactionRunner;
 import br.com.walletcore.application.service.AuditLedgerService;
+import br.com.walletcore.application.service.BalanceHistoryService;
 import br.com.walletcore.application.service.MoveMoneyService;
 import br.com.walletcore.application.service.QueryAccountService;
 import br.com.walletcore.application.service.SettlementRouter;
@@ -60,7 +61,31 @@ final class InMemoryFixture {
     final Map<AccountId, Customer.Status> customerStatusByAccount = new HashMap<>();
     private long accountSequence = 0;
 
-    final Clock clock = Clock.fixed(Instant.parse("2026-09-21T12:00:00Z"), ZoneOffset.UTC);
+    final MutableClock clock = new MutableClock(Instant.parse("2026-09-21T12:00:00Z"));
+
+    /** A clock the test moves by hand - forward, or back, as another instance's late clock would be. */
+    static final class MutableClock extends Clock {
+        Instant now;
+
+        MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+
+        @Override
+        public java.time.ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+    }
 
     final TransactionRunner runner = new TransactionRunner() {
         @Override
@@ -149,7 +174,8 @@ final class InMemoryFixture {
         }
 
         @Override
-        public BalanceUpdateResult applyDelta(TenantId tenantId, AccountId accountId, Account.Kind kind, long delta) {
+        public BalanceUpdateResult applyDelta(TenantId tenantId, AccountId accountId, Account.Kind kind, long delta,
+                                              Instant occurredAt) {
             Account a = accounts.get(accountId);
             if (a == null || a.kind() != kind) {
                 return new BalanceUpdateResult.Rejected(BalanceUpdateResult.Reason.ACCOUNT_NOT_FOUND);
@@ -163,9 +189,17 @@ final class InMemoryFixture {
             }
             accounts.put(accountId, new Account(a.id(), a.tenantId(), a.kind(), a.customerId(), a.number(), a.status(),
                     a.allowNegativeBalance(), Money.ofCents(updated), a.version() + 1, a.createdAt()));
-            return new BalanceUpdateResult.Applied(Money.ofCents(updated), a.version() + 1);
+            // Same rule as the SQL: GREATEST(last_occurred_at, occurredAt) - dates never go back (ADR-012).
+            Instant effective = lastOccurredAt.merge(accountId, occurredAt, (old, now) -> old.isAfter(now) ? old : now);
+            return new BalanceUpdateResult.Applied(Money.ofCents(updated), a.version() + 1, effective);
         }
     };
+
+    /** How many single-entry lookups the closing-balance search made (ADR-012: about log2 n). */
+    int sequenceReads;
+
+    /** account.last_occurred_at of the SQL adapter. */
+    final Map<AccountId, Instant> lastOccurredAt = new HashMap<>();
 
     final LedgerRepository ledgerRepository = new LedgerRepository() {
         @Override
@@ -181,6 +215,12 @@ final class InMemoryFixture {
                     .filter(e -> types == null || types.isEmpty() || types.contains(e.type()))
                     .sorted(Comparator.comparingLong(LedgerEntry::sequence).reversed())
                     .limit(limit).toList();
+        }
+
+        @Override
+        public Optional<LedgerEntry> findBySequence(TenantId tenantId, AccountId accountId, long sequence) {
+            sequenceReads++;
+            return entries.stream().filter(e -> e.accountId().equals(accountId) && e.sequence() == sequence).findFirst();
         }
 
         @Override
@@ -278,6 +318,8 @@ final class InMemoryFixture {
     final QueryAccountService query = new QueryAccountService(runner, accountRepository, ledgerRepository,
             pixDetailRepository);
     final AuditLedgerService audit = new AuditLedgerService(runner, accountRepository, ledgerRepository, metrics);
+    final BalanceHistoryService balanceHistory = new BalanceHistoryService(runner, accountRepository, ledgerRepository,
+            clock, java.time.Duration.ofMinutes(1));
 
     InMemoryFixture() {
         for (int i = 0; i < 3; i++) {

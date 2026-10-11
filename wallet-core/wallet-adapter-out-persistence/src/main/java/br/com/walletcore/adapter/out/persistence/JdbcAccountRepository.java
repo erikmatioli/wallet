@@ -16,6 +16,7 @@ import br.com.walletcore.domain.shared.TenantId;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -202,23 +203,27 @@ class JdbcAccountRepository implements AccountRepository {
      */
     @Override
     public BalanceUpdateResult applyDelta(TenantId tenantId, AccountId accountId, Account.Kind expectedKind,
-                                          long deltaCents) {
+                                          long deltaCents, Instant occurredAt) {
         Optional<BalanceUpdateResult.Applied> applied = jdbc.sql("""
                 UPDATE account
                    SET balance_cents = balance_cents + :delta,
                        version       = version + 1,
+                       -- ADR-012: an entry's date never goes back within the account (GREATEST skips NULL)
+                       last_occurred_at = GREATEST(last_occurred_at, :occurredAt),
                        updated_at    = now()
                  WHERE tenant_id = :tenant
                    AND id        = :id
                    AND kind      = :kind
                    AND status    = 'ACTIVE'
                    AND (allow_negative OR balance_cents + :delta >= 0)
-                RETURNING balance_cents, version""")
+                RETURNING balance_cents, version, last_occurred_at""")
                 .param("delta", deltaCents)
                 .param("tenant", tenantId.value())
                 .param("id", accountId.value())
                 .param("kind", expectedKind.name())
-                .query((rs, i) -> new BalanceUpdateResult.Applied(Money.ofCents(rs.getLong(1)), rs.getLong(2)))
+                .param("occurredAt", Sql.ts(occurredAt))
+                .query((rs, i) -> new BalanceUpdateResult.Applied(Money.ofCents(rs.getLong(1)), rs.getLong(2),
+                        Sql.instant(rs, "last_occurred_at")))
                 .optional();
         if (applied.isPresent()) {
             return applied.get();

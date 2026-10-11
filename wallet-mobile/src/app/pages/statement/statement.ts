@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { AppApi } from '../../core/api';
-import { dayTitle } from '../../core/format';
+import { dayKey, dayTitle, money } from '../../core/format';
 import { StatementFlow } from '../../flows/account.flow';
 import { EntryDetail } from '../../ui/entry-detail';
 import { EntryItem } from '../../ui/entry-item';
@@ -29,7 +29,12 @@ import { Icon } from '../../ui/icon';
 
       @for (d of flow.days(); track d.day) {
         <section class="stack day" [attr.aria-label]="dayTitle(d.day)">
-          <h2 class="day-title">{{ dayTitle(d.day) }}</h2>
+          <h2 class="day-title">
+            <span>{{ dayTitle(d.day) }}</span>
+            <span class="day-balance num">
+              {{ d.day === today ? 'Saldo até agora' : 'Saldo do dia' }} {{ money(d.closingCents) }}
+            </span>
+          </h2>
           <ul class="list">
             @for (e of d.entries; track e.transactionId + e.sequence) {
               <li><mw-entry-item [entry]="e" (pick)="flow.open($event)" /></li>
@@ -72,7 +77,14 @@ import { Icon } from '../../ui/icon';
       font-weight: 700;
       color: var(--mw-text-2);
       text-transform: none;
-      padding-left: 4px;
+      padding: 0 4px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .day-balance {
+      font-weight: 600;
+      white-space: nowrap;
     }
     .empty {
       display: flex;
@@ -95,6 +107,9 @@ import { Icon } from '../../ui/icon';
 export class Statement implements OnInit {
   protected readonly flow = new StatementFlow(inject(AppApi));
   protected readonly dayTitle = (day: string) => dayTitle(day);
+  protected readonly money = money;
+  /** The day not over yet: its balance is "so far", not the closing one. */
+  protected readonly today = dayKey(new Date());
 
   ngOnInit(): void {
     void this.flow.loadMore();

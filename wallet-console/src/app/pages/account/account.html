@@ -53,7 +53,20 @@
         </tr>
       </thead>
       <tbody>
-        @for (e of entries(); track e.sequence) {
+        @for (d of days(); track d.day) {
+          @if (!pixOnly()) {
+            <!-- The day's first line is its last entry: its balance closes the day (ADR-012 of the core).
+                 Not with the Pix filter, which can hide the day's last entry. -->
+            <tr class="day-row">
+              <td colspan="5">
+                <span>{{ dayLabel(d.day) }}</span>
+                <span class="day-balance">
+                  {{ d.day === today ? 'Saldo até agora' : 'Saldo no fim do dia' }} {{ d.closingBalance | number: '1.2-2' }}
+                </span>
+              </td>
+            </tr>
+          }
+          @for (e of d.entries; track e.sequence) {
           <tr class="entry-row" tabindex="0" (click)="entryDetail.open(e)" (keydown.enter)="entryDetail.open(e)"
               [attr.aria-label]="'Ver detalhes: ' + typeLabel(e.type)">
             <td class="nowrap">{{ e.occurredAt | date: 'dd/MM HH:mm' }}</td>
@@ -64,6 +77,7 @@
             </td>
             <td class="num">{{ e.balanceAfter | number: '1.2-2' }}</td>
           </tr>
+          }
         } @empty {
           <tr>
             <td colspan="5" class="hint">{{ pixOnly() ? 'Nenhum Pix nesta conta.' : 'Nenhum lançamento ainda.' }}</td>

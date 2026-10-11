@@ -97,6 +97,7 @@ curl -s -X POST $BASE/v1/transfers \
 # 5) Saldo, extrato e auditoria (replay do ledger)
 curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/balance
 curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/accounts/$ACC/statement?limit=20"
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/accounts/$ACC/balance?at=2026-10-09"   # saldo no fim do dia
 curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 ```
 
@@ -115,6 +116,8 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 | `POST /v1/accounts/holder-check` | `accounts:read` | Confere se agência + conta + dígito são de uma conta apta a receber e se pertencem ao CPF/CNPJ do corpo. Responde `result` (`VALID`, `ACCOUNT_NOT_FOUND`, `ACCOUNT_BLOCKED`, `ACCOUNT_CLOSED`, `TAX_ID_MISMATCH`) e `accountId` só quando `VALID`, sem dados do titular. POST para o documento não ir na URL. Usado na autorização de Pix recebidos (`../wallet-pix`) |
 | `GET /v1/accounts/{id}` | `accounts:read` | Dados da conta (ISPB, agência, número, dígito, tipo `TRAN`, saldo), titular, `customerId` e `customerEmail` |
 | `GET /v1/accounts/{id}/balance` | `accounts:read` | Saldo |
+| `GET /v1/accounts/{id}/balance?at=AAAA-MM-DD` | `accounts:read` | Saldo de fechamento do dia (meia-noite de Brasília), lido do ledger por busca binária ([ADR-012](docs/adr/012-saldo-de-fechamento-sob-demanda.md)). Hoje e o futuro: `422 DAY_NOT_CLOSED` |
+| `GET /v1/accounts/{id}/daily-balances?from=&to=` | `accounts:read` | Saldo de fechamento dia a dia, até 366 dias encerrados; dias sem movimento repetem o saldo |
 | `GET /v1/accounts/{id}/statement?before=&limit=&types=&product=` | `accounts:read` | Extrato paginado por sequência (mais novo primeiro). `types` filtra por tipo (`PIX_IN,PIX_OUT`); `product=PIX` traz todos os `PIX_*` |
 | `POST /v1/accounts/{id}/deposits` | `ledger:write` | Entrada de dinheiro |
 | `POST /v1/accounts/{id}/withdrawals` | `ledger:write` ou `pix:send` | Saída de dinheiro (nunca deixa o saldo negativo) |

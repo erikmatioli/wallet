@@ -5,7 +5,8 @@ inicial, sem loja. Faz o mesmo que o app desktop do [`wallet-app`](../wallet-app
 backend, o `app-api`:
 
 - abrir conta e entrar **sem senha**, com o código que chega por e-mail;
-- saldo (que pode ser escondido), últimos lançamentos e extrato por dia, com detalhe;
+- saldo (que pode ser escondido), a evolução do saldo nos últimos 30 dias, últimos lançamentos e extrato
+  por dia, com o saldo de cada dia e o detalhe de cada lançamento (wallet-core, ADR-012);
 - **Pix** para outra instituição e **transferência** entre contas, com confirmação e comprovante;
 - **agendamentos**: lista, detalhe, cancelamento e novo agendamento (transferência ou Pix).
 
