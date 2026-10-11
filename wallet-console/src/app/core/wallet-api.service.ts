@@ -6,15 +6,21 @@ import {
   AccountListResponse,
   AccountResponse,
   AuditResponse,
+  BackingAccount,
+  BackingStatementResponse,
   BalanceResponse,
   CreateScheduleRequest,
   MoneyMovementRequest,
   OnboardCustomerRequest,
   OnboardCustomerResponse,
+  PositionsResponse,
+  RegisterBackingAccountRequest,
   ScheduleResponse,
   StatementResponse,
   TransactionResponse,
   TransferRequest,
+  TreasuryTransferRequest,
+  UncoveredDailyResponse,
 } from './models';
 
 /**
@@ -108,5 +114,35 @@ export class WalletApiService {
 
   cancelSchedule(id: string): Observable<ScheduleResponse> {
     return this.http.post<ScheduleResponse>(`/v1/schedules/${id}/cancel`, null);
+  }
+
+  // ---------------------------------------------------------------- treasury (ADR-011)
+
+  /** Every backing account with its expected balance now and at the end of yesterday. */
+  treasuryPositions(): Observable<PositionsResponse> {
+    return this.http.get<PositionsResponse>('/v1/treasury/backing-accounts');
+  }
+
+  registerBackingAccount(request: RegisterBackingAccountRequest): Observable<BackingAccount> {
+    return this.http.post<BackingAccount>('/v1/treasury/backing-accounts', request);
+  }
+
+  /** A backing account's movements, newest first; {@code before} is the previous page's {@code next}. */
+  backingEntries(id: string, before?: string, limit = 20): Observable<BackingStatementResponse> {
+    let params = new HttpParams().set('limit', limit);
+    if (before) params = params.set('before', before);
+    return this.http.get<BackingStatementResponse>(`/v1/treasury/backing-accounts/${id}/entries`, { params });
+  }
+
+  /** Per closed day: created by deposits, covered by the treasury, uncovered at the end of the day. */
+  uncoveredDaily(from: string, to: string): Observable<UncoveredDailyResponse> {
+    const params = new HttpParams().set('from', from).set('to', to);
+    return this.http.get<UncoveredDailyResponse>('/v1/treasury/unassigned/daily', { params });
+  }
+
+  treasuryTransfer(request: TreasuryTransferRequest, idempotencyKey: string): Observable<TransactionResponse> {
+    return this.http.post<TransactionResponse>('/v1/treasury/transfers', request, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    });
   }
 }

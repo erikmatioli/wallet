@@ -11,6 +11,7 @@ import br.com.walletcore.application.port.in.MoveMoneyUseCase.TransactionResult;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.TransferCommand;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.WithdrawCommand;
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.backing.BackingType;
 import br.com.walletcore.domain.exception.BusinessRuleException;
 import br.com.walletcore.domain.exception.ConflictException;
 import br.com.walletcore.domain.exception.DomainException;
@@ -136,8 +137,8 @@ class MoveMoneyServiceTest {
         f.moveMoney.transfer(new TransferCommand(f.tenant, a.id(), new Destination.ById(b.id()), Money.ofCents(1_000),
                 "", "t1"));
 
-        // Deposit: customer leg's counterparty is whichever settlement shard was picked - never
-        // null, but which shard is intentionally not asserted here (see SettlementRouter).
+        // Deposit: customer leg's counterparty is whichever shard of "a regularizar" was picked - never
+        // null, but which shard is intentionally not asserted here (see BackingRouter).
         LedgerEntry depositLeg = f.entries.stream()
                 .filter(e -> e.accountId().equals(a.id()) && e.type() == TransactionType.DEPOSIT)
                 .findFirst().orElseThrow();
@@ -186,22 +187,17 @@ class MoveMoneyServiceTest {
     }
 
     @Test
-    void internalSettlementAccountsCannotBeAddressedByClients() {
+    void internalBackingAccountsCannotBeAddressedByClients() {
         Account a = f.openCustomerAccount();
         f.moveMoney.deposit(deposit(a, 1_000, "d1"));
-        var settlementId = f.accountRepository.findSettlementAccountIds(f.tenant).get(0);
+        var shardId = f.backingRepository.findShardIds(f.tenant, f.backing(BackingType.PIX_PI)).get(0);
 
-        // Uses transfer (not deposit/withdraw) on purpose: those two pick their settlement
-        // counterparty via SettlementRouter's hash-based routing, which - with 3 shards in this
-        // fixture - has a ~1/3 chance of coincidentally routing to this very settlementId. When
-        // that happens, both legs of the transaction become the same account, and the domain
-        // rejects it as SAME_ACCOUNT before ever reaching the account-kind check below, making
-        // the test flaky. transfer's two legs are exactly source/destination as given - no
-        // random routing - so the account-kind check below is exercised deterministically.
-        assertThatThrownBy(() -> f.moveMoney.transfer(new TransferCommand(f.tenant, settlementId,
+        // Uses transfer (not deposit/withdraw) on purpose: its two legs are exactly source/destination as given,
+        // so the account-kind check below is exercised deterministically (a Pix shard is never a customer).
+        assertThatThrownBy(() -> f.moveMoney.transfer(new TransferCommand(f.tenant, shardId,
                 new Destination.ById(a.id()), Money.ofCents(100), "", "x1")))
                 .isInstanceOf(NotFoundException.class);
-        assertThatThrownBy(() -> f.query.getAccount(f.tenant, settlementId)).isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> f.query.getAccount(f.tenant, shardId)).isInstanceOf(NotFoundException.class);
     }
 
     @Test

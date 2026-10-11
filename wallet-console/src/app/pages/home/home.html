@@ -1,7 +1,12 @@
 <section class="page">
   <div class="home-header">
     <h1>Contas</h1>
-    <a routerLink="/onboard"><button type="button">+ Nova conta</button></a>
+    <div class="actions">
+      @if (canSeeTreasury) {
+        <a routerLink="/tesouraria"><button type="button" class="secondary">Tesouraria</button></a>
+      }
+      <a routerLink="/onboard"><button type="button">+ Nova conta</button></a>
+    </div>
   </div>
 
   <app-problem-banner [message]="error()" />

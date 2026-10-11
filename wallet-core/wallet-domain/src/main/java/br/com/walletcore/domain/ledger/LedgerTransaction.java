@@ -55,7 +55,7 @@ public record LedgerTransaction(
         }
     }
 
-    /** Money enters the platform: settlement is debited, the customer account is credited. */
+    /** Money enters the platform: the backing account is debited, the customer account is credited. */
     public static LedgerTransaction deposit(TenantId tenantId, TransactionId id, AccountId customerAccount,
                                             AccountId settlementAccount, Money amount, String description, Instant now) {
         return new LedgerTransaction(id, tenantId, TransactionType.DEPOSIT, amount, description,
@@ -63,7 +63,7 @@ public record LedgerTransaction(
                         new Leg(customerAccount, EntryDirection.CREDIT, amount)), now);
     }
 
-    /** Money leaves the platform: the customer account is debited, settlement is credited. */
+    /** Money leaves the platform: the customer account is debited, the backing account is credited. */
     public static LedgerTransaction withdrawal(TenantId tenantId, TransactionId id, AccountId customerAccount,
                                                AccountId settlementAccount, Money amount, String description, Instant now) {
         return new LedgerTransaction(id, tenantId, TransactionType.WITHDRAWAL, amount, description,
@@ -97,6 +97,18 @@ public record LedgerTransaction(
         return new LedgerTransaction(id, tenantId, TransactionType.TRANSFER, amount, description,
                 List.of(new Leg(source, EntryDirection.DEBIT, amount),
                         new Leg(destination, EntryDirection.CREDIT, amount)), now);
+    }
+
+    /**
+     * The treasury moves money from one backing account to another (ADR-011). A backing account's balance is
+     * negative for the money held there, so the money leaving {@code from} is a credit (its expected balance goes
+     * down) and the money arriving at {@code to} is a debit (its expected balance goes up).
+     */
+    public static LedgerTransaction treasuryTransfer(TenantId tenantId, TransactionId id, AccountId fromShard,
+                                                     AccountId toShard, Money amount, String description, Instant now) {
+        return new LedgerTransaction(id, tenantId, TransactionType.TREASURY_TRANSFER, amount, description,
+                List.of(new Leg(fromShard, EntryDirection.CREDIT, amount),
+                        new Leg(toShard, EntryDirection.DEBIT, amount)), now);
     }
 
     /**

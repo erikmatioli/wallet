@@ -186,7 +186,7 @@ class BalanceHistoryIntegrationTest {
         for (int i = 1; i < dates.size(); i++) {
             assertThat(dates.get(i)).as("entry %d", i + 1).isAfterOrEqualTo(dates.get(i - 1));
         }
-        // And for the settlement shards too: every account the postings touched.
+        // And for the backing-account shards too: every account the postings touched.
         Integer backwards = tx.readOnly(tenant, () -> jdbc.sql("""
                 SELECT count(*) FROM ledger_entry e JOIN ledger_entry p
                   ON p.account_id = e.account_id AND p.sequence_no = e.sequence_no - 1

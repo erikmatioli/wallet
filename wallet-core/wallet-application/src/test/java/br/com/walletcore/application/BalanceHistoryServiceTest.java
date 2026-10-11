@@ -7,6 +7,7 @@ import br.com.walletcore.application.port.in.BalanceHistoryUseCase.ClosingBalanc
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.DepositCommand;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.WithdrawCommand;
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.backing.BackingType;
 import br.com.walletcore.domain.exception.BusinessRuleException;
 import br.com.walletcore.domain.exception.DomainException;
 import br.com.walletcore.domain.exception.NotFoundException;
@@ -153,8 +154,8 @@ class BalanceHistoryServiceTest {
         assertThat(f.balanceHistory.dailyBalances(f.tenant, a.id(),
                 LocalDate.parse("2026-01-01"), LocalDate.parse("2026-12-31"))).hasSize(365);
 
-        AccountId settlement = f.accountRepository.findSettlementAccountIds(f.tenant).getFirst();
-        assertThatThrownBy(() -> f.balanceHistory.closingBalance(f.tenant, settlement, LocalDate.parse("2026-10-09")))
+        AccountId shard = f.backingRepository.findShardIds(f.tenant, f.backing(BackingType.UNASSIGNED)).getFirst();
+        assertThatThrownBy(() -> f.balanceHistory.closingBalance(f.tenant, shard, LocalDate.parse("2026-10-09")))
                 .isInstanceOf(NotFoundException.class);
     }
 }

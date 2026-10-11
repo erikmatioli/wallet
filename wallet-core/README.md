@@ -126,6 +126,12 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 | `POST /v1/transactions/{id}/reversals` | `ledger:write` ou `pix:send` | Estorna integralmente um saque (com um depósito) ou um Pix enviado (com um `PIX_REFUND`), uma única vez (repetir devolve o estorno original) |
 | `POST /v1/transfers` | `ledger:write` | Transferência entre contas do tenant |
 | `GET /v1/accounts/{id}/audit` | `ledger:audit` | Reconstrói o saldo pelos eventos e compara com o saldo armazenado |
+| `GET /v1/treasury/backing-accounts` | `ledger:audit` | Contas de lastro com o saldo esperado agora e no fim de ontem; a soma é a posição do tenant ([ADR-011](docs/adr/011-posicao-do-tenant-e-lastro.md)) |
+| `POST /v1/treasury/backing-accounts` | `treasury:write` | Cadastra uma conta de lastro (Reservas, CCME, investimento, carteira de crédito) |
+| `GET /v1/treasury/backing-accounts/{id}/entries?before=&limit=` | `ledger:audit` | Lançamentos da conta de lastro, intercalados entre as shards, com o cliente e o saldo esperado depois de cada um |
+| `GET /v1/treasury/backing-accounts/{id}/daily-balances?from=&to=` | `ledger:audit` | Saldo esperado no fim de cada dia |
+| `GET /v1/treasury/unassigned/daily?from=&to=` | `ledger:audit` | Por dia: dinheiro criado por depósitos, coberto pela tesouraria e o descoberto no fim do dia |
+| `POST /v1/treasury/transfers` | `treasury:write` | Movimentação de tesouraria entre contas de lastro: cobertura (saindo de A regularizar, até o descoberto) ou recomposição |
 
 Valores monetários são decimais em BRL com no máximo 2 casas (`"amount": 250.00`); internamente tudo é `long` em centavos.
 
@@ -144,7 +150,7 @@ Repetir uma requisição com a mesma `Idempotency-Key` e o mesmo corpo devolve a
 ## 5. Decisões de projeto (resumo — detalhes em `docs/adr`)
 
 1. **PostgreSQL** (ADR-001): ACID, lock por linha, constraints únicas, RLS, particionamento e operação madura em RDS/Aurora.
-2. **Ledger de partidas dobradas, append-only** (ADR-002): toda transação gera lançamentos de débito e crédito que fecham em zero. Entradas e saídas de dinheiro têm como contrapartida contas internas de *settlement* (várias shards por tenant para não criar uma linha quente). Cada lançamento carrega `sequence_no` (sem buracos por conta) e `balance_after`, então o saldo é **totalmente reconstruível por replay**.
+2. **Ledger de partidas dobradas, append-only** (ADR-002): toda transação gera lançamentos de débito e crédito que fecham em zero. Entradas e saídas de dinheiro têm como contrapartida as **contas de lastro** do tenant (ADR-011): a Conta PI para o Pix, o Caixa para o saque e "A regularizar" para o depósito, cada uma com várias shards para não criar uma linha quente. Cada lançamento carrega `sequence_no` (sem buracos por conta) e `balance_after`, então o saldo é **totalmente reconstruível por replay**.
 3. **Concorrência** (ADR-003): o saldo muda com **um único `UPDATE ... WHERE saldo + delta >= 0 RETURNING`**. O PostgreSQL trava a linha e reavalia a condição sobre a versão mais nova commitada, sem lost update e sem saldo negativo. As contas são travadas sempre em **ordem determinística de id** (A→B e B→A não geram deadlock), `lock_timeout` de 3 s e retry automático de falhas transitórias.
 4. **Idempotência**: `INSERT ... ON CONFLICT DO NOTHING` em `(tenant, idempotency_key)` como primeiro passo da transação; requisições concorrentes com a mesma chave esperam o commit da primeira.
 5. **Defesa em profundidade no banco**: `CHECK (balance >= 0)`, triggers que proíbem `UPDATE/DELETE/TRUNCATE` no ledger, trigger *deferred* que confere `Σ créditos = Σ débitos` no `COMMIT`, e a role da aplicação nem sequer tem privilégio de `UPDATE/DELETE` no ledger.

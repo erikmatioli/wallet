@@ -1,8 +1,10 @@
 package br.com.walletcore.application.port.in;
 
+import br.com.walletcore.domain.backing.TreasuryReference;
 import br.com.walletcore.domain.ledger.TransactionType;
 import br.com.walletcore.domain.pix.PixDetail;
 import br.com.walletcore.domain.shared.AccountId;
+import br.com.walletcore.domain.shared.BackingAccountId;
 import br.com.walletcore.domain.shared.Money;
 import br.com.walletcore.domain.shared.TenantId;
 import br.com.walletcore.domain.shared.TransactionId;
@@ -38,6 +40,18 @@ public interface MoveMoneyUseCase {
      * ({@link #reverseWithdrawal}).
      */
     TransactionResult postPix(PixCommand command);
+
+    /**
+     * The treasury moves money between two backing accounts (ADR-011): a coverage, when it leaves "a regularizar"
+     * (the money a deposit created arrived somewhere), or a rebalancing between two places. Never touches a
+     * customer: the tenant's position does not change. A coverage cannot exceed what is uncovered, and nothing
+     * goes into "a regularizar".
+     */
+    TransactionResult treasuryTransfer(TreasuryTransferCommand command);
+
+    record TreasuryTransferCommand(TenantId tenantId, BackingAccountId from, BackingAccountId to, Money amount,
+                                   String description, TreasuryReference reference, String idempotencyKey) {
+    }
 
     /** @param reasonCode SPI reason of the refund, only used when the reversed debit is a PIX_OUT */
     record ReversalCommand(TenantId tenantId, TransactionId withdrawalId, String description, String reasonCode) {

@@ -1,0 +1,219 @@
+<section class="page wide">
+  <div class="page-header">
+    <div>
+      <a routerLink="/home" class="back">← Contas</a>
+      <h1>Tesouraria</h1>
+    </div>
+    <button type="button" class="secondary" (click)="reload()" [disabled]="loading()">Atualizar</button>
+  </div>
+
+  <app-problem-banner [message]="error()" />
+  @if (success()) {
+    <div class="done" role="status">{{ success() }}</div>
+  }
+
+  @if (unassigned(); as u) {
+    <div class="card uncovered" [class.alert]="u.expected > 0">
+      <div>
+        <div class="kicker">Descoberto agora</div>
+        <div class="big num">R$ {{ u.expected | number: '1.2-2' }}</div>
+        <p class="explain">
+          Dinheiro criado por depósitos que a tesouraria ainda não cobriu.
+          @if (u.expectedYesterday !== null) {
+            No fim de ontem: <strong class="num">R$ {{ u.expectedYesterday | number: '1.2-2' }}</strong>.
+          }
+        </p>
+      </div>
+      @if (total() !== null) {
+        <div class="position">
+          <div class="kicker">Posição do tenant</div>
+          <div class="num">R$ {{ total() | number: '1.2-2' }}</div>
+          <p class="explain">Soma das contas de lastro = soma dos saldos dos clientes.</p>
+        </div>
+      }
+    </div>
+  }
+
+  <h2 class="section-title">Contas de lastro</h2>
+  <div class="backing-grid">
+    @for (p of positions(); track p.account.id) {
+      <button
+        type="button"
+        class="backing"
+        [class.selected]="p.account.id === selectedId()"
+        [class.negative]="p.expected < 0"
+        (click)="select(p.account.id)"
+      >
+        <span class="name">{{ p.account.name }}</span>
+        <span class="type">{{ typeLabel(p.account.type) }}</span>
+        <span class="num value">R$ {{ p.expected | number: '1.2-2' }}</span>
+        <span class="yesterday">
+          @if (p.expectedYesterday !== null) {
+            ontem: <span class="num">R$ {{ p.expectedYesterday | number: '1.2-2' }}</span>
+          }
+        </span>
+        @if (p.expected < 0) {
+          <span class="warn">Negativa: saiu daqui mais do que havia</span>
+        }
+      </button>
+    }
+  </div>
+
+  @if (canWrite()) {
+    <div class="forms">
+      <div class="card">
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" [class.on]="mode === 'coverage'" (click)="setMode('coverage')">Registrar cobertura</button>
+          <button type="button" role="tab" [class.on]="mode === 'rebalance'" (click)="setMode('rebalance')">Registrar recomposição</button>
+        </div>
+        <p class="hint">
+          @if (mode === 'coverage') {
+            O dinheiro dos depósitos chegou a algum lugar: ele sai de "A regularizar" e entra na conta de lastro onde está agora.
+          } @else {
+            A tesouraria moveu dinheiro de um lugar para outro (por exemplo, aportou na Conta PI vindo das Reservas).
+          }
+        </p>
+        <form (ngSubmit)="move()">
+          <div class="row">
+            @if (mode === 'rebalance') {
+              <label>
+                De
+                <select name="moveFrom" [(ngModel)]="moveFrom" required>
+                  <option value="" disabled>Escolha</option>
+                  @for (p of destinations(); track p.account.id) {
+                    <option [value]="p.account.id">{{ p.account.name }}</option>
+                  }
+                </select>
+              </label>
+            }
+            <label>
+              Para
+              <select name="moveTo" [(ngModel)]="moveTo" required>
+                <option value="" disabled>Escolha</option>
+                @for (p of destinations(); track p.account.id) {
+                  @if (p.account.id !== moveFrom) {
+                    <option [value]="p.account.id">{{ p.account.name }}</option>
+                  }
+                }
+              </select>
+            </label>
+            <label>
+              Valor (R$)
+              <input name="moveAmount" type="number" min="0.01" step="0.01" [(ngModel)]="moveAmount" required />
+            </label>
+          </div>
+          <div class="row">
+            <label>
+              Comprovante
+              <input name="moveDocument" [(ngModel)]="moveDocument" maxlength="140" placeholder="TED 000123" />
+            </label>
+            <label class="grow">
+              Observação
+              <input name="moveNote" [(ngModel)]="moveNote" maxlength="280" placeholder="resgate do CDB, cobertura dos créditos de 09/10" />
+            </label>
+          </div>
+          <button type="submit" [disabled]="busy()">{{ busy() ? 'Registrando...' : 'Registrar' }}</button>
+        </form>
+      </div>
+
+      <details class="card">
+        <summary>Cadastrar conta de lastro</summary>
+        <p class="hint">Conta PI, Caixa e A regularizar já existem. Cadastre as outras que a tesouraria acompanha.</p>
+        <form (ngSubmit)="register()">
+          <div class="row">
+            <label>
+              Tipo
+              <select name="newType" [(ngModel)]="newType">
+                @for (t of registrable; track t) {
+                  <option [value]="t">{{ typeLabel(t) }}</option>
+                }
+              </select>
+            </label>
+            <label class="grow">
+              Nome
+              <input name="newName" [(ngModel)]="newName" maxlength="80" required placeholder="CDB Banco X" />
+            </label>
+            <label class="grow">
+              Onde está (instituição, agência e conta)
+              <input name="newRef" [(ngModel)]="newRef" maxlength="140" placeholder="341 / 0001 / 12345-6" />
+            </label>
+          </div>
+          <button type="submit" class="secondary" [disabled]="busy()">Cadastrar</button>
+        </form>
+      </details>
+    </div>
+  }
+
+  @if (selected(); as s) {
+    <h2 class="section-title">Extrato: {{ s.account.name }}</h2>
+    @if (s.account.externalRef) {
+      <p class="hint">{{ s.account.externalRef }}</p>
+    }
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Movimento</th>
+            <th>Cliente / origem</th>
+            <th class="right">Valor</th>
+            <th class="right">Saldo esperado</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (e of entries(); track e.transactionId) {
+            <tr>
+              <td class="num">{{ e.occurredAt | date: 'dd/MM/yy HH:mm' }}</td>
+              <td>
+                {{ label(e.type) }}
+                @if (e.description && e.type !== 'DEPOSIT' && e.type !== 'WITHDRAWAL') {
+                  <div class="sub">{{ e.description }}</div>
+                }
+                @if (e.reference?.document || e.reference?.note) {
+                  <div class="sub">{{ e.reference?.document }} {{ e.reference?.note }}</div>
+                }
+              </td>
+              <td>{{ other(e) }}</td>
+              <td class="right num" [class.amount-credit]="e.direction === 'IN'" [class.amount-debit]="e.direction === 'OUT'">
+                {{ e.direction === 'IN' ? '+' : '−' }} {{ e.amount | number: '1.2-2' }}
+              </td>
+              <td class="right num">{{ e.expectedAfter | number: '1.2-2' }}</td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="5" class="hint">Nenhum movimento.</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+      @if (next()) {
+        <button type="button" class="secondary" (click)="loadEntries()">Carregar mais</button>
+      }
+    </div>
+  }
+
+  <h2 class="section-title">Descoberto no fim de cada dia</h2>
+  <p class="hint">Os últimos 14 dias encerrados. O dia fecha à meia-noite de Brasília.</p>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Dia</th>
+          <th class="right">Criado (depósitos)</th>
+          <th class="right">Coberto</th>
+          <th class="right">Descoberto no fim do dia</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (d of days(); track d.date) {
+          <tr>
+            <td class="num">{{ day(d.date) }}</td>
+            <td class="right num">{{ d.created | number: '1.2-2' }}</td>
+            <td class="right num">{{ d.covered | number: '1.2-2' }}</td>
+            <td class="right num" [class.amount-debit]="d.uncoveredAtEnd > 0">{{ d.uncoveredAtEnd | number: '1.2-2' }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</section>

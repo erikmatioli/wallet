@@ -29,7 +29,8 @@ label {
   margin-block: 0.6rem;
 }
 
-input {
+input,
+select {
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--color-border);
   border-radius: 6px;
