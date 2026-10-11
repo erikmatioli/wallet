@@ -44,7 +44,7 @@ class ScheduleServiceTest {
 
     @Test
     fun `refuses a payer that cannot pay and a destination that does not exist`() {
-        f.walletCore.accounts[f.payer.id] = f.payer.copy(status = "BLOCKED")
+        f.walletCore.accounts[f.payer.id] = f.payer.copy(status = "CLOSED")
         assertThatThrownBy { f.transfer() }.extracting(::code).isEqualTo("PAYER_ACCOUNT_NOT_ACTIVE")
 
         f.walletCore.accounts[f.payer.id] = f.payer
