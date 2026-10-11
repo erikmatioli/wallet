@@ -2,6 +2,10 @@
 
 **Status:** aceita
 
+> **Atualização:** a contrapartida de depósitos, saques e Pix deixou de ser a conta de liquidação (*settlement*)
+> e passou a ser a **conta de lastro** de cada meio, também com shards ([ADR-011](011-posicao-do-tenant-e-lastro.md)).
+> O resto desta decisão continua valendo.
+
 ## Contexto
 "Toda transação precisa ter auditoria de partida" e "temos que ser capazes de recriar o saldo da carteira com todos os eventos".
 

@@ -2,6 +2,10 @@
 
 **Status:** aceita
 
+> **Atualização:** a contrapartida de depósitos, saques e Pix deixou de ser a conta de liquidação (*settlement*)
+> e passou a ser a **conta de lastro** de cada meio, também com shards ([ADR-011](011-posicao-do-tenant-e-lastro.md)).
+> O resto desta decisão continua valendo.
+
 ## Contexto
 O core precisa de alto volume de transações, consistência forte no saldo (nunca negativo, sem lost update), auditoria imutável e reconstrução do saldo a partir de eventos. O acesso é predominantemente por chave (conta) e o padrão de escrita é *append* no ledger + atualização atômica de uma linha de saldo.
 

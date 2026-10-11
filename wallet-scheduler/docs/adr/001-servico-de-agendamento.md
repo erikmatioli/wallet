@@ -109,7 +109,8 @@ Cada recusa é gravada com o código do serviço que recusou e um texto para o c
 | Código | Origem | Texto | Retenta no dia |
 |---|---|---|---|
 | `INSUFFICIENT_FUNDS` | core / wallet-pix | Saldo insuficiente no momento do pagamento | sim |
-| `ACCOUNT_NOT_ACTIVE` | core | Conta pagadora bloqueada ou inativa | sim |
+| `ACCOUNT_BLOCKED` | core | Conta pagadora bloqueada (ADR-013 do core: um bloqueio pode ser liberado no dia) | sim |
+| `ACCOUNT_NOT_ACTIVE` | core | Conta pagadora encerrada (definitivo, desde a ADR-013 do core) | não |
 | `DESTINATION_ACCOUNT_NOT_FOUND` | core | Conta de destino não encontrada | não |
 | `AC03` | SPI | Conta do recebedor inexistente ou inválida | não |
 | código desconhecido | qualquer | Não foi possível concluir o pagamento (código) | não |

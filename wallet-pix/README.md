@@ -54,7 +54,7 @@ SPI ──pacs.002 ACSC──▶ pix-service ──deposit (Idempotency-Key = En
    | Código | Quando |
    |---|---|
    | AC03 | conta inexistente ou número inválido |
-   | AC06 | conta (ou cliente) bloqueada |
+   | AC06 | conta com bloqueio total, ou cliente bloqueado (os bloqueios de fraude e judicial recebem: ADR-013 do core) |
    | AC07 | conta encerrada |
    | AC14 | tipo de conta diferente de TRAN |
    | BE01 | CPF/CNPJ não é do titular |

@@ -141,7 +141,9 @@ Uma entrada nova no console, **`/ccs`**:
 
 ## Plano de entrega
 1. **Core (ADR-013):** bloqueios, encerramento, `closed_at`, a regra do `applyDelta`, a transferência judicial e o feed
-   `ccs/account-events`, com os escopos novos.
+   `ccs/account-events`, com os escopos novos. **Feito** (PR #52): o feed devolve `events` (cada um com `seq`,
+   `accountId`, `event` = `OPENED`/`CLOSED`, `occurredAt`, `holder` e `account`) e `next`, o `after` da próxima
+   chamada.
 2. **Console:** bloqueios, transferência judicial, encerramento e linha do tempo na tela da conta.
 3. **wallet-ccs, esqueleto:** projeto Kotlin, banco, CI, Docker Compose.
 4. **wallet-ccs, relacionamentos:** leitura do feed e as regras do item 3.

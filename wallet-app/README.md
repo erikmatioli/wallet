@@ -47,6 +47,11 @@ Brasília); hoje, o saldo até agora. O início mostra a evolução do saldo nos
 de `GET /app/v1/balance-history?from=&to=`, que o `app-api` lê do wallet-core sem guardar nada
 ([ADR-012 do wallet-core](../wallet-core/docs/adr/012-saldo-de-fechamento-sob-demanda.md)).
 
+**Conta bloqueada ou encerrada** ([ADR-013 do wallet-core](../wallet-core/docs/adr/013-bloqueios-e-encerramento-da-conta.md)).
+`GET /app/v1/me` traz `canPay` e `canReceive`. Com a conta bloqueada, o cliente entra, vê o saldo e o extrato
+e um aviso, e as ações de pagar somem. Com a conta encerrada, o login é recusado depois do código
+(`ACCOUNT_CLOSED`), como as outras recusas do login: quem não é dono do CPF não fica sabendo de nada.
+
 ## Rodar localmente
 
 ```bash

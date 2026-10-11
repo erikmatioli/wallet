@@ -2,8 +2,8 @@
 
 Console operacional (microfrontend) do produto de carteira digital, usado pelo operador do tenant.
 Opera o [`wallet-core`](../wallet-core/) (onboarding de clientes, lista e busca de contas, saldo e
-extrato, depósito, saque, transferência e auditoria por replay do ledger) e os agendamentos do
-[`wallet-scheduler`](../wallet-scheduler/).
+extrato, depósito, saque, transferência, auditoria por replay do ledger, bloqueios e encerramento da
+conta, tesouraria) e os agendamentos do [`wallet-scheduler`](../wallet-scheduler/).
 
 | | |
 |---|---|
@@ -22,6 +22,8 @@ extrato, depósito, saque, transferência e auditoria por replay do ledger) e os
 | `/accounts/:id`, cabeçalho | E-mail do titular, com "cadastrar" ou "alterar" | `PUT /v1/customers/{id}/email` |
 | `/accounts/:id` | Saldo, extrato paginado com filtro "Somente Pix" e detalhe de cada lançamento (com link para a conta contraparte em transferências), depósito, saque, transferência (por ID ou por agência/conta/dígito), auditoria | `GET /v1/accounts/{id}`, `/statement` (`product=PIX`), `POST /deposits`, `/withdrawals`, `POST /v1/transfers`, `GET /audit` |
 | `/accounts/:id`, seção Agendamentos | Agendamentos que a conta vai pagar, com a execução e as tentativas de cada um; agendar transferência ou Pix; cancelar até a véspera | `GET /v1/schedules?payerAccountId=`, `POST /v1/schedules`, `POST /v1/schedules/{id}/cancel` (wallet-scheduler) |
+| `/accounts/:id`, seções Bloqueios e encerramento / Histórico da conta | Bloqueios ativos e liberação; bloquear por fraude, bloquear tudo, bloqueio judicial, transferência judicial e encerramento com lista de verificação (cada ação só aparece para o escopo que a permite); o histórico de abertura, bloqueios, liberações e encerramento (ADR-013 do core) | `POST /v1/accounts/{id}/blocks`, `/blocks/{id}/release`, `/judicial-transfers`, `/close`, `GET /timeline` |
+| `/tesouraria` (com `ledger:audit`) | Contas de lastro com o saldo esperado, o dinheiro descoberto e o extrato de cada uma; cadastro, cobertura e recomposição (com `treasury:write`); depósitos judiciais a transferir e o registro da TED (ADR-011 e ADR-013 do core) | `GET/POST /v1/treasury/**`, `GET /v1/judicial-transit/pending`, `POST /v1/judicial-transit/{id}/teds` |
 
 ## Rodando
 
