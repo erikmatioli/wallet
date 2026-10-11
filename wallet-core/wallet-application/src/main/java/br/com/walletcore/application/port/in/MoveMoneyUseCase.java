@@ -1,10 +1,12 @@
 package br.com.walletcore.application.port.in;
 
+import br.com.walletcore.domain.account.Actor;
 import br.com.walletcore.domain.backing.TreasuryReference;
 import br.com.walletcore.domain.ledger.TransactionType;
 import br.com.walletcore.domain.pix.PixDetail;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.BackingAccountId;
+import br.com.walletcore.domain.shared.BlockId;
 import br.com.walletcore.domain.shared.Money;
 import br.com.walletcore.domain.shared.TenantId;
 import br.com.walletcore.domain.shared.TransactionId;
@@ -48,6 +50,39 @@ public interface MoveMoneyUseCase {
      * goes into "a regularizar".
      */
     TransactionResult treasuryTransfer(TreasuryTransferCommand command);
+
+    /**
+     * Carries out a court's order on a judicially blocked account (ADR-013, item 3): debits it, whatever its fraud or
+     * administrative blocks say, and credits another customer of the tenant or the judicial transit (a court deposit
+     * in another bank, whose TED the treasury sends and records with {@link #judicialTransitOut}). Up to the balance;
+     * an order may take several transfers.
+     */
+    TransactionResult judicialTransfer(JudicialTransferCommand command);
+
+    /**
+     * Records the TED of a judicial transfer to the transit: out of the transit, from the backing account the TED was
+     * sent from. The TEDs of a transfer cannot exceed it.
+     */
+    TransactionResult judicialTransitOut(JudicialTransitOutCommand command);
+
+    /** Where the court sends the money: another customer account of the tenant, or a court deposit elsewhere. */
+    sealed interface JudicialDestination {
+        record ToAccount(Destination account) implements JudicialDestination {
+        }
+
+        record ToTransit() implements JudicialDestination {
+        }
+    }
+
+    record JudicialTransferCommand(TenantId tenantId, AccountId accountId, BlockId blockId, Money amount,
+                                   JudicialDestination destination, String note, Actor actor,
+                                   String idempotencyKey) {
+    }
+
+    /** @param document the TED's receipt (required) */
+    record JudicialTransitOutCommand(TenantId tenantId, TransactionId transferId, BackingAccountId from, Money amount,
+                                     String document, String note, Actor actor, String idempotencyKey) {
+    }
 
     record TreasuryTransferCommand(TenantId tenantId, BackingAccountId from, BackingAccountId to, Money amount,
                                    String description, TreasuryReference reference, String idempotencyKey) {

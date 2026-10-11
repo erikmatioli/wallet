@@ -6,6 +6,7 @@ import br.com.walletcore.application.port.in.QueryAccountUseCase.HolderCheck;
 import br.com.walletcore.domain.exception.NotFoundException;
 import br.com.walletcore.domain.exception.ValidationException;
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.account.AccountBlock;
 import br.com.walletcore.domain.customer.Customer;
 import org.junit.jupiter.api.Test;
 
@@ -71,7 +72,8 @@ public class QueryAccountServiceTest {
 
     @Test
     void holderCheckReportsBlockedAndClosedAccountsBeforeComparingDocument() {
-        Account blocked = f.withStatus(f.openCustomerAccount("52998224725"), Account.Status.BLOCKED);
+        Account blocked = f.openCustomerAccount("52998224725");
+        f.block(blocked, AccountBlock.Type.ADMINISTRATIVE);
         Account closed = f.withStatus(f.openCustomerAccount("11144477735"), Account.Status.CLOSED);
 
         // Documento errado de propósito: o estado da conta vem antes da comparação.

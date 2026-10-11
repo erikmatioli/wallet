@@ -1,6 +1,6 @@
 # ADR-013 — Bloqueios e encerramento da conta
 
-**Status:** proposta
+**Status:** aceita e implementada (11/10/2026)
 
 ## Contexto
 A conta já tem um status (`ACTIVE`, `BLOCKED`, `CLOSED`), mas **nada o altera**: não há API, as 8 contas do
@@ -179,6 +179,42 @@ passa a vir do token.
 - **console, na tela da conta:** os bloqueios ativos em destaque, os botões **Bloquear por fraude**, **Bloquear
   tudo**, **Bloqueio judicial**, **Transferência judicial**, **Liberar** e **Encerrar**, cada um visível só
   para o escopo que o permite, e a linha do tempo da conta.
+
+## Ajustes feitos na implementação
+- **Criar ou liberar um bloqueio não muda a versão da conta.** A versão é a sequência do ledger (ADR-003): um
+  bloqueio não movimenta dinheiro, então não consome um número. A serialização vem da linha da conta travada
+  (`SELECT ... FOR UPDATE`) antes de gravar o bloqueio e recalcular as políticas; um movimento que espera essa linha
+  lê a política nova quando a recebe.
+- **O que desfaz um débito entra sob qualquer bloqueio:** além do estorno de Pix (`PIX_REFUND`), a **devolução
+  recebida** de um Pix enviado (`PIX_RETURN_IN`) e o **estorno de um saque**. Recusá-los deixaria o dinheiro do
+  cliente parado no tenant. O estorno de saque é um `DEPOSIT`; o core o reconhece pelo fluxo, não pelo tipo.
+- **A baixa da transferência judicial usa a ADR-011.** A perna da TED vai para a conta de lastro de onde ela saiu,
+  escolhida pela tesouraria, nunca para A regularizar (`INVALID_TREASURY_SOURCE`). A baixa referencia a
+  transferência judicial que cumpre, e as TEDs de uma transferência não passam do valor dela
+  (`TRANSIT_OUT_EXCEEDS_TRANSFER`, com um lock por transferência). Endpoints: `GET /v1/judicial-transit/pending`
+  (`accounts:judicial` ou `ledger:audit`) e `POST /v1/judicial-transit/{transferId}/teds` (`accounts:judicial`,
+  `Idempotency-Key`). A conta de trânsito não fica negativa: é dinheiro devido ao juízo, como o de um cliente.
+- **Com transferências ao trânsito pendentes**, a soma das contas de lastro é o saldo dos clientes **mais** o que
+  está no trânsito: o dinheiro ainda está no tenant, só não é mais de um cliente.
+- **Extrato:** a descrição da transferência judicial é "Ordem judicial, processo …", nos dois lados (também no
+  extrato do credor). A da TED é "Depósito judicial, processo …".
+- **A ordem só transfere enquanto o bloqueio judicial estiver ativo** (`JUDICIAL_BLOCK_NOT_ACTIVE`); a repetição de
+  uma transferência já feita é respondida mesmo depois da liberação.
+- **A ordem do feed do CCS.** O `seq` é global, mas cada evento é gravado com um lock por tenant, tomado antes de
+  tirar o número: dentro de um tenant, os números ficam visíveis na ordem em que foram tirados, e quem leu até `n`
+  nunca encontra um menor depois. Um rollback só deixa um buraco.
+- **Motivos do encerramento:** `CUSTOMER_REQUEST`, `INSTITUTION_DECISION`, `DEATH` e `OTHER` (observação
+  obrigatória). **Liberar um bloqueio exige dizer por quê.**
+- **A conta passa a dizer o que pode fazer:** `canReceive` e `canPay` em `GET /v1/accounts/{id}` (com os bloqueios
+  ativos e `closedAt`) e na lista de contas.
+- **`ACCOUNT_NOT_ACTIVE` passa a significar conta encerrada.** O wallet-scheduler trata `ACCOUNT_BLOCKED` como
+  retentável no dia e `ACCOUNT_NOT_ACTIVE` como falha definitiva. O wallet-pix repassa a recusa do core sem mudança.
+- **App (desktop e M-Wall):** com a conta bloqueada, mostram o aviso e escondem Pix e transferência. O login de uma
+  conta encerrada é recusado só depois do código, como as outras recusas do login (`ACCOUNT_CLOSED`).
+- **Console:** a tela da conta mostra os bloqueios ativos e as ações que o token permite; o encerramento tem uma
+  lista de verificação. O saldo e o bloqueio judicial vêm do core; os agendamentos vêm do wallet-scheduler. O Pix
+  sem resposta do SPI fica para conferência manual: o wallet-pix ainda não tem essa consulta. A tesouraria ganha a
+  lista de depósitos judiciais a transferir, com o registro da TED. As recusas aparecem em português.
 
 ## Fora do escopo
 - **Bloqueio de um valor** (item 1): o próximo passo.

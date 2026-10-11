@@ -1,6 +1,7 @@
 package br.com.walletcore.application.port.in;
 
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.account.AccountBlock;
 import br.com.walletcore.domain.ledger.LedgerEntry;
 import br.com.walletcore.domain.ledger.TransactionType;
 import br.com.walletcore.domain.pix.PixDetail;
@@ -17,8 +18,20 @@ public interface QueryAccountUseCase {
     /** Same as {@link #getAccount}, plus the owning customer's display name and masked document. */
     AccountDetail getAccountDetail(TenantId tenantId, AccountId accountId);
 
-    /** @param customerEmail the holder's email as the operator registered it; null when there is none */
-    record AccountDetail(Account account, String customerName, String documentMasked, String customerEmail) {
+    /**
+     * @param customerEmail the holder's email as the operator registered it; null when there is none
+     * @param activeBlocks  the account's active blocks (ADR-013), newest first
+     */
+    record AccountDetail(Account account, String customerName, String documentMasked, String customerEmail,
+                         List<AccountBlock> activeBlocks) {
+
+        public AccountDetail {
+            activeBlocks = activeBlocks == null ? List.of() : List.copyOf(activeBlocks);
+        }
+
+        public AccountDetail(Account account, String customerName, String documentMasked, String customerEmail) {
+            this(account, customerName, documentMasked, customerEmail, List.of());
+        }
 
         public AccountDetail(Account account, String customerName, String documentMasked) {
             this(account, customerName, documentMasked, null);

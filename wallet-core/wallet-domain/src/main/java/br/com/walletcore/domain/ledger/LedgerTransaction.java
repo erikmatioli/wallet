@@ -112,6 +112,30 @@ public record LedgerTransaction(
     }
 
     /**
+     * A court's order carried out (ADR-013): the blocked account is debited and {@code destination} (another customer
+     * account, or the judicial transit) is credited.
+     */
+    public static LedgerTransaction judicialTransfer(TenantId tenantId, TransactionId id, AccountId blockedAccount,
+                                                     AccountId destination, Money amount, String description,
+                                                     Instant now) {
+        return new LedgerTransaction(id, tenantId, TransactionType.JUDICIAL_TRANSFER, amount, description,
+                List.of(new Leg(blockedAccount, EntryDirection.DEBIT, amount),
+                        new Leg(destination, EntryDirection.CREDIT, amount)), now);
+    }
+
+    /**
+     * The TED of a judicial transfer left the tenant: the judicial transit is debited and the backing account the TED
+     * was sent from is credited, as a withdrawal credits the cash.
+     */
+    public static LedgerTransaction judicialTransitOut(TenantId tenantId, TransactionId id, AccountId transit,
+                                                       AccountId backingShard, Money amount, String description,
+                                                       Instant now) {
+        return new LedgerTransaction(id, tenantId, TransactionType.JUDICIAL_TRANSIT_OUT, amount, description,
+                List.of(new Leg(transit, EntryDirection.DEBIT, amount),
+                        new Leg(backingShard, EntryDirection.CREDIT, amount)), now);
+    }
+
+    /**
      * Legs sorted by account id. Locking accounts in this deterministic order in every
      * transaction makes deadlocks impossible (A->B and B->A both lock the lower id first).
      */

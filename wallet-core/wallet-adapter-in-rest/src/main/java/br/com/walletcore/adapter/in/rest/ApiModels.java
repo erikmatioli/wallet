@@ -151,7 +151,11 @@ public final class ApiModels {
             @Schema(description = "Nome do titular da conta", example = "João da Silva") String customerName,
             @Schema(description = "Documento mascarado do titular", example = "***.686.290-**") String documentMasked,
             @Schema(description = "UUID do cliente titular") UUID customerId,
-            @Schema(description = "E-mail do titular; ausente quando não há", example = "maria@example.com") String customerEmail) {
+            @Schema(description = "E-mail do titular; ausente quando não há", example = "maria@example.com") String customerEmail,
+            @Schema(description = "Quando a conta foi encerrada; ausente enquanto ativa") Instant closedAt,
+            @Schema(description = "Se a conta pode receber agora (sem bloqueio administrativo)") boolean canReceive,
+            @Schema(description = "Se a conta pode pagar agora (sem bloqueio)") boolean canPay,
+            @Schema(description = "Bloqueios ativos, mais novos primeiro") List<AccountControlModels.BlockResponse> blocks) {
 
         static AccountDetailResponse from(QueryAccountUseCase.AccountDetail d) {
             Account a = d.account();
@@ -159,7 +163,9 @@ public final class ApiModels {
                     a.id().value(), a.number().ispb(), a.number().branch(), a.number().number(),
                     a.number().checkDigit(), a.number().formatted(), a.number().type().bcbCode(), a.status().name(),
                     a.balance().toDecimal(), Money.CURRENCY, d.customerName(), d.documentMasked(),
-                    a.customerId() == null ? null : a.customerId().value(), d.customerEmail());
+                    a.customerId() == null ? null : a.customerId().value(), d.customerEmail(), a.closedAt(),
+                    a.isActive() && a.policy().canReceive(), a.isActive() && a.policy().canPay(),
+                    d.activeBlocks().stream().map(AccountControlModels.BlockResponse::from).toList());
         }
     }
 
@@ -343,12 +349,15 @@ public final class ApiModels {
             @Schema(description = "Status", example = "ACTIVE") String status,
             @Schema(description = "Saldo", example = "1250.00") BigDecimal balance,
             @Schema(description = "Moeda", example = "BRL") String currency,
-            @Schema(description = "Data de criação", example = "2026-10-01T10:00:00Z") Instant createdAt) {
+            @Schema(description = "Data de criação", example = "2026-10-01T10:00:00Z") Instant createdAt,
+            @Schema(description = "Se a conta pode receber agora") boolean canReceive,
+            @Schema(description = "Se a conta pode pagar agora") boolean canPay) {
 
         static AccountListItemResponse from(ListAccountsUseCase.Item i) {
+            boolean active = "ACTIVE".equals(i.status());
             return new AccountListItemResponse(i.accountId().value(), i.customerName(), i.documentMasked(),
                     i.accountFormatted(), i.accountType(), i.status(), i.balance().toDecimal(), i.currency(),
-                    i.createdAt());
+                    i.createdAt(), active && i.canReceive(), active && i.canPay());
         }
     }
 

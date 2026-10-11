@@ -3,6 +3,7 @@ package br.com.walletcore.adapter.in.rest;
 import br.com.walletcore.domain.exception.BusinessRuleException;
 import br.com.walletcore.domain.exception.ConflictException;
 import br.com.walletcore.domain.exception.DomainException;
+import br.com.walletcore.domain.exception.ForbiddenException;
 import br.com.walletcore.domain.exception.NotFoundException;
 import br.com.walletcore.domain.exception.ValidationException;
 import java.util.List;
@@ -30,6 +31,7 @@ class ApiExceptionHandler {
     ResponseEntity<ProblemDetail> domain(DomainException e) {
         HttpStatus status = switch (e) {
             case NotFoundException n -> HttpStatus.NOT_FOUND;
+            case ForbiddenException f -> HttpStatus.FORBIDDEN;
             case ConflictException c -> HttpStatus.CONFLICT;
             case BusinessRuleException b -> HttpStatus.UNPROCESSABLE_ENTITY;
             case ValidationException v -> HttpStatus.BAD_REQUEST;

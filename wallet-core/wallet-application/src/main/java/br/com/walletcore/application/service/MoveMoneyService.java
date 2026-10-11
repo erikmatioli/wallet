@@ -3,7 +3,9 @@ package br.com.walletcore.application.service;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase;
 import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.BackingAccountRepository;
+import br.com.walletcore.application.port.out.AccountBlockRepository;
 import br.com.walletcore.application.port.out.BalanceUpdateResult;
+import br.com.walletcore.application.port.out.JudicialTransferRepository;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
 import br.com.walletcore.application.port.out.OutboxRepository;
@@ -12,6 +14,8 @@ import br.com.walletcore.application.port.out.StoredTransaction;
 import br.com.walletcore.application.port.out.TransactionJournal;
 import br.com.walletcore.application.port.out.TransactionRunner;
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.account.AccountBlock;
+import br.com.walletcore.domain.account.AccountPolicy;
 import br.com.walletcore.domain.backing.BackingAccount;
 import br.com.walletcore.domain.backing.BackingType;
 import br.com.walletcore.domain.backing.TreasuryReference;
@@ -27,6 +31,7 @@ import br.com.walletcore.domain.ledger.Leg;
 import br.com.walletcore.domain.ledger.TransactionType;
 import br.com.walletcore.domain.pix.PixDetail;
 import br.com.walletcore.domain.shared.AccountId;
+import br.com.walletcore.domain.shared.BackingAccountId;
 import br.com.walletcore.domain.shared.Money;
 import br.com.walletcore.domain.shared.TenantId;
 import br.com.walletcore.domain.shared.TransactionId;
@@ -38,8 +43,8 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Posts balanced double-entry transactions. Everything happens in ONE database transaction:
@@ -64,13 +69,15 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
     private final PixDetailRepository pixDetails;
     private final BackingAccountRepository backing;
     private final BackingRouter router;
+    private final AccountBlockRepository blocks;
+    private final JudicialTransferRepository judicial;
     private final MetricsRecorder metrics;
     private final Clock clock;
 
     public MoveMoneyService(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
                             TransactionJournal journal, OutboxRepository outbox, PixDetailRepository pixDetails,
-                            BackingAccountRepository backing, BackingRouter router, MetricsRecorder metrics,
-                            Clock clock) {
+                            BackingAccountRepository backing, BackingRouter router, AccountBlockRepository blocks,
+                            JudicialTransferRepository judicial, MetricsRecorder metrics, Clock clock) {
         this.tx = tx;
         this.accounts = accounts;
         this.ledger = ledger;
@@ -79,6 +86,8 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
         this.pixDetails = pixDetails;
         this.backing = backing;
         this.router = router;
+        this.blocks = blocks;
+        this.judicial = judicial;
         this.metrics = metrics;
         this.clock = clock;
     }
@@ -94,7 +103,7 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
             AccountId backingId = router.pick(c.tenantId(), BackingType.UNASSIGNED, id);
             LedgerTransaction lt = LedgerTransaction.deposit(c.tenantId(), id, c.accountId(), backingId,
                     c.amount(), c.description(), clock.instant());
-            return post(lt, key, fp, Set.of(backingId));
+            return post(lt, key, fp, backingLeg(backingId));
         });
     }
 
@@ -109,7 +118,7 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
             AccountId backingId = router.pick(c.tenantId(), BackingType.CASH, id);
             LedgerTransaction lt = LedgerTransaction.withdrawal(c.tenantId(), id, c.accountId(), backingId,
                     c.amount(), c.description(), clock.instant());
-            return post(lt, key, fp, Set.of(backingId));
+            return post(lt, key, fp, backingLeg(backingId));
         });
     }
 
@@ -126,7 +135,7 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
             AccountId destination = resolve(c.tenantId(), c.destination());
             LedgerTransaction lt = LedgerTransaction.transfer(c.tenantId(), TransactionId.newId(), c.source(),
                     destination, c.amount(), c.description(), clock.instant());
-            return post(lt, key, fp, Set.of());
+            return post(lt, key, fp, Map.of());
         });
     }
 
@@ -156,7 +165,8 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
                 AccountId backingId = router.pick(c.tenantId(), BackingType.CASH, id);
                 LedgerTransaction lt = LedgerTransaction.deposit(c.tenantId(), id, debit.accountId(), backingId,
                         debit.amount(), description, clock.instant());
-                return post(lt, key, fp, Set.of(backingId));
+                // It undoes a debit: it comes in even under an administrative block (ADR-013).
+                return post(lt, key, fp, backingLeg(backingId), null, () -> { }, () -> { }, true);
             }
             AccountId backingId = router.pick(c.tenantId(), BackingType.PIX_PI, id);
             pixDetails.lockOriginal(c.tenantId(), c.withdrawalId());
@@ -165,7 +175,7 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
                     .refundOf(c.withdrawalId(), c.reasonCode());
             LedgerTransaction lt = LedgerTransaction.pix(c.tenantId(), id, TransactionType.PIX_REFUND,
                     debit.accountId(), backingId, debit.amount(), description, clock.instant());
-            return post(lt, key, fp, Set.of(backingId), refund, () -> {
+            return post(lt, key, fp, backingLeg(backingId), refund, () -> {
                 if (pixDetails.sumRelated(c.tenantId(), c.withdrawalId(), TransactionType.PIX_RETURN_IN) > 0) {
                     throw new BusinessRuleException("PIX_ALREADY_RETURNED",
                             "this Pix was settled and returned; it cannot be refunded");
@@ -199,7 +209,7 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
             AccountId backingId = router.pick(c.tenantId(), BackingType.PIX_PI, id);
             LedgerTransaction lt = LedgerTransaction.pix(c.tenantId(), id, detail.type(), c.accountId(), backingId,
                     c.amount(), c.description(), clock.instant());
-            return post(lt, key, fp, Set.of(backingId), detail, () -> checkPixRules(c, detail));
+            return post(lt, key, fp, backingLeg(backingId), detail, () -> checkPixRules(c, detail));
         });
     }
 
@@ -232,7 +242,7 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
                     : c.description();
             LedgerTransaction lt = LedgerTransaction.treasuryTransfer(c.tenantId(), id, fromShard, toShard,
                     c.amount(), description, clock.instant());
-            return post(lt, key, fp, Set.of(fromShard, toShard), null, () -> {
+            return post(lt, key, fp, Map.of(fromShard, Account.Kind.BACKING, toShard, Account.Kind.BACKING), null, () -> {
                 if (from.type() == BackingType.UNASSIGNED) {
                     // Locks every shard of "a regularizar": two coverages at once cannot both pass the check.
                     long uncovered = -backing.lockAndSumBalance(c.tenantId(), from.id());
@@ -246,7 +256,115 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
         });
     }
 
-    private BackingAccount loadBacking(TenantId tenantId, br.com.walletcore.domain.shared.BackingAccountId id) {
+    @Override
+    public TransactionResult judicialTransfer(JudicialTransferCommand c) {
+        String key = validateKey(c.idempotencyKey());
+        requirePositive(c.amount());
+        if (c.blockId() == null || c.actor() == null) {
+            throw new ValidationException("INVALID_JUDICIAL_TRANSFER", "the judicial block and the operator are required");
+        }
+        if (c.destination() == null) {
+            throw new ValidationException("INVALID_DESTINATION", "destination is required");
+        }
+        String note = note(c.note());
+        String destinationRef = switch (c.destination()) {
+            case JudicialDestination.ToTransit t -> "transit";
+            case JudicialDestination.ToAccount(Destination.ById d) -> "id:" + d.id();
+            case JudicialDestination.ToAccount(Destination.ByNumber n) ->
+                    "number:" + n.branch() + "/" + n.number() + "/" + n.checkDigit();
+        };
+        String fp = fingerprint("JUDICIAL_TRANSFER", c.accountId(), c.blockId(), destinationRef, c.amount().cents(),
+                note, c.actor().operator());
+        return tx.inTransaction(c.tenantId(), () -> {
+            AccountBlock block = blocks.findById(c.tenantId(), c.blockId())
+                    .filter(b -> b.accountId().equals(c.accountId()) && b.type() == AccountBlock.Type.JUDICIAL)
+                    .orElseThrow(() -> new NotFoundException("JUDICIAL_BLOCK_NOT_FOUND",
+                            "no judicial block " + c.blockId() + " on this account"));
+            boolean toTransit = c.destination() instanceof JudicialDestination.ToTransit;
+            AccountId destination = switch (c.destination()) {
+                case JudicialDestination.ToTransit t -> accounts.findJudicialTransit(c.tenantId())
+                        .orElseThrow(() -> new IllegalStateException("tenant has no judicial transit account"));
+                case JudicialDestination.ToAccount a -> resolve(c.tenantId(), a.account());
+            };
+            TransactionId id = TransactionId.newId();
+            LedgerTransaction lt = LedgerTransaction.judicialTransfer(c.tenantId(), id, c.accountId(), destination,
+                    c.amount(), "Ordem judicial, processo " + block.court().process(), clock.instant());
+            Map<AccountId, Account.Kind> internal = toTransit
+                    ? Map.of(destination, Account.Kind.JUDICIAL_TRANSIT) : Map.of();
+            return post(lt, key, fp, internal, null, () -> {
+                // Checked only for a new transfer: a replay is still answered after the block was released.
+                if (!block.isActive()) {
+                    throw new BusinessRuleException("JUDICIAL_BLOCK_NOT_ACTIVE",
+                            "the judicial block was released; a released order transfers nothing");
+                }
+            }, () -> judicial.insert(c.tenantId(), new JudicialTransferRepository.Detail(id,
+                    JudicialTransferRepository.Kind.TRANSFER, c.accountId(), block.id(), block.court().process(),
+                    block.court().protocol(), toTransit, null, c.actor(), note, null)));
+        });
+    }
+
+    @Override
+    public TransactionResult judicialTransitOut(JudicialTransitOutCommand c) {
+        String key = validateKey(c.idempotencyKey());
+        requirePositive(c.amount());
+        if (c.transferId() == null || c.from() == null || c.actor() == null) {
+            throw new ValidationException("INVALID_JUDICIAL_TRANSIT_OUT",
+                    "the judicial transfer, the backing account and the operator are required");
+        }
+        String document = c.document() == null ? "" : c.document().strip();
+        if (document.isEmpty() || document.length() > 140) {
+            throw new ValidationException("DOCUMENT_REQUIRED", "the TED's receipt is required, at most 140 characters");
+        }
+        String note = note(c.note());
+        String fp = fingerprint("JUDICIAL_TRANSIT_OUT", c.transferId().value(), c.from(), c.amount().cents(), document,
+                note, c.actor().operator());
+        return tx.inTransaction(c.tenantId(), () -> {
+            JudicialTransferRepository.Detail transfer = judicial.findByTransaction(c.tenantId(), c.transferId())
+                    .filter(d -> d.kind() == JudicialTransferRepository.Kind.TRANSFER && d.toTransit())
+                    .orElseThrow(() -> new NotFoundException("JUDICIAL_TRANSFER_NOT_FOUND",
+                            "no judicial transfer to the transit " + c.transferId().value()));
+            BackingAccount from = loadBacking(c.tenantId(), c.from());
+            if (from.type() == BackingType.UNASSIGNED) {
+                throw new BusinessRuleException("INVALID_TREASURY_SOURCE",
+                        "a TED leaves from a real place, never from \"a regularizar\"");
+            }
+            AccountId transit = accounts.findJudicialTransit(c.tenantId())
+                    .orElseThrow(() -> new IllegalStateException("tenant has no judicial transit account"));
+            TransactionId id = TransactionId.newId();
+            AccountId shard = router.pick(c.tenantId(), from.id(), id);
+            LedgerTransaction lt = LedgerTransaction.judicialTransitOut(c.tenantId(), id, transit, shard, c.amount(),
+                    "Depósito judicial, processo " + transfer.process(), clock.instant());
+            return post(lt, key, fp, Map.of(transit, Account.Kind.JUDICIAL_TRANSIT, shard, Account.Kind.BACKING), null,
+                    () -> {
+                        // Two TEDs of one transfer at once cannot both fit in what is left.
+                        judicial.lock(c.tenantId(), c.transferId());
+                        long ordered = ledger.findByTransaction(c.tenantId(), c.transferId()).stream()
+                                .filter(e -> e.direction() == EntryDirection.DEBIT)
+                                .mapToLong(e -> e.amount().cents()).sum();
+                        long sent = judicial.sumSent(c.tenantId(), c.transferId());
+                        if (sent + c.amount().cents() > ordered) {
+                            throw new BusinessRuleException("TRANSIT_OUT_EXCEEDS_TRANSFER",
+                                    "the TEDs would exceed the judicial transfer (" + Money.ofCents(ordered - sent)
+                                            .toDecimal() + " left)");
+                        }
+                    }, () -> judicial.insert(c.tenantId(), new JudicialTransferRepository.Detail(id,
+                            JudicialTransferRepository.Kind.TRANSIT_OUT, null, transfer.blockId(), transfer.process(),
+                            transfer.protocol(), false, c.transferId(), c.actor(), note, document)));
+        });
+    }
+
+    private static String note(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String v = value.strip();
+        if (v.length() > 280) {
+            throw new ValidationException("INVALID_NOTE", "note must have at most 280 characters");
+        }
+        return v;
+    }
+
+    private BackingAccount loadBacking(TenantId tenantId, BackingAccountId id) {
         return backing.findById(tenantId, id)
                 .orElseThrow(() -> new NotFoundException("BACKING_ACCOUNT_NOT_FOUND", "backing account " + id + " not found"));
     }
@@ -306,25 +424,38 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
         };
     }
 
-    private TransactionResult post(LedgerTransaction lt, String key, String fingerprint, Set<AccountId> internal) {
+    private static Map<AccountId, Account.Kind> backingLeg(AccountId shard) {
+        return Map.of(shard, Account.Kind.BACKING);
+    }
+
+    private TransactionResult post(LedgerTransaction lt, String key, String fingerprint,
+                                   Map<AccountId, Account.Kind> internal) {
         return post(lt, key, fingerprint, internal, null, () -> { });
     }
 
-    private TransactionResult post(LedgerTransaction lt, String key, String fingerprint, Set<AccountId> internal,
-                                   PixDetail pixDetail, Runnable rules) {
+    private TransactionResult post(LedgerTransaction lt, String key, String fingerprint,
+                                   Map<AccountId, Account.Kind> internal, PixDetail pixDetail, Runnable rules) {
         return post(lt, key, fingerprint, internal, pixDetail, rules, () -> { });
     }
 
+    private TransactionResult post(LedgerTransaction lt, String key, String fingerprint,
+                                   Map<AccountId, Account.Kind> internal, PixDetail pixDetail, Runnable rules,
+                                   Runnable onPosted) {
+        return post(lt, key, fingerprint, internal, pixDetail, rules, onPosted, false);
+    }
+
     /**
-     * @param internal  the legs on backing-account shards (every other leg is a customer account)
+     * @param internal  the legs on internal accounts and their kind (every other leg is a customer account)
      * @param pixDetail stored with the transaction when it is a Pix (null otherwise)
      * @param rules     checks that only apply to a new transaction: they run after the idempotency
      *                  lookup, so a replay is still answered when the rules would now refuse it
      *                  (a full return, replayed, would otherwise "exceed" the original)
      * @param onPosted  writes what goes with a new transaction (the treasury reference), in the same transaction
+     * @param refund    the customer's credit undoes a debit of the same account, so no block keeps it out (ADR-013)
      */
-    private TransactionResult post(LedgerTransaction lt, String key, String fingerprint, Set<AccountId> internal,
-                                   PixDetail pixDetail, Runnable rules, Runnable onPosted) {
+    private TransactionResult post(LedgerTransaction lt, String key, String fingerprint,
+                                   Map<AccountId, Account.Kind> internal, PixDetail pixDetail, Runnable rules,
+                                   Runnable onPosted, boolean refund) {
         Optional<StoredTransaction> existing = journal.insertIfAbsent(lt, key, fingerprint);
         if (existing.isPresent()) {
             StoredTransaction s = existing.get();
@@ -343,9 +474,11 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
 
         List<LedgerEntry> entries = new ArrayList<>(lt.legs().size());
         for (Leg leg : lt.legsInLockOrder()) {
-            Account.Kind kind = internal.contains(leg.accountId()) ? Account.Kind.BACKING : Account.Kind.CUSTOMER;
+            Account.Kind kind = internal.getOrDefault(leg.accountId(), Account.Kind.CUSTOMER);
+            AccountPolicy.Gate gate = kind == Account.Kind.CUSTOMER
+                    ? AccountPolicy.gateFor(lt.type(), refund) : AccountPolicy.Gate.ANY;
             BalanceUpdateResult result = accounts.applyDelta(lt.tenantId(), leg.accountId(), kind, leg.signedCents(),
-                    lt.occurredAt());
+                    lt.occurredAt(), gate);
             switch (result) {
                 case BalanceUpdateResult.Applied applied -> entries.add(new LedgerEntry(
                         UuidV7.next(), lt.tenantId(), lt.id(), leg.accountId(), applied.version(), leg.direction(),
@@ -386,6 +519,8 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
             case ACCOUNT_NOT_FOUND -> new NotFoundException("ACCOUNT_NOT_FOUND", "account " + accountId + " not found");
             case ACCOUNT_NOT_ACTIVE -> new BusinessRuleException("ACCOUNT_NOT_ACTIVE",
                     "account " + accountId + " is not active");
+            case ACCOUNT_BLOCKED -> new BusinessRuleException("ACCOUNT_BLOCKED",
+                    "account " + accountId + " is blocked for this movement");
             case INSUFFICIENT_FUNDS -> new BusinessRuleException("INSUFFICIENT_FUNDS",
                     "account " + accountId + " has insufficient funds");
         };

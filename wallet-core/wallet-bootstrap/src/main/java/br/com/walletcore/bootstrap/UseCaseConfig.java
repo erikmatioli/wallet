@@ -1,5 +1,6 @@
 package br.com.walletcore.bootstrap;
 
+import br.com.walletcore.application.port.in.AccountControlUseCase;
 import br.com.walletcore.application.port.in.AuditLedgerUseCase;
 import br.com.walletcore.application.port.in.BalanceHistoryUseCase;
 import br.com.walletcore.application.port.in.CustomerContactUseCase;
@@ -9,9 +10,12 @@ import br.com.walletcore.application.port.in.ProvisionTenantUseCase;
 import br.com.walletcore.application.port.in.ListAccountsUseCase;
 import br.com.walletcore.application.port.in.QueryAccountUseCase;
 import br.com.walletcore.application.port.in.TreasuryUseCase;
+import br.com.walletcore.application.port.out.AccountBlockRepository;
 import br.com.walletcore.application.port.out.AccountRepository;
+import br.com.walletcore.application.port.out.AccountStatusEventRepository;
 import br.com.walletcore.application.port.out.BackingAccountRepository;
 import br.com.walletcore.application.port.out.CustomerRepository;
+import br.com.walletcore.application.port.out.JudicialTransferRepository;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
 import br.com.walletcore.application.port.out.OutboxRepository;
@@ -20,6 +24,7 @@ import br.com.walletcore.application.port.out.SecretHasher;
 import br.com.walletcore.application.port.out.TenantRepository;
 import br.com.walletcore.application.port.out.TransactionJournal;
 import br.com.walletcore.application.port.out.TransactionRunner;
+import br.com.walletcore.application.service.AccountControlService;
 import br.com.walletcore.application.service.AuditLedgerService;
 import br.com.walletcore.application.service.BalanceHistoryService;
 import br.com.walletcore.application.service.CustomerContactService;
@@ -64,8 +69,9 @@ class UseCaseConfig {
     @Bean
     OnboardCustomerUseCase onboardCustomerUseCase(TransactionRunner tx, TenantRepository tenants,
                                                    CustomerRepository customers, AccountRepository accounts,
-                                                   OutboxRepository outbox, MetricsRecorder metrics, Clock clock) {
-        return new OnboardCustomerService(tx, tenants, customers, accounts, outbox, metrics, clock);
+                                                   AccountStatusEventRepository statusEvents, OutboxRepository outbox,
+                                                   MetricsRecorder metrics, Clock clock) {
+        return new OnboardCustomerService(tx, tenants, customers, accounts, statusEvents, outbox, metrics, clock);
     }
 
     @Bean
@@ -77,9 +83,17 @@ class UseCaseConfig {
     MoveMoneyUseCase moveMoneyUseCase(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
                                       TransactionJournal journal, OutboxRepository outbox, PixDetailRepository pixDetails,
                                       BackingAccountRepository backing, BackingRouter backingRouter,
+                                      AccountBlockRepository blocks, JudicialTransferRepository judicial,
                                       MetricsRecorder metrics, Clock clock) {
-        return new MoveMoneyService(tx, accounts, ledger, journal, outbox, pixDetails, backing, backingRouter, metrics,
-                clock);
+        return new MoveMoneyService(tx, accounts, ledger, journal, outbox, pixDetails, backing, backingRouter, blocks,
+                judicial, metrics, clock);
+    }
+
+    @Bean
+    AccountControlUseCase accountControlUseCase(TransactionRunner tx, AccountRepository accounts,
+                                                AccountBlockRepository blocks, AccountStatusEventRepository statusEvents,
+                                                JudicialTransferRepository judicial, Clock clock) {
+        return new AccountControlService(tx, accounts, blocks, statusEvents, judicial, clock);
     }
 
     @Bean
@@ -91,8 +105,8 @@ class UseCaseConfig {
 
     @Bean
     QueryAccountUseCase queryAccountUseCase(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
-                                            PixDetailRepository pixDetails) {
-        return new QueryAccountService(tx, accounts, ledger, pixDetails);
+                                            PixDetailRepository pixDetails, AccountBlockRepository blocks) {
+        return new QueryAccountService(tx, accounts, ledger, pixDetails, blocks);
     }
 
     @Bean
@@ -114,7 +128,8 @@ class UseCaseConfig {
 
     @Bean
     ProvisionTenantUseCase provisionTenantUseCase(TransactionRunner tx, TenantRepository tenants,
-                                                  BackingAccountRepository backing, SecretHasher hasher, Clock clock) {
-        return new ProvisionTenantService(tx, tenants, backing, hasher, clock);
+                                                  BackingAccountRepository backing, AccountRepository accounts,
+                                                  SecretHasher hasher, Clock clock) {
+        return new ProvisionTenantService(tx, tenants, backing, accounts, hasher, clock);
     }
 }
