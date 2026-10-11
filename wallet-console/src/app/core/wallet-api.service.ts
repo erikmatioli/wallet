@@ -2,6 +2,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
+  AccountBlock,
   AccountDetailResponse,
   AccountListResponse,
   AccountResponse,
@@ -9,14 +10,20 @@ import {
   BackingAccount,
   BackingStatementResponse,
   BalanceResponse,
+  BlockRequest,
+  CloseReason,
   CreateScheduleRequest,
+  JudicialTedRequest,
+  JudicialTransferRequest,
   MoneyMovementRequest,
   OnboardCustomerRequest,
   OnboardCustomerResponse,
+  PendingTransit,
   PositionsResponse,
   RegisterBackingAccountRequest,
   ScheduleResponse,
   StatementResponse,
+  TimelineItem,
   TransactionResponse,
   TransferRequest,
   TreasuryTransferRequest,
@@ -142,6 +149,40 @@ export class WalletApiService {
 
   treasuryTransfer(request: TreasuryTransferRequest, idempotencyKey: string): Observable<TransactionResponse> {
     return this.http.post<TransactionResponse>('/v1/treasury/transfers', request, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    });
+  }
+
+  // ---------------------------------------------------------------- blocks and closing (ADR-013 of the core)
+
+  blockAccount(accountId: string, request: BlockRequest): Observable<AccountBlock> {
+    return this.http.post<AccountBlock>(`/v1/accounts/${accountId}/blocks`, request);
+  }
+
+  releaseBlock(accountId: string, blockId: string, operator: string, note: string): Observable<AccountBlock> {
+    return this.http.post<AccountBlock>(`/v1/accounts/${accountId}/blocks/${blockId}/release`, { operator, note });
+  }
+
+  accountTimeline(accountId: string): Observable<{ items: TimelineItem[] }> {
+    return this.http.get<{ items: TimelineItem[] }>(`/v1/accounts/${accountId}/timeline`);
+  }
+
+  judicialTransfer(accountId: string, request: JudicialTransferRequest, idempotencyKey: string): Observable<TransactionResponse> {
+    return this.http.post<TransactionResponse>(`/v1/accounts/${accountId}/judicial-transfers`, request, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    });
+  }
+
+  closeAccount(accountId: string, reason: CloseReason, operator: string, note?: string): Observable<AccountDetailResponse> {
+    return this.http.post<AccountDetailResponse>(`/v1/accounts/${accountId}/close`, { reason, operator, note });
+  }
+
+  pendingJudicialTransit(): Observable<{ items: PendingTransit[] }> {
+    return this.http.get<{ items: PendingTransit[] }>('/v1/judicial-transit/pending');
+  }
+
+  judicialTed(transferId: string, request: JudicialTedRequest, idempotencyKey: string): Observable<TransactionResponse> {
+    return this.http.post<TransactionResponse>(`/v1/judicial-transit/${transferId}/teds`, request, {
       headers: { 'Idempotency-Key': idempotencyKey },
     });
   }

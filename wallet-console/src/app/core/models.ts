@@ -39,6 +39,99 @@ export interface AccountDetailResponse extends AccountResponse {
   customerId: string;
   /** Where the customer's app sends login codes (wallet-app ADR-003); absent when none was registered. */
   customerEmail?: string | null;
+  /** ADR-013: when the account was closed; absent while active. */
+  closedAt?: string | null;
+  /** What the active blocks let the account do now. */
+  canReceive: boolean;
+  canPay: boolean;
+  /** The active blocks, newest first. */
+  blocks: AccountBlock[];
+}
+
+// ---------------------------------------------------------------- blocks and closing (ADR-013 of the core)
+
+export type BlockType = 'FRAUD' | 'ADMINISTRATIVE' | 'JUDICIAL';
+export type BlockReason =
+  | 'FRAUD_SUSPICION'
+  | 'CUSTOMER_REQUEST'
+  | 'REGISTRATION_PENDING'
+  | 'INSTITUTION_DECISION'
+  | 'COURT_ORDER'
+  | 'OTHER';
+export type CloseReason = 'CUSTOMER_REQUEST' | 'INSTITUTION_DECISION' | 'DEATH' | 'OTHER';
+
+export interface CourtOrder {
+  process: string;
+  protocol?: string | null;
+}
+
+/** Who did it: the operator the console declared, and the token's client. */
+export interface Actor {
+  operator: string;
+  clientId: string;
+}
+
+export interface AccountBlock {
+  id: string;
+  accountId: string;
+  type: BlockType;
+  reason: BlockReason;
+  note: string | null;
+  court: CourtOrder | null;
+  createdBy: Actor;
+  createdAt: string;
+  active: boolean;
+  releasedBy: Actor | null;
+  releasedAt: string | null;
+  releaseNote: string | null;
+}
+
+export interface BlockRequest {
+  type: BlockType;
+  reason: BlockReason;
+  operator: string;
+  court?: CourtOrder;
+  note?: string;
+}
+
+export interface TimelineItem {
+  kind: 'OPENED' | 'CLOSED' | 'BLOCKED' | 'RELEASED';
+  at: string;
+  actor: Actor;
+  reason: string | null;
+  note: string | null;
+  blockId: string | null;
+  blockType: BlockType | null;
+  court: CourtOrder | null;
+}
+
+export interface JudicialTransferRequest {
+  blockId: string;
+  amount: number;
+  destination:
+    | { kind: 'JUDICIAL_TRANSIT' }
+    | { kind: 'ACCOUNT'; accountId?: string; branch?: string; number?: string; checkDigit?: string };
+  operator: string;
+  note?: string;
+}
+
+export interface PendingTransit {
+  transferId: string;
+  accountId: string;
+  process: string;
+  protocol: string | null;
+  amount: number;
+  sent: number;
+  remaining: number;
+  occurredAt: string;
+}
+
+export interface JudicialTedRequest {
+  backingAccountId: string;
+  amount: number;
+  document: string;
+  operator: string;
+  note?: string;
 }
 
 export interface OnboardCustomerRequest {
@@ -82,7 +175,9 @@ export type TransactionType =
   | 'PIX_RETURN_IN'
   | 'PIX_RETURN_OUT'
   | 'TREASURY_TRANSFER'
-  | 'RECLASSIFICATION';
+  | 'RECLASSIFICATION'
+  | 'JUDICIAL_TRANSFER'
+  | 'JUDICIAL_TRANSIT_OUT';
 
 export interface TransactionResponse {
   id: string;
@@ -176,6 +271,8 @@ export interface AccountListItem {
   balance: number;
   currency: string;
   createdAt: string;
+  canReceive: boolean;
+  canPay: boolean;
 }
 
 export interface AccountListResponse {

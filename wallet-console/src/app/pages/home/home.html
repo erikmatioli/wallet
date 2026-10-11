@@ -67,7 +67,7 @@
             <td>{{ i.customerName }}</td>
             <td>{{ i.documentMasked }}</td>
             <td>{{ i.accountFormatted }}</td>
-            <td><span class="badge" [class.ok]="i.status === 'ACTIVE'" [class.bad]="i.status !== 'ACTIVE'">{{ i.status }}</span></td>
+            <td><span class="badge" [class.ok]="situation(i) === 'Ativa'" [class.bad]="situation(i) !== 'Ativa'">{{ situation(i) }}</span></td>
             <td>{{ i.balance | number: '1.2-2' }} {{ i.currency }}</td>
           </tr>
         } @empty {

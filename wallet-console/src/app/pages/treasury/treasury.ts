@@ -9,6 +9,7 @@ import { BackingEntry, BackingPosition, BackingType, UncoveredDay } from '../../
 import { BACKING_TYPE_LABELS, REGISTRABLE_TYPES, dayLabelBr, daysBefore, lastClosedDay } from '../../core/treasury';
 import { transactionLabel } from '../../core/transaction-labels';
 import { ProblemBanner } from '../../shared/problem-banner/problem-banner';
+import { JudicialTransit } from './judicial-transit';
 
 /**
  * The treasury (ADR-011 of wallet-core): where the money that backs the customers should be, how much a deposit
@@ -17,7 +18,7 @@ import { ProblemBanner } from '../../shared/problem-banner/problem-banner';
  */
 @Component({
   selector: 'app-treasury',
-  imports: [FormsModule, RouterLink, DecimalPipe, DatePipe, ProblemBanner],
+  imports: [FormsModule, RouterLink, DecimalPipe, DatePipe, ProblemBanner, JudicialTransit],
   templateUrl: './treasury.html',
   styleUrl: './treasury.scss',
 })
@@ -111,9 +112,16 @@ export class TreasuryPage implements OnInit {
 
   /** Who or what is on the other side of a movement of this place. */
   other(e: BackingEntry): string {
+    if (e.type === 'JUDICIAL_TRANSIT_OUT') return 'Depósito judicial (TED)';
     if (e.customerName) return e.customerAccount ? `${e.customerName} · ${e.customerAccount}` : e.customerName;
     if (e.otherBackingAccount) return `${e.direction === 'IN' ? 'de' : 'para'} ${e.otherBackingAccount.name}`;
     return '—';
+  }
+
+  /** A TED of a judicial deposit was recorded: the place it left from changed. */
+  judicialTedRecorded(message: string): void {
+    this.success.set(message);
+    this.reload();
   }
 
   setMode(mode: 'coverage' | 'rebalance'): void {
