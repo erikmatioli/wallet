@@ -6,6 +6,7 @@ import { AuthService } from '../../core/auth.service';
 import { WalletApiService } from '../../core/wallet-api.service';
 import { extractErrorMessage } from '../../core/http-error.util';
 import { AccountListItem } from '../../core/models';
+import { accountSituation } from '../../core/account-control';
 import { ProblemBanner } from '../../shared/problem-banner/problem-banner';
 
 @Component({
@@ -32,6 +33,7 @@ export class Home implements OnInit {
 
   /** The treasury (ADR-011 of wallet-core) is read with ledger:audit. */
   readonly canSeeTreasury: boolean;
+  protected readonly situation = accountSituation;
 
   constructor(
     private readonly api: WalletApiService,

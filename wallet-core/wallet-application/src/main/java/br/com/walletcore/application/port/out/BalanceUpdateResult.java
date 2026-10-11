@@ -17,5 +17,7 @@ public sealed interface BalanceUpdateResult {
     record Rejected(Reason reason) implements BalanceUpdateResult {
     }
 
-    enum Reason { ACCOUNT_NOT_FOUND, ACCOUNT_NOT_ACTIVE, INSUFFICIENT_FUNDS }
+    /** {@code ACCOUNT_NOT_ACTIVE} is a closed account; {@code ACCOUNT_BLOCKED}, one whose blocks refuse this movement. */
+    /** {@code ACCOUNT_NOT_ACTIVE} is a closed account; {@code ACCOUNT_BLOCKED}, one whose blocks refuse the movement. */
+    enum Reason { ACCOUNT_NOT_FOUND, ACCOUNT_NOT_ACTIVE, ACCOUNT_BLOCKED, INSUFFICIENT_FUNDS }
 }

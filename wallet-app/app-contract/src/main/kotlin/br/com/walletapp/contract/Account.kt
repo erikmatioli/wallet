@@ -5,7 +5,13 @@ import kotlinx.serialization.Serializable
 // Money is always in cents (Long) in the contract, never a floating point number (ADR-001, decision 6).
 // Instants are ISO-8601 strings (e.g. "2026-10-07T15:00:00Z").
 
-/** `GET /app/v1/me`: the logged-in customer's account. */
+/**
+ * `GET /app/v1/me`: the logged-in customer's account.
+ *
+ * @property canPay whether the account may pay now: false under any block of wallet-core's ADR-013 (the app hides
+ *   the payment actions and says why)
+ * @property canReceive whether it may receive: false only under a total (administrative) block
+ */
 @Serializable
 data class Me(
     val customerName: String,
@@ -14,6 +20,8 @@ data class Me(
     val checkDigit: String,
     val status: String,
     val balanceCents: Long,
+    val canPay: Boolean = true,
+    val canReceive: Boolean = true,
 )
 
 /** `GET /app/v1/statement?before=&limit=`: newest first; [nextBefore] is the cursor of the next page, or null. */

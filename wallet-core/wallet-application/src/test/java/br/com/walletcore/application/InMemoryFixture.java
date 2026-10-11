@@ -1,6 +1,9 @@
 package br.com.walletcore.application;
 
+import br.com.walletcore.application.port.out.AccountBlockRepository;
 import br.com.walletcore.application.port.out.AccountRepository;
+import br.com.walletcore.application.port.out.AccountStatusEventRepository;
+import br.com.walletcore.application.port.out.JudicialTransferRepository;
 import br.com.walletcore.application.port.out.AccountRepository.AccountDirectoryItem;
 import br.com.walletcore.application.port.out.AccountRepository.AccountHolder;
 import br.com.walletcore.application.port.out.BackingAccountRepository;
@@ -12,6 +15,7 @@ import br.com.walletcore.application.port.out.PixDetailRepository;
 import br.com.walletcore.application.port.out.StoredTransaction;
 import br.com.walletcore.application.port.out.TransactionJournal;
 import br.com.walletcore.application.port.out.TransactionRunner;
+import br.com.walletcore.application.service.AccountControlService;
 import br.com.walletcore.application.service.AuditLedgerService;
 import br.com.walletcore.application.service.BalanceHistoryService;
 import br.com.walletcore.application.service.MoveMoneyService;
@@ -20,6 +24,10 @@ import br.com.walletcore.application.service.BackingRouter;
 import br.com.walletcore.application.service.ClosingBalances;
 import br.com.walletcore.application.service.TreasuryService;
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.account.AccountBlock;
+import br.com.walletcore.domain.account.AccountPolicy;
+import br.com.walletcore.domain.account.AccountStatusEvent;
+import br.com.walletcore.domain.account.Actor;
 import br.com.walletcore.domain.account.AccountType;
 import br.com.walletcore.domain.account.PaymentAccountNumber;
 import br.com.walletcore.domain.backing.BackingAccount;
@@ -34,6 +42,7 @@ import br.com.walletcore.domain.ledger.TransactionType;
 import br.com.walletcore.domain.pix.PixDetail;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.BackingAccountId;
+import br.com.walletcore.domain.shared.BlockId;
 import br.com.walletcore.domain.shared.CustomerId;
 import br.com.walletcore.domain.shared.Money;
 import br.com.walletcore.domain.shared.TenantId;
@@ -179,7 +188,7 @@ final class InMemoryFixture {
 
         @Override
         public BalanceUpdateResult applyDelta(TenantId tenantId, AccountId accountId, Account.Kind kind, long delta,
-                                              Instant occurredAt) {
+                                              Instant occurredAt, AccountPolicy.Gate gate) {
             Account a = accounts.get(accountId);
             if (a == null || a.kind() != kind) {
                 return new BalanceUpdateResult.Rejected(BalanceUpdateResult.Reason.ACCOUNT_NOT_FOUND);
@@ -187,15 +196,142 @@ final class InMemoryFixture {
             if (!a.isActive()) {
                 return new BalanceUpdateResult.Rejected(BalanceUpdateResult.Reason.ACCOUNT_NOT_ACTIVE);
             }
+            if (!gate.admits(a.policy(), delta)) {
+                return new BalanceUpdateResult.Rejected(BalanceUpdateResult.Reason.ACCOUNT_BLOCKED);
+            }
             long updated = a.balance().cents() + delta;
             if (!a.allowNegativeBalance() && updated < 0) {
                 return new BalanceUpdateResult.Rejected(BalanceUpdateResult.Reason.INSUFFICIENT_FUNDS);
             }
             accounts.put(accountId, new Account(a.id(), a.tenantId(), a.kind(), a.customerId(), a.number(), a.status(),
-                    a.allowNegativeBalance(), Money.ofCents(updated), a.version() + 1, a.createdAt()));
+                    a.allowNegativeBalance(), Money.ofCents(updated), a.version() + 1, a.createdAt(), a.policy(),
+                    a.closedAt()));
             // Same rule as the SQL: GREATEST(last_occurred_at, occurredAt) - dates never go back (ADR-012).
             Instant effective = lastOccurredAt.merge(accountId, occurredAt, (old, now) -> old.isAfter(now) ? old : now);
             return new BalanceUpdateResult.Applied(Money.ofCents(updated), a.version() + 1, effective);
+        }
+
+        @Override
+        public Optional<Account> lockForUpdate(TenantId tenantId, AccountId accountId) {
+            return findById(tenantId, accountId);
+        }
+
+        @Override
+        public void updatePolicy(TenantId tenantId, AccountId accountId, AccountPolicy policy) {
+            Account a = accounts.get(accountId);
+            accounts.put(accountId, new Account(a.id(), a.tenantId(), a.kind(), a.customerId(), a.number(), a.status(),
+                    a.allowNegativeBalance(), a.balance(), a.version(), a.createdAt(), policy, a.closedAt()));
+        }
+
+        @Override
+        public void close(TenantId tenantId, AccountId accountId, Instant closedAt) {
+            Account a = accounts.get(accountId);
+            accounts.put(accountId, new Account(a.id(), a.tenantId(), a.kind(), a.customerId(), a.number(),
+                    Account.Status.CLOSED, a.allowNegativeBalance(), a.balance(), a.version(), a.createdAt(), a.policy(),
+                    closedAt));
+        }
+
+        @Override
+        public Optional<AccountId> findJudicialTransit(TenantId tenantId) {
+            return accounts.values().stream().filter(a -> a.kind() == Account.Kind.JUDICIAL_TRANSIT).map(Account::id)
+                    .findFirst();
+        }
+    };
+
+    final Map<BlockId, AccountBlock> blocks = new LinkedHashMap<>();
+
+    final AccountBlockRepository blockRepository = new AccountBlockRepository() {
+        @Override
+        public void insert(AccountBlock block) {
+            blocks.put(block.id(), block);
+        }
+
+        @Override
+        public Optional<AccountBlock> findById(TenantId tenantId, BlockId id) {
+            return Optional.ofNullable(blocks.get(id));
+        }
+
+        @Override
+        public List<AccountBlock> findByAccount(TenantId tenantId, AccountId accountId, boolean activeOnly) {
+            List<AccountBlock> found = new ArrayList<>(blocks.values().stream()
+                    .filter(b -> b.accountId().equals(accountId) && (!activeOnly || b.isActive())).toList());
+            java.util.Collections.reverse(found); // newest first, as the SQL orders them
+            return found;
+        }
+
+        @Override
+        public void markReleased(AccountBlock released) {
+            if (!blocks.get(released.id()).isActive()) {
+                throw new IllegalStateException("block was not active");
+            }
+            blocks.put(released.id(), released);
+        }
+    };
+
+    final List<AccountStatusEvent> statusEvents = new ArrayList<>();
+
+    final AccountStatusEventRepository statusEventRepository = new AccountStatusEventRepository() {
+        @Override
+        public void append(TenantId tenantId, AccountStatusEvent e) {
+            statusEvents.add(new AccountStatusEvent(statusEvents.size() + 1, e.accountId(), e.from(), e.to(),
+                    e.occurredAt(), e.actor(), e.reason(), e.note()));
+        }
+
+        @Override
+        public List<AccountStatusEvent> findByAccount(TenantId tenantId, AccountId accountId) {
+            return statusEvents.stream().filter(e -> e.accountId().equals(accountId)).toList();
+        }
+
+        @Override
+        public List<CcsAccountEvent> findAfter(TenantId tenantId, long afterSeq, int limit) {
+            return statusEvents.stream().filter(e -> e.seq() > afterSeq).limit(limit)
+                    .map(e -> new CcsAccountEvent(e.seq(), e.accountId(),
+                            e.isOpening() ? CcsAccountEvent.Kind.OPENED : CcsAccountEvent.Kind.CLOSED, e.occurredAt(),
+                            "Test Customer", "CPF", String.valueOf(taxIdsByAccount.get(e.accountId())), "12345678",
+                            "0001", accounts.get(e.accountId()).number().number(),
+                            accounts.get(e.accountId()).number().checkDigit(), "TRAN"))
+                    .toList();
+        }
+    };
+
+    final Map<TransactionId, JudicialTransferRepository.Detail> judicialDetails = new LinkedHashMap<>();
+
+    final JudicialTransferRepository judicialRepository = new JudicialTransferRepository() {
+        @Override
+        public void insert(TenantId tenantId, Detail detail) {
+            judicialDetails.put(detail.transactionId(), detail);
+        }
+
+        @Override
+        public Optional<Detail> findByTransaction(TenantId tenantId, TransactionId transactionId) {
+            return Optional.ofNullable(judicialDetails.get(transactionId));
+        }
+
+        @Override
+        public void lock(TenantId tenantId, TransactionId transferId) {
+            // single-threaded fixture: nothing to serialize
+        }
+
+        @Override
+        public long sumSent(TenantId tenantId, TransactionId transferId) {
+            return judicialDetails.values().stream()
+                    .filter(d -> d.kind() == Kind.TRANSIT_OUT && transferId.equals(d.related()))
+                    .mapToLong(d -> amountOf(d.transactionId())).sum();
+        }
+
+        @Override
+        public List<PendingTransit> findPendingTransit(TenantId tenantId) {
+            return judicialDetails.values().stream()
+                    .filter(d -> d.kind() == Kind.TRANSFER && d.toTransit())
+                    .map(d -> new PendingTransit(d.transactionId(), d.accountId(), d.process(), d.protocol(),
+                            Money.ofCents(amountOf(d.transactionId())),
+                            Money.ofCents(sumSent(tenantId, d.transactionId())), clock.instant()))
+                    .filter(p -> p.remaining().isPositive())
+                    .toList();
+        }
+
+        private long amountOf(TransactionId id) {
+            return journal.values().stream().filter(t -> t.id().equals(id)).mapToLong(t -> t.amount().cents()).sum();
         }
     };
 
@@ -397,9 +533,12 @@ final class InMemoryFixture {
     };
 
     final MoveMoneyService moveMoney = new MoveMoneyService(runner, accountRepository, ledgerRepository,
-            transactionJournal, outbox, pixDetailRepository, backingRepository, router, metrics, clock);
+            transactionJournal, outbox, pixDetailRepository, backingRepository, router, blockRepository,
+            judicialRepository, metrics, clock);
     final QueryAccountService query = new QueryAccountService(runner, accountRepository, ledgerRepository,
-            pixDetailRepository);
+            pixDetailRepository, blockRepository);
+    final AccountControlService control = new AccountControlService(runner, accountRepository, blockRepository,
+            statusEventRepository, judicialRepository, clock);
     final AuditLedgerService audit = new AuditLedgerService(runner, accountRepository, ledgerRepository, metrics);
     final ClosingBalances closings = new ClosingBalances(ledgerRepository, clock, java.time.Duration.ofMinutes(1));
     final BalanceHistoryService balanceHistory = new BalanceHistoryService(runner, accountRepository, closings);
@@ -417,6 +556,29 @@ final class InMemoryFixture {
                 backingRepository.insert(BackingAccount.openDefault(tenant, type, clock.instant()), shards);
             }
         }
+        accountRepository.insert(Account.openJudicialTransit(tenant, clock.instant()));
+    }
+
+    /** Who the tests say did it: the operator "maria" with the tenant's token. */
+    final Actor operator = new Actor("maria", "demo-tenant");
+
+    /** Every ADR-013 scope, as the default tenant has them. */
+    static final Set<String> ALL_SCOPES = Set.of("accounts:block", "accounts:judicial", "accounts:close");
+
+    AccountBlock block(Account account, AccountBlock.Type type) {
+        AccountBlock.Reason reason = switch (type) {
+            case FRAUD -> AccountBlock.Reason.FRAUD_SUSPICION;
+            case ADMINISTRATIVE -> AccountBlock.Reason.INSTITUTION_DECISION;
+            case JUDICIAL -> AccountBlock.Reason.COURT_ORDER;
+        };
+        AccountBlock.CourtOrder court = type == AccountBlock.Type.JUDICIAL
+                ? new AccountBlock.CourtOrder("0001234-56.2026.8.26.0100", "SISBAJUD 20261011000123") : null;
+        return control.block(new br.com.walletcore.application.port.in.AccountControlUseCase.BlockCommand(tenant,
+                account.id(), type, reason, null, court, operator, ALL_SCOPES));
+    }
+
+    AccountId judicialTransit() {
+        return accountRepository.findJudicialTransit(tenant).orElseThrow();
     }
 
     BackingAccountId backing(BackingType type) {
@@ -442,10 +604,11 @@ final class InMemoryFixture {
         return account;
     }
 
-    /** Replaces the stored account with the same one in another status (BLOCKED, CLOSED). */
+    /** Replaces the stored account with the same one in another status (CLOSED). */
     Account withStatus(Account a, Account.Status status) {
         Account changed = new Account(a.id(), a.tenantId(), a.kind(), a.customerId(), a.number(), status,
-                a.allowNegativeBalance(), a.balance(), a.version(), a.createdAt());
+                a.allowNegativeBalance(), a.balance(), a.version(), a.createdAt(), a.policy(),
+                status == Account.Status.CLOSED ? clock.instant() : null);
         accounts.put(a.id(), changed);
         return changed;
     }

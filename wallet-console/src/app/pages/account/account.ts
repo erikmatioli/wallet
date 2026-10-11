@@ -10,6 +10,8 @@ import { counterpartyName, transactionLabel } from '../../core/transaction-label
 import { brasiliaToday } from '../../core/schedule-labels';
 import { EntryDetail } from './entry-detail/entry-detail';
 import { AccountSchedules } from './schedules/account-schedules';
+import { AccountControl } from './control/account-control';
+import { accountSituation } from '../../core/account-control';
 import { ProblemBanner } from '../../shared/problem-banner/problem-banner';
 import { dayLabel, statementDays } from '../../core/statement-days';
 
@@ -17,7 +19,7 @@ type TransferMethod = 'id' | 'number';
 
 @Component({
   selector: 'app-account',
-  imports: [FormsModule, RouterLink, DecimalPipe, DatePipe, ProblemBanner, EntryDetail, AccountSchedules],
+  imports: [FormsModule, RouterLink, DecimalPipe, DatePipe, ProblemBanner, EntryDetail, AccountSchedules, AccountControl],
   templateUrl: './account.html',
   styleUrl: './account.scss',
 })
@@ -114,6 +116,8 @@ export class AccountPage implements OnInit {
     this.loadStatement(true);
   }
 
+  protected readonly situation = accountSituation;
+
   typeLabel(type: string): string {
     return transactionLabel(type);
   }
@@ -130,7 +134,7 @@ export class AccountPage implements OnInit {
     action();
   }
 
-  private afterMutation(message: string): void {
+  protected afterMutation(message: string): void {
     this.notice.set(message);
     this.busy.set(false);
     this.loadAccount();

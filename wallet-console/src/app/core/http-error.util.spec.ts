@@ -5,9 +5,19 @@ describe('extractErrorMessage', () => {
   it('prefers detail + code from a wallet-core problem+json body', () => {
     const err = new HttpErrorResponse({
       status: 422,
-      error: { title: 'Unprocessable Entity', detail: 'account has insufficient funds', code: 'INSUFFICIENT_FUNDS' },
+      error: { title: 'Unprocessable Entity', detail: 'this Pix was already refunded', code: 'PIX_ALREADY_REFUNDED' },
     });
-    expect(extractErrorMessage(err)).toBe('account has insufficient funds (INSUFFICIENT_FUNDS)');
+    expect(extractErrorMessage(err)).toBe('this Pix was already refunded (PIX_ALREADY_REFUNDED)');
+  });
+
+  it("says the operator's refusals in Portuguese, keeping the code", () => {
+    const err = new HttpErrorResponse({
+      status: 422,
+      error: { detail: 'the court order must be carried out first', code: 'JUDICIAL_BLOCK_ACTIVE' },
+    });
+    expect(extractErrorMessage(err)).toBe(
+      'Há um bloqueio judicial ativo: cumpra ou libere a ordem antes de encerrar. (JUDICIAL_BLOCK_ACTIVE)',
+    );
   });
 
   it('falls back to title when detail is missing', () => {

@@ -45,6 +45,7 @@ object Format {
         "PIX_REFUND" -> "Estorno de Pix"
         "PIX_RETURN_IN" -> "Devolução recebida"
         "PIX_RETURN_OUT" -> "Devolução enviada"
+        "JUDICIAL_TRANSFER" -> "Transferência por ordem judicial"
         else -> type
     }
 

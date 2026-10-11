@@ -134,11 +134,24 @@ class AuthService(
         val existing = logins.find(cpf)
         if (existing != null && existing.canLogIn) {
             checkCode(otp.verify(challengeId, cpf, code, null))
-            return session(existing)
+            return session(requireOpen(existing))
         }
         val customer = consoleCustomer(cpf) ?: throw wrongCode()
         checkCode(otp.verify(challengeId, cpf, code, null))
-        return session(link(cpf, customer, existing))
+        return session(requireOpen(link(cpf, customer, existing)))
+    }
+
+    /**
+     * A closed account (wallet-core's ADR-013) has nothing left to show or move: the login is refused, and only
+     * after the code - whoever does not own the CPF learns nothing. A blocked account still logs in: the customer
+     * sees the balance and why it cannot pay.
+     */
+    private fun requireOpen(login: CustomerLogin): CustomerLogin {
+        val accountId = login.accountId ?: return login
+        if (core.me(accountId).status == "CLOSED") {
+            throw BusinessRuleException("ACCOUNT_CLOSED", CustomerMessages.of("ACCOUNT_CLOSED"))
+        }
+        return login
     }
 
     /** A wallet-core customer the app can send a code to: with an email and a payment account. */

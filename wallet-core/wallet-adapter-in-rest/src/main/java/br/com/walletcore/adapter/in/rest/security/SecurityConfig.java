@@ -51,6 +51,17 @@ class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/v1/customers/*/email").hasAuthority("SCOPE_customers:write")
                         .requestMatchers(HttpMethod.GET, "/v1/customers/contact").hasAuthority("SCOPE_accounts:read")
                         .requestMatchers(HttpMethod.GET, "/v1/accounts/*/audit").hasAuthority("SCOPE_ledger:audit")
+                        // ADR-013: whoever moves money is not whoever blocks it. Creating and releasing a block needs
+                        // the scope of its type (the service checks which), the judicial transfer and its TED the
+                        // judicial one, the closing its own; the CCS feed carries full documents, so its own scope too.
+                        .requestMatchers(HttpMethod.POST, "/v1/accounts/*/blocks", "/v1/accounts/*/blocks/*/release")
+                        .hasAnyAuthority("SCOPE_accounts:block", "SCOPE_accounts:judicial")
+                        .requestMatchers(HttpMethod.POST, "/v1/accounts/*/judicial-transfers", "/v1/judicial-transit/*/teds")
+                        .hasAuthority("SCOPE_accounts:judicial")
+                        .requestMatchers(HttpMethod.GET, "/v1/judicial-transit/**")
+                        .hasAnyAuthority("SCOPE_accounts:judicial", "SCOPE_ledger:audit")
+                        .requestMatchers(HttpMethod.POST, "/v1/accounts/*/close").hasAuthority("SCOPE_accounts:close")
+                        .requestMatchers(HttpMethod.GET, "/v1/ccs/**").hasAuthority("SCOPE_ccs:read")
                         // Treasury (ADR-011): reading is auditing the ledger; moving money between backing accounts
                         // and registering them is treasury:write - who creates money (a deposit) is not who covers it.
                         .requestMatchers(HttpMethod.GET, "/v1/treasury/**").hasAuthority("SCOPE_ledger:audit")

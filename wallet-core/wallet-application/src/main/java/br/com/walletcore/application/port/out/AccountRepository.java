@@ -1,6 +1,7 @@
 package br.com.walletcore.application.port.out;
 
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.account.AccountPolicy;
 import br.com.walletcore.domain.customer.Customer;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.TenantId;
@@ -69,12 +70,25 @@ public interface AccountRepository {
     /**
      * Atomically adds {@code deltaCents} to the balance, locking the row until the surrounding
      * transaction ends. The change is only applied if the account exists, has the expected kind,
-     * is ACTIVE and (unless it may overdraw) the resulting balance stays non-negative. The check
-     * and the update are a single statement, so concurrent movements can never overdraw.
+     * is ACTIVE, its policy for the direction of the change is one the {@code gate} admits (ADR-013) and
+     * (unless it may overdraw) the resulting balance stays non-negative. The check and the update are a
+     * single statement, so concurrent movements can never overdraw nor slip past a block.
      *
      * @param occurredAt the posting's clock; the result carries the date the entry must use, never earlier
      *                   than the account's previous entry (ADR-012)
      */
     BalanceUpdateResult applyDelta(TenantId tenantId, AccountId accountId, Account.Kind expectedKind, long deltaCents,
-                                   Instant occurredAt);
+                                   Instant occurredAt, AccountPolicy.Gate gate);
+
+    /** The account, its row locked until the transaction ends: a block, a release or the closing take it first. */
+    Optional<Account> lockForUpdate(TenantId tenantId, AccountId accountId);
+
+    /** Rewrites what the account may do, from its active blocks (ADR-013). Never touches the ledger version. */
+    void updatePolicy(TenantId tenantId, AccountId accountId, AccountPolicy policy);
+
+    /** ACTIVE to CLOSED, for good. */
+    void close(TenantId tenantId, AccountId accountId, Instant closedAt);
+
+    /** The tenant's "depósitos judiciais a transferir" (ADR-013). */
+    Optional<AccountId> findJudicialTransit(TenantId tenantId);
 }

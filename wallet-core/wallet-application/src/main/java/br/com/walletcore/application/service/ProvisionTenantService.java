@@ -1,6 +1,7 @@
 package br.com.walletcore.application.service;
 
 import br.com.walletcore.application.port.in.ProvisionTenantUseCase;
+import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.BackingAccountRepository;
 import br.com.walletcore.application.port.out.SecretHasher;
 import br.com.walletcore.application.port.out.TenantRepository;
@@ -25,14 +26,16 @@ public final class ProvisionTenantService implements ProvisionTenantUseCase {
     private final TransactionRunner tx;
     private final TenantRepository tenants;
     private final BackingAccountRepository backing;
+    private final AccountRepository accounts;
     private final SecretHasher hasher;
     private final Clock clock;
 
     public ProvisionTenantService(TransactionRunner tx, TenantRepository tenants, BackingAccountRepository backing,
-                                  SecretHasher hasher, Clock clock) {
+                                  AccountRepository accounts, SecretHasher hasher, Clock clock) {
         this.tx = tx;
         this.tenants = tenants;
         this.backing = backing;
+        this.accounts = accounts;
         this.hasher = hasher;
         this.clock = clock;
     }
@@ -64,6 +67,8 @@ public final class ProvisionTenantService implements ProvisionTenantUseCase {
                     backing.insert(BackingAccount.openDefault(tenant.id(), type, now), shards);
                 }
             }
+            // "Depósitos judiciais a transferir" (ADR-013): judicial transfers are rare, one row is enough.
+            accounts.insert(Account.openJudicialTransit(tenant.id(), now));
             return tenant;
         });
     }

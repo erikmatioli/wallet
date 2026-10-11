@@ -2,12 +2,15 @@ package br.com.walletcore.application.service;
 
 import br.com.walletcore.application.port.in.OnboardCustomerUseCase;
 import br.com.walletcore.application.port.out.AccountRepository;
+import br.com.walletcore.application.port.out.AccountStatusEventRepository;
 import br.com.walletcore.application.port.out.CustomerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
 import br.com.walletcore.application.port.out.OutboxRepository;
 import br.com.walletcore.application.port.out.TenantRepository;
 import br.com.walletcore.application.port.out.TransactionRunner;
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.account.AccountStatusEvent;
+import br.com.walletcore.domain.account.Actor;
 import br.com.walletcore.domain.account.AccountType;
 import br.com.walletcore.domain.account.PaymentAccountNumber;
 import br.com.walletcore.domain.customer.Customer;
@@ -28,17 +31,19 @@ public final class OnboardCustomerService implements OnboardCustomerUseCase {
     private final TenantRepository tenants;
     private final CustomerRepository customers;
     private final AccountRepository accounts;
+    private final AccountStatusEventRepository statusEvents;
     private final OutboxRepository outbox;
     private final MetricsRecorder metrics;
     private final Clock clock;
 
     public OnboardCustomerService(TransactionRunner tx, TenantRepository tenants, CustomerRepository customers,
-                                  AccountRepository accounts, OutboxRepository outbox, MetricsRecorder metrics,
-                                  Clock clock) {
+                                  AccountRepository accounts, AccountStatusEventRepository statusEvents,
+                                  OutboxRepository outbox, MetricsRecorder metrics, Clock clock) {
         this.tx = tx;
         this.tenants = tenants;
         this.customers = customers;
         this.accounts = accounts;
+        this.statusEvents = statusEvents;
         this.outbox = outbox;
         this.metrics = metrics;
         this.clock = clock;
@@ -64,6 +69,9 @@ public final class OnboardCustomerService implements OnboardCustomerUseCase {
 
             customers.insert(customer);
             accounts.insert(account);
+            // The start of the relationship, for the CCS (ADR-013): same transaction as the account.
+            statusEvents.append(c.tenantId(), new AccountStatusEvent(0, account.id(), null, Account.Status.ACTIVE, now,
+                    Actor.system(tenant.clientId()), null, null));
             outbox.enqueue(List.of(new CustomerOnboarded(
                     UuidV7.next(), c.tenantId().value(), customer.id().value(), account.id().value(),
                     taxId.type().name(), number.branch(), number.number(), number.checkDigit(),

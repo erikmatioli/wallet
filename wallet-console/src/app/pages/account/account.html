@@ -12,7 +12,7 @@
         <h1>{{ acc.customerName }}</h1>
         <span class="hint">
           {{ acc.documentMasked }} · {{ acc.formatted }} · {{ acc.type }} ·
-          <span class="badge" [class.ok]="acc.status === 'ACTIVE'" [class.bad]="acc.status !== 'ACTIVE'">{{ acc.status }}</span>
+          <span class="badge" [class.ok]="situation(acc) === 'Ativa'" [class.bad]="situation(acc) !== 'Ativa'">{{ situation(acc) }}</span>
         </span>
         @if (editingEmail()) {
           <form class="email-form" (ngSubmit)="saveEmail()">
@@ -93,8 +93,10 @@
 
   @if (account(); as acc) {
     <app-account-schedules [accountId]="acc.id" />
+    <app-account-control [account]="acc" (changed)="afterMutation($event)" />
   }
 
+  @if (account()?.status !== 'CLOSED') {
   <h2 class="section-title">Depósito</h2>
   <form class="card inline-form" (ngSubmit)="submitDeposit()">
     <label>
@@ -168,6 +170,7 @@
     </div>
     <button type="submit" [disabled]="busy()">Transferir</button>
   </form>
+  }
 
   <h2 class="section-title">Auditoria (replay do ledger)</h2>
   <div class="card">

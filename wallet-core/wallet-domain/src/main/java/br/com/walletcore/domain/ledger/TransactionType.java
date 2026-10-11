@@ -22,7 +22,11 @@ public enum TransactionType {
     /** The treasury moves money between two backing accounts (ADR-011): never touches a customer. */
     TREASURY_TRANSFER,
     /** One-off move of the settlement's balance to the backing accounts, when they were introduced (ADR-011). */
-    RECLASSIFICATION;
+    RECLASSIFICATION,
+    /** Money a court ordered out of a blocked account (ADR-013): to another customer or to the judicial transit. */
+    JUDICIAL_TRANSFER,
+    /** The treasury sent the TED of a judicial transfer: out of the judicial transit, from a backing account. */
+    JUDICIAL_TRANSIT_OUT;
 
     public boolean isPix() {
         return name().startsWith("PIX_");
@@ -33,7 +37,8 @@ public enum TransactionType {
         return switch (this) {
             case PIX_IN, PIX_REFUND, PIX_RETURN_IN -> true;
             case PIX_OUT, PIX_RETURN_OUT -> false;
-            case DEPOSIT, WITHDRAWAL, TRANSFER, TREASURY_TRANSFER, RECLASSIFICATION ->
+            case DEPOSIT, WITHDRAWAL, TRANSFER, TREASURY_TRANSFER, RECLASSIFICATION, JUDICIAL_TRANSFER,
+                 JUDICIAL_TRANSIT_OUT ->
                     throw new IllegalStateException(this + " has no fixed customer direction");
         };
     }

@@ -21,6 +21,15 @@ final class Sql {
         return rs.getObject(column, OffsetDateTime.class).toInstant();
     }
 
+    static Instant instantOrNull(ResultSet rs, String column) throws SQLException {
+        OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
+        return value == null ? null : value.toInstant();
+    }
+
+    static OffsetDateTime tsOrNull(Instant instant) {
+        return instant == null ? null : ts(instant);
+    }
+
     static UUID uuid(ResultSet rs, String column) throws SQLException {
         return rs.getObject(column, UUID.class);
     }

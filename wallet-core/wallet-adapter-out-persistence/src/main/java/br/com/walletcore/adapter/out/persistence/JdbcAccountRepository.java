@@ -5,6 +5,7 @@ import br.com.walletcore.application.port.out.AccountRepository.AccountDirectory
 import br.com.walletcore.application.port.out.AccountRepository.AccountHolder;
 import br.com.walletcore.application.port.out.BalanceUpdateResult;
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.account.AccountPolicy;
 import br.com.walletcore.domain.account.AccountType;
 import br.com.walletcore.domain.account.PaymentAccountNumber;
 import br.com.walletcore.domain.customer.Customer;
@@ -29,7 +30,7 @@ class JdbcAccountRepository implements AccountRepository {
 
     private static final String COLUMNS = """
             id, tenant_id, kind, customer_id, ispb, branch, account_number, check_digit, status,
-            allow_negative, balance_cents, version, created_at""";
+            allow_negative, balance_cents, version, created_at, credit_policy, debit_policy, closed_at""";
 
     private final JdbcClient jdbc;
 
@@ -106,6 +107,7 @@ class JdbcAccountRepository implements AccountRepository {
         return jdbc.sql("""
                 SELECT a.id, a.tenant_id, a.kind, a.customer_id, a.ispb, a.branch, a.account_number,
                        a.check_digit, a.status, a.allow_negative, a.balance_cents, a.version, a.created_at,
+                       a.credit_policy, a.debit_policy, a.closed_at,
                        c.tax_id, c.tax_id_type, c.status AS customer_status
                   FROM account a
                   JOIN customer c ON c.id = a.customer_id
@@ -144,6 +146,7 @@ class JdbcAccountRepository implements AccountRepository {
         String sql = """
                 SELECT a.id, a.customer_id, a.ispb, a.branch, a.account_number, a.check_digit, a.status,
                        a.allow_negative, a.balance_cents, a.version, a.created_at,
+                       a.credit_policy, a.debit_policy, a.closed_at,
                        c.name AS customer_name, c.tax_id, c.tax_id_type, c.email AS customer_email
                   FROM account a
                   JOIN customer c ON c.id = a.customer_id
@@ -170,6 +173,7 @@ class JdbcAccountRepository implements AccountRepository {
         String sql = """
                 SELECT a.id, a.customer_id, a.ispb, a.branch, a.account_number, a.check_digit, a.status,
                        a.allow_negative, a.balance_cents, a.version, a.created_at,
+                       a.credit_policy, a.debit_policy, a.closed_at,
                        c.name AS customer_name, c.tax_id, c.tax_id_type, c.email AS customer_email
                   FROM account a
                   JOIN customer c ON c.id = a.customer_id
@@ -192,10 +196,13 @@ class JdbcAccountRepository implements AccountRepository {
      * re-evaluates the WHERE clause against the freshly committed row (READ COMMITTED
      * "EvalPlanQual"). Result: no lost updates, no overdraft, no explicit SELECT ... FOR UPDATE.
      * The returned {@code version} becomes the account's gapless ledger sequence number.
+     *
+     * <p>ADR-013: the same statement checks the account's policy for the direction of the change, so a
+     * movement waiting on the row while a block is created reads the new policy when it gets the row.
      */
     @Override
     public BalanceUpdateResult applyDelta(TenantId tenantId, AccountId accountId, Account.Kind expectedKind,
-                                          long deltaCents, Instant occurredAt) {
+                                          long deltaCents, Instant occurredAt, AccountPolicy.Gate gate) {
         Optional<BalanceUpdateResult.Applied> applied = jdbc.sql("""
                 UPDATE account
                    SET balance_cents = balance_cents + :delta,
@@ -207,9 +214,12 @@ class JdbcAccountRepository implements AccountRepository {
                    AND id        = :id
                    AND kind      = :kind
                    AND status    = 'ACTIVE'
+                   AND (CASE WHEN :delta > 0 THEN credit_policy IN (:credits) ELSE debit_policy IN (:debits) END)
                    AND (allow_negative OR balance_cents + :delta >= 0)
                 RETURNING balance_cents, version, last_occurred_at""")
                 .param("delta", deltaCents)
+                .param("credits", gate.credits().stream().map(Enum::name).toList())
+                .param("debits", gate.debits().stream().map(Enum::name).toList())
                 .param("tenant", tenantId.value())
                 .param("id", accountId.value())
                 .param("kind", expectedKind.name())
@@ -228,7 +238,56 @@ class JdbcAccountRepository implements AccountRepository {
         if (!current.get().isActive()) {
             return new BalanceUpdateResult.Rejected(BalanceUpdateResult.Reason.ACCOUNT_NOT_ACTIVE);
         }
+        if (!gate.admits(current.get().policy(), deltaCents)) {
+            return new BalanceUpdateResult.Rejected(BalanceUpdateResult.Reason.ACCOUNT_BLOCKED);
+        }
         return new BalanceUpdateResult.Rejected(BalanceUpdateResult.Reason.INSUFFICIENT_FUNDS);
+    }
+
+    @Override
+    public Optional<Account> lockForUpdate(TenantId tenantId, AccountId accountId) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM account WHERE tenant_id = :tenant AND id = :id FOR UPDATE")
+                .param("tenant", tenantId.value())
+                .param("id", accountId.value())
+                .query(JdbcAccountRepository::map)
+                .optional();
+    }
+
+    @Override
+    public void updatePolicy(TenantId tenantId, AccountId accountId, AccountPolicy policy) {
+        // version is the ledger's sequence (ADR-003): a block moves no money, so it does not take one.
+        jdbc.sql("""
+                UPDATE account
+                   SET credit_policy = :credit, debit_policy = :debit, updated_at = now()
+                 WHERE tenant_id = :tenant AND id = :id""")
+                .param("credit", policy.credit().name())
+                .param("debit", policy.debit().name())
+                .param("tenant", tenantId.value())
+                .param("id", accountId.value())
+                .update();
+    }
+
+    @Override
+    public void close(TenantId tenantId, AccountId accountId, Instant closedAt) {
+        int closed = jdbc.sql("""
+                UPDATE account
+                   SET status = 'CLOSED', closed_at = :at, updated_at = now()
+                 WHERE tenant_id = :tenant AND id = :id AND status = 'ACTIVE'""")
+                .param("at", Sql.ts(closedAt))
+                .param("tenant", tenantId.value())
+                .param("id", accountId.value())
+                .update();
+        if (closed != 1) {
+            throw new IllegalStateException("account " + accountId + " was not active");
+        }
+    }
+
+    @Override
+    public Optional<AccountId> findJudicialTransit(TenantId tenantId) {
+        return jdbc.sql("SELECT id FROM account WHERE tenant_id = :tenant AND kind = 'JUDICIAL_TRANSIT'")
+                .param("tenant", tenantId.value())
+                .query((rs, i) -> new AccountId(Sql.uuid(rs, "id")))
+                .optional();
     }
 
     private static Account map(ResultSet rs, int rowNum) throws SQLException {
@@ -247,7 +306,14 @@ class JdbcAccountRepository implements AccountRepository {
                 rs.getBoolean("allow_negative"),
                 Money.ofCents(rs.getLong("balance_cents")),
                 rs.getLong("version"),
-                Sql.instant(rs, "created_at"));
+                Sql.instant(rs, "created_at"),
+                policy(rs),
+                Sql.instantOrNull(rs, "closed_at"));
+    }
+
+    private static AccountPolicy policy(ResultSet rs) throws SQLException {
+        return new AccountPolicy(AccountPolicy.Credit.valueOf(rs.getString("credit_policy")),
+                AccountPolicy.Debit.valueOf(rs.getString("debit_policy")));
     }
 
     /**
@@ -271,7 +337,9 @@ class JdbcAccountRepository implements AccountRepository {
                 rs.getBoolean("allow_negative"),
                 Money.ofCents(rs.getLong("balance_cents")),
                 rs.getLong("version"),
-                Sql.instant(rs, "created_at"));
+                Sql.instant(rs, "created_at"),
+                policy(rs),
+                Sql.instantOrNull(rs, "closed_at"));
         TaxId taxId = new TaxId(rs.getString("tax_id"), TaxId.DocumentType.valueOf(rs.getString("tax_id_type")));
         return new AccountDirectoryItem(account, rs.getString("customer_name"), taxId.masked(), rs.getString("customer_email"));
     }

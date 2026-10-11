@@ -1,0 +1,302 @@
+@let acc = account();
+
+<h2 class="section-title">Bloqueios e encerramento</h2>
+<div class="card">
+  <app-problem-banner [message]="error()" />
+
+  @if (closed()) {
+    <p class="hint closed-line">Conta encerrada em {{ acc.closedAt | date: 'dd/MM/yyyy HH:mm' }}. Nada mais entra nem sai.</p>
+  }
+
+  <table class="blocks">
+    <thead>
+      <tr>
+        <th>Desde</th>
+        <th>Bloqueio</th>
+        <th>Detalhe</th>
+        <th>Por</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (b of acc.blocks; track b.id) {
+        <tr>
+          <td class="nowrap">{{ b.createdAt | date: 'dd/MM/yy HH:mm' }}</td>
+          <td><span class="status bad">{{ typeLabels[b.type] }}</span></td>
+          <td class="wrap">{{ blockDetail(b) }}</td>
+          <td class="ellipsis">{{ b.createdBy.operator }}</td>
+          <td class="num">
+            @if (canRelease(b)) {
+              <button type="button" class="link" (click)="startRelease(b)">Liberar</button>
+            }
+          </td>
+        </tr>
+      } @empty {
+        <tr>
+          <td colspan="5" class="hint">{{ closed() ? 'Nenhum bloqueio.' : 'Nenhum bloqueio ativo: a conta recebe e paga normalmente.' }}</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+  @if (acc.blocks.length > 0) {
+    <ul class="hint effects">
+      @for (t of activeTypes(); track t) {
+        <li>{{ typeLabels[t] }}: {{ effects[t] }}</li>
+      }
+    </ul>
+  }
+
+  @for (b of acc.blocks; track b.id) {
+    @if (releasing() === b.id) {
+      <form class="panel" (ngSubmit)="submitRelease(b)">
+        <p class="hint">Liberar: {{ typeLabels[b.type] }}. Os outros bloqueios continuam.</p>
+        <div class="inline-form">
+          <label>
+            Operador
+            <input name="operator" [(ngModel)]="operator" maxlength="80" required />
+          </label>
+          <label class="grow">
+            Por que liberar
+            <input name="releaseNote" [(ngModel)]="releaseNote" maxlength="280" required placeholder="Análise concluída" />
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" [disabled]="busy()">Liberar bloqueio</button>
+          <button type="button" class="secondary" (click)="releasing.set(null)">Fechar</button>
+        </div>
+      </form>
+    }
+  }
+
+  @if (anyAction() && panel() === null && releasing() === null) {
+    <div class="form-actions">
+      @if (canBlock) {
+        <button type="button" class="secondary" (click)="open('FRAUD')">Bloquear por fraude</button>
+        <button type="button" class="secondary" (click)="open('ADMINISTRATIVE')">Bloquear tudo</button>
+      }
+      @if (canJudicial) {
+        <button type="button" class="secondary" (click)="open('JUDICIAL')">Bloqueio judicial</button>
+        @if (judicialBlocks().length > 0) {
+          <button type="button" class="secondary" (click)="open('JUDICIAL_TRANSFER')">Transferência judicial</button>
+        }
+      }
+      @if (canClose) {
+        <button type="button" class="secondary" (click)="open('CLOSE')">Encerrar conta</button>
+      }
+    </div>
+  }
+
+  @switch (panel()) {
+    @case ('FRAUD') {
+      <form class="panel" (ngSubmit)="submitBlock('FRAUD')">
+        <p class="hint">{{ effects.FRAUD }} Libere quando a análise terminar.</p>
+        <div class="inline-form">
+          <label>
+            Operador
+            <input name="operator" [(ngModel)]="operator" maxlength="80" required />
+          </label>
+          <label class="grow">
+            Observação
+            <input name="note" [(ngModel)]="note" maxlength="280" placeholder="Pix recebidos de contas recém-abertas" />
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" [disabled]="busy()">Bloquear por fraude</button>
+          <button type="button" class="secondary" (click)="panel.set(null)">Fechar</button>
+        </div>
+      </form>
+    }
+    @case ('ADMINISTRATIVE') {
+      <form class="panel" (ngSubmit)="submitBlock('ADMINISTRATIVE')">
+        <p class="hint">{{ effects.ADMINISTRATIVE }} Um Pix recebido é recusado (AC06).</p>
+        <div class="inline-form">
+          <label>
+            Operador
+            <input name="operator" [(ngModel)]="operator" maxlength="80" required />
+          </label>
+          <label class="wide">
+            Motivo
+            <select name="reason" [(ngModel)]="reason">
+              @for (r of administrativeReasons; track r) {
+                <option [value]="r">{{ reasonLabels[r] }}</option>
+              }
+            </select>
+          </label>
+          <label class="grow">
+            Observação{{ reason === 'OTHER' ? ' (obrigatória)' : '' }}
+            <input name="note" [(ngModel)]="note" maxlength="280" [required]="reason === 'OTHER'" />
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" [disabled]="busy()">Bloquear tudo</button>
+          <button type="button" class="secondary" (click)="panel.set(null)">Fechar</button>
+        </div>
+      </form>
+    }
+    @case ('JUDICIAL') {
+      <form class="panel" (ngSubmit)="submitBlock('JUDICIAL')">
+        <p class="hint">{{ effects.JUDICIAL }} Só quem tem o escopo judicial libera.</p>
+        <div class="inline-form">
+          <label>
+            Operador
+            <input name="operator" [(ngModel)]="operator" maxlength="80" required />
+          </label>
+          <label>
+            Número do processo
+            <input name="process" [(ngModel)]="process" maxlength="60" required placeholder="0001234-56.2026.8.26.0100" />
+          </label>
+          <label>
+            Protocolo da ordem
+            <input name="protocol" [(ngModel)]="protocol" maxlength="60" placeholder="SISBAJUD 20261011000123" />
+          </label>
+        </div>
+        <label>
+          Observação
+          <input name="note" [(ngModel)]="note" maxlength="280" placeholder="bloqueio total da conta" />
+        </label>
+        <div class="form-actions">
+          <button type="submit" [disabled]="busy()">Registrar bloqueio judicial</button>
+          <button type="button" class="secondary" (click)="panel.set(null)">Fechar</button>
+        </div>
+      </form>
+    }
+    @case ('JUDICIAL_TRANSFER') {
+      <form class="panel" (ngSubmit)="submitJudicialTransfer()">
+        <p class="hint">
+          Debita esta conta para cumprir a ordem, acima dos bloqueios de fraude e administrativo. Saldo:
+          {{ acc.balance | number: '1.2-2' }}.
+        </p>
+        <div class="method-toggle">
+          <label class="radio">
+            <input type="radio" name="transferTo" value="JUDICIAL_TRANSIT" [(ngModel)]="transferTo" />
+            Depósito judicial em outro banco
+          </label>
+          <label class="radio">
+            <input type="radio" name="transferTo" value="ACCOUNT" [(ngModel)]="transferTo" />
+            Conta de outro cliente deste tenant
+          </label>
+        </div>
+        <div class="inline-form">
+          @if (judicialBlocks().length > 1) {
+            <label>
+              Ordem
+              <select name="transferBlockId" [(ngModel)]="transferBlockId">
+                @for (b of judicialBlocks(); track b.id) {
+                  <option [value]="b.id">{{ b.court?.process }}</option>
+                }
+              </select>
+            </label>
+          }
+          <label>
+            Operador
+            <input name="operator" [(ngModel)]="operator" maxlength="80" required />
+          </label>
+          <label>
+            Valor
+            <input type="number" step="0.01" min="0.01" [max]="acc.balance" name="transferAmount" [(ngModel)]="transferAmount" required />
+          </label>
+        </div>
+        @if (transferTo === 'ACCOUNT') {
+          <div class="inline-form">
+            <label>
+              Agência
+              <input name="transferBranch" [(ngModel)]="transferBranch" required maxlength="4" />
+            </label>
+            <label>
+              Número
+              <input name="transferNumber" [(ngModel)]="transferNumber" required maxlength="20" />
+            </label>
+            <label>
+              Dígito
+              <input name="transferCheckDigit" [(ngModel)]="transferCheckDigit" required maxlength="1" />
+            </label>
+          </div>
+        }
+        <label>
+          Observação
+          <input name="note" [(ngModel)]="note" maxlength="280" placeholder="ofício 123/2026" />
+        </label>
+        @if (transferTo === 'JUDICIAL_TRANSIT') {
+          <p class="hint">A tesouraria faz a TED fora e a registra em Tesouraria → Depósitos judiciais a transferir.</p>
+        }
+        <div class="form-actions">
+          <button type="submit" [disabled]="busy()">Transferir por ordem judicial</button>
+          <button type="button" class="secondary" (click)="panel.set(null)">Fechar</button>
+        </div>
+      </form>
+    }
+    @case ('CLOSE') {
+      <form class="panel" (ngSubmit)="submitClose()">
+        <p class="hint">O encerramento é definitivo. Se o cliente voltar, abre uma conta nova.</p>
+        <table class="checks">
+          <tbody>
+            @for (c of checks(); track c.label) {
+              <tr>
+                <td>{{ c.label }}</td>
+                <td>
+                  <span class="status" [class.ok]="c.ok === true" [class.bad]="c.ok === false">
+                    {{ c.ok === true ? 'Ok' : c.ok === false ? 'Pendente' : 'Conferir' }}
+                  </span>
+                </td>
+                <td class="hint">{{ c.detail }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+        @if (acc.blocks.length > 0 && judicialBlocks().length === 0) {
+          <p class="hint">Os bloqueios de fraude e administrativos ativos são liberados pelo próprio encerramento.</p>
+        }
+        <div class="inline-form">
+          <label>
+            Operador
+            <input name="operator" [(ngModel)]="operator" maxlength="80" required />
+          </label>
+          <label class="wide">
+            Motivo
+            <select name="closeReason" [(ngModel)]="closeReason">
+              @for (r of closeReasons; track r) {
+                <option [value]="r">{{ closeReasonLabels[r] }}</option>
+              }
+            </select>
+          </label>
+          <label class="grow">
+            Observação{{ closeReason === 'OTHER' ? ' (obrigatória)' : '' }}
+            <input name="note" [(ngModel)]="note" maxlength="280" [required]="closeReason === 'OTHER'" />
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" [disabled]="busy()">Encerrar definitivamente</button>
+          <button type="button" class="secondary" (click)="panel.set(null)">Fechar</button>
+        </div>
+      </form>
+    }
+  }
+</div>
+
+<h2 class="section-title">Histórico da conta</h2>
+<div class="card">
+  <table class="timeline">
+    <thead>
+      <tr>
+        <th>Data</th>
+        <th>Evento</th>
+        <th>Detalhe</th>
+        <th>Por</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (i of timeline() ?? []; track $index) {
+        <tr>
+          <td class="nowrap">{{ i.at | date: 'dd/MM/yy HH:mm' }}</td>
+          <td>{{ timelineLabel(i) }}</td>
+          <td class="wrap">{{ timelineDetail(i) }}</td>
+          <td class="ellipsis">{{ i.actor.operator }}</td>
+        </tr>
+      } @empty {
+        <tr>
+          <td colspan="4" class="hint">{{ timeline() === null ? 'Carregando...' : 'Nada registrado.' }}</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</div>

@@ -192,6 +192,8 @@
     </div>
   }
 
+  <app-judicial-transit [positions]="positions()" (changed)="judicialTedRecorded($event)" />
+
   <h2 class="section-title">Descoberto no fim de cada dia</h2>
   <p class="hint">Os últimos 14 dias encerrados. O dia fecha à meia-noite de Brasília.</p>
   <div class="card">

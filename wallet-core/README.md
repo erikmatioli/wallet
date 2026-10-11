@@ -114,7 +114,7 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 | `GET /v1/accounts/lookup?branch=&number=&checkDigit=` | `accounts:read` | Busca uma conta pelo número bancário em vez do id |
 | `GET /v1/accounts/findByTaxId?taxId=` | `accounts:read` | Busca a conta do cliente pelo CPF/CNPJ |
 | `POST /v1/accounts/holder-check` | `accounts:read` | Confere se agência + conta + dígito são de uma conta apta a receber e se pertencem ao CPF/CNPJ do corpo. Responde `result` (`VALID`, `ACCOUNT_NOT_FOUND`, `ACCOUNT_BLOCKED`, `ACCOUNT_CLOSED`, `TAX_ID_MISMATCH`) e `accountId` só quando `VALID`, sem dados do titular. POST para o documento não ir na URL. Usado na autorização de Pix recebidos (`../wallet-pix`) |
-| `GET /v1/accounts/{id}` | `accounts:read` | Dados da conta (ISPB, agência, número, dígito, tipo `TRAN`, saldo), titular, `customerId` e `customerEmail` |
+| `GET /v1/accounts/{id}` | `accounts:read` | Dados da conta (ISPB, agência, número, dígito, tipo `TRAN`, saldo), titular, `customerId`, `customerEmail`, os bloqueios ativos, `canReceive`, `canPay` e `closedAt` |
 | `GET /v1/accounts/{id}/balance` | `accounts:read` | Saldo |
 | `GET /v1/accounts/{id}/balance?at=AAAA-MM-DD` | `accounts:read` | Saldo de fechamento do dia (meia-noite de Brasília), lido do ledger por busca binária ([ADR-012](docs/adr/012-saldo-de-fechamento-sob-demanda.md)). Hoje e o futuro: `422 DAY_NOT_CLOSED` |
 | `GET /v1/accounts/{id}/daily-balances?from=&to=` | `accounts:read` | Saldo de fechamento dia a dia, até 366 dias encerrados; dias sem movimento repetem o saldo |
@@ -132,6 +132,15 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 | `GET /v1/treasury/backing-accounts/{id}/daily-balances?from=&to=` | `ledger:audit` | Saldo esperado no fim de cada dia |
 | `GET /v1/treasury/unassigned/daily?from=&to=` | `ledger:audit` | Por dia: dinheiro criado por depósitos, coberto pela tesouraria e o descoberto no fim do dia |
 | `POST /v1/treasury/transfers` | `treasury:write` | Movimentação de tesouraria entre contas de lastro: cobertura (saindo de A regularizar, até o descoberto) ou recomposição |
+| `POST /v1/accounts/{id}/blocks` | `accounts:block` ou `accounts:judicial` | Bloqueia a conta ([ADR-013](docs/adr/013-bloqueios-e-encerramento-da-conta.md)): `FRAUD` (recebe, só sai o MED), `ADMINISTRATIVE` (nada entra nem sai, só estornos) com `accounts:block`; `JUDICIAL` (recebe, só sai a transferência judicial) com `accounts:judicial` e o número do processo |
+| `POST /v1/accounts/{id}/blocks/{blockId}/release` | o escopo do tipo | Libera um bloqueio, com o motivo. Os outros bloqueios continuam |
+| `GET /v1/accounts/{id}/blocks?active=` | `accounts:read` | Bloqueios da conta, ativos e liberados |
+| `POST /v1/accounts/{id}/judicial-transfers` | `accounts:judicial` | Transferência por ordem judicial, acima dos bloqueios de fraude e administrativo: para outro cliente do tenant ou para os depósitos judiciais a transferir |
+| `GET /v1/judicial-transit/pending` | `accounts:judicial` ou `ledger:audit` | Transferências judiciais ao trânsito com TED a registrar |
+| `POST /v1/judicial-transit/{transferId}/teds` | `accounts:judicial` | Registra a TED enviada pela tesouraria: sai do trânsito, contra a conta de lastro de onde ela saiu |
+| `POST /v1/accounts/{id}/close` | `accounts:close` | Encerra a conta, para sempre. Recusa com saldo (`ACCOUNT_NOT_EMPTY`) ou bloqueio judicial ativo (`JUDICIAL_BLOCK_ACTIVE`) |
+| `GET /v1/accounts/{id}/timeline` | `accounts:read` | Abertura, bloqueios, liberações e encerramento, com quem fez |
+| `GET /v1/ccs/account-events?after=&limit=` | `ccs:read` | Feed de aberturas e encerramentos em ordem de `seq`, com o documento completo do titular, para o `wallet-ccs` |
 
 Valores monetários são decimais em BRL com no máximo 2 casas (`"amount": 250.00`); internamente tudo é `long` em centavos.
 

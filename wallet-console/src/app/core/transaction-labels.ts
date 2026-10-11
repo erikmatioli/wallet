@@ -11,6 +11,8 @@ const LABELS: Record<TransactionType, string> = {
   PIX_RETURN_OUT: 'Devolução enviada',
   TREASURY_TRANSFER: 'Movimentação de tesouraria',
   RECLASSIFICATION: 'Reclassificação',
+  JUDICIAL_TRANSFER: 'Transferência por ordem judicial',
+  JUDICIAL_TRANSIT_OUT: 'TED de depósito judicial',
 };
 
 /** Readable name of a transaction type; an unknown one (a newer API) is shown as it came. */

@@ -15,7 +15,10 @@ object FailureReasons {
 
     private val known = listOf(
         FailureReason("INSUFFICIENT_FUNDS", "Saldo insuficiente no momento do pagamento", retryToday = true),
-        FailureReason("ACCOUNT_NOT_ACTIVE", "Conta pagadora bloqueada ou inativa", retryToday = true),
+        // wallet-core's ADR-013: a blocked account is ACCOUNT_BLOCKED (a block can be lifted within the day); an
+        // account that is no longer active is closed, for good.
+        FailureReason("ACCOUNT_BLOCKED", "Conta pagadora bloqueada", retryToday = true),
+        FailureReason("ACCOUNT_NOT_ACTIVE", "Conta pagadora encerrada", retryToday = false),
         FailureReason("DESTINATION_ACCOUNT_NOT_FOUND", "Conta de destino não encontrada", retryToday = false),
         FailureReason("ACCOUNT_NOT_FOUND", "Conta não encontrada", retryToday = false),
         FailureReason("SAME_ACCOUNT", "Conta de destino igual à conta pagadora", retryToday = false),

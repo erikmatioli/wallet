@@ -1,6 +1,7 @@
 package br.com.walletcore.application.service;
 
 import br.com.walletcore.application.port.in.QueryAccountUseCase;
+import br.com.walletcore.application.port.out.AccountBlockRepository;
 import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.AccountRepository.AccountDirectoryItem;
 import br.com.walletcore.application.port.out.AccountRepository.AccountHolder;
@@ -33,13 +34,15 @@ public final class QueryAccountService implements QueryAccountUseCase {
     private final AccountRepository accounts;
     private final LedgerRepository ledger;
     private final PixDetailRepository pixDetails;
+    private final AccountBlockRepository blocks;
 
     public QueryAccountService(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
-                               PixDetailRepository pixDetails) {
+                               PixDetailRepository pixDetails, AccountBlockRepository blocks) {
         this.tx = tx;
         this.accounts = accounts;
         this.ledger = ledger;
         this.pixDetails = pixDetails;
+        this.blocks = blocks;
     }
 
     @Override
@@ -54,7 +57,7 @@ public final class QueryAccountService implements QueryAccountUseCase {
         return tx.readOnly(tenantId, () -> accounts.findByIds(tenantId, Set.of(accountId)).stream()
                 .findFirst()
                 .map(item -> new AccountDetail(item.account(), item.customerName(), item.documentMasked(),
-                        item.customerEmail()))
+                        item.customerEmail(), blocks.findByAccount(tenantId, accountId, true)))
                 .orElseThrow(() -> new NotFoundException("ACCOUNT_NOT_FOUND", "account not found")));
     }
 
@@ -86,14 +89,17 @@ public final class QueryAccountService implements QueryAccountUseCase {
     /**
      * Order matters: account state is checked before the document, so a caller probing with
      * random tax ids against a closed account learns only "closed", never whether the guess was
-     * right. The document is compared last, and on a match the account must also be ACTIVE.
+     * right. The document is compared last.
+     *
+     * <p>ADR-013: only a block that keeps credits out (ADMINISTRATIVE) refuses the Pix. An account under a fraud or
+     * a judicial block still receives it.
      */
     private static HolderCheck evaluate(AccountHolder holder, Optional<TaxId> taxId) {
         Account account = holder.account();
         if (account.status() == Account.Status.CLOSED) {
             return HolderCheck.rejected(HolderCheck.Result.ACCOUNT_CLOSED);
         }
-        if (account.status() == Account.Status.BLOCKED || holder.holderStatus() == Customer.Status.BLOCKED) {
+        if (!account.policy().canReceive() || holder.holderStatus() == Customer.Status.BLOCKED) {
             return HolderCheck.rejected(HolderCheck.Result.ACCOUNT_BLOCKED);
         }
         if (taxId.isEmpty() || !taxId.get().value().equals(holder.holderTaxId().value())) {
