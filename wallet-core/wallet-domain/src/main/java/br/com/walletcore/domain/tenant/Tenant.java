@@ -38,9 +38,12 @@ public record Tenant(
      *
      * <p>{@code otp:use} is the same for wallet-otp's API: create and verify one-time codes
      * (ADR-001 of wallet-otp).
+     *
+     * <p>{@code treasury:write} registers backing accounts and moves money between them (ADR-011): covering what a
+     * deposit created is the treasury's, not whoever holds {@code ledger:write}.
      */
     public static final Set<String> DEFAULT_SCOPES = Set.of("customers:write", "accounts:read", "ledger:write",
-            "ledger:audit", "pix:send", "pix:receive", "schedules:read", "schedules:write", "otp:use");
+            "ledger:audit", "pix:send", "pix:receive", "schedules:read", "schedules:write", "otp:use", "treasury:write");
 
     private static final Pattern CLIENT_ID = Pattern.compile("[a-z0-9][a-z0-9-]{2,62}");
     private static final Pattern ISPB = Pattern.compile("[0-9]{8}");

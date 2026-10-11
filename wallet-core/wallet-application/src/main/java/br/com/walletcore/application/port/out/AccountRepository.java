@@ -58,9 +58,6 @@ public interface AccountRepository {
     /** Next value of the account number sequence (may skip values; never repeats). */
     long nextAccountSequence();
 
-    /** Ids of the tenant's settlement shards, in a stable order. */
-    List<AccountId> findSettlementAccountIds(TenantId tenantId);
-
     /**
      * Ids of the tenant's customer accounts most recently touched (by {@code updated_at}), most
      * recent first, capped at {@code limit}. Used by the periodic audit sweep so that, as the

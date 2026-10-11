@@ -8,7 +8,9 @@ import br.com.walletcore.application.port.in.OnboardCustomerUseCase;
 import br.com.walletcore.application.port.in.ProvisionTenantUseCase;
 import br.com.walletcore.application.port.in.ListAccountsUseCase;
 import br.com.walletcore.application.port.in.QueryAccountUseCase;
+import br.com.walletcore.application.port.in.TreasuryUseCase;
 import br.com.walletcore.application.port.out.AccountRepository;
+import br.com.walletcore.application.port.out.BackingAccountRepository;
 import br.com.walletcore.application.port.out.CustomerRepository;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
@@ -26,7 +28,9 @@ import br.com.walletcore.application.service.OnboardCustomerService;
 import br.com.walletcore.application.service.ProvisionTenantService;
 import br.com.walletcore.application.service.ListAccountsService;
 import br.com.walletcore.application.service.QueryAccountService;
-import br.com.walletcore.application.service.SettlementRouter;
+import br.com.walletcore.application.service.BackingRouter;
+import br.com.walletcore.application.service.ClosingBalances;
+import br.com.walletcore.application.service.TreasuryService;
 import java.time.Clock;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,8 +50,15 @@ class UseCaseConfig {
     }
 
     @Bean
-    SettlementRouter settlementRouter(AccountRepository accounts) {
-        return new SettlementRouter(accounts);
+    BackingRouter backingRouter(BackingAccountRepository backing) {
+        return new BackingRouter(backing);
+    }
+
+    /** ADR-012: closing balances from the ledger. The grace must exceed the longest posting transaction. */
+    @Bean
+    ClosingBalances closingBalances(LedgerRepository ledger, Clock clock,
+                                    @Value("${wallet.balance.day-close-grace:1m}") Duration dayCloseGrace) {
+        return new ClosingBalances(ledger, clock, dayCloseGrace);
     }
 
     @Bean
@@ -65,9 +76,17 @@ class UseCaseConfig {
     @Bean
     MoveMoneyUseCase moveMoneyUseCase(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
                                       TransactionJournal journal, OutboxRepository outbox, PixDetailRepository pixDetails,
-                                      SettlementRouter settlementRouter, MetricsRecorder metrics, Clock clock) {
-        return new MoveMoneyService(tx, accounts, ledger, journal, outbox, pixDetails, settlementRouter, metrics,
+                                      BackingAccountRepository backing, BackingRouter backingRouter,
+                                      MetricsRecorder metrics, Clock clock) {
+        return new MoveMoneyService(tx, accounts, ledger, journal, outbox, pixDetails, backing, backingRouter, metrics,
                 clock);
+    }
+
+    @Bean
+    TreasuryUseCase treasuryUseCase(TransactionRunner tx, AccountRepository accounts, BackingAccountRepository backing,
+                                    LedgerRepository ledger, BackingRouter backingRouter, ClosingBalances closings,
+                                    Clock clock) {
+        return new TreasuryService(tx, accounts, backing, ledger, backingRouter, closings, clock);
     }
 
     @Bean
@@ -76,12 +95,10 @@ class UseCaseConfig {
         return new QueryAccountService(tx, accounts, ledger, pixDetails);
     }
 
-    /** ADR-012: closing balances from the ledger. The grace must exceed the longest posting transaction. */
     @Bean
-    BalanceHistoryUseCase balanceHistoryUseCase(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
-                                                Clock clock,
-                                                @Value("${wallet.balance.day-close-grace:1m}") Duration dayCloseGrace) {
-        return new BalanceHistoryService(tx, accounts, ledger, clock, dayCloseGrace);
+    BalanceHistoryUseCase balanceHistoryUseCase(TransactionRunner tx, AccountRepository accounts,
+                                                ClosingBalances closings) {
+        return new BalanceHistoryService(tx, accounts, closings);
     }
 
     @Bean
@@ -97,7 +114,7 @@ class UseCaseConfig {
 
     @Bean
     ProvisionTenantUseCase provisionTenantUseCase(TransactionRunner tx, TenantRepository tenants,
-                                                  AccountRepository accounts, SecretHasher hasher, Clock clock) {
-        return new ProvisionTenantService(tx, tenants, accounts, hasher, clock);
+                                                  BackingAccountRepository backing, SecretHasher hasher, Clock clock) {
+        return new ProvisionTenantService(tx, tenants, backing, hasher, clock);
     }
 }

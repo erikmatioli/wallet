@@ -10,6 +10,8 @@ import br.com.walletcore.domain.shared.TenantId;
 import br.com.walletcore.domain.shared.TransactionId;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -95,6 +97,28 @@ class JdbcLedgerRepository implements LedgerRepository {
                 .param("tenant", tenantId.value())
                 .param("tx", transactionId.value())
                 .query(JdbcLedgerRepository::map)
+                .list();
+    }
+
+    @Override
+    public List<DaySum> sumByDay(TenantId tenantId, AccountId accountId, long afterSequence, long upToSequence,
+                                 ZoneId zone) {
+        return jdbc.sql("""
+                SELECT (occurred_at AT TIME ZONE :zone)::date AS day,
+                       COALESCE(SUM(amount_cents) FILTER (WHERE direction = 'DEBIT'), 0)  AS debits,
+                       COALESCE(SUM(amount_cents) FILTER (WHERE direction = 'CREDIT'), 0) AS credits
+                  FROM ledger_entry
+                 WHERE tenant_id = :tenant AND account_id = :account
+                   AND sequence_no > :after AND sequence_no <= :upTo
+                 GROUP BY 1
+                 ORDER BY 1""")
+                .param("zone", zone.getId())
+                .param("tenant", tenantId.value())
+                .param("account", accountId.value())
+                .param("after", afterSequence)
+                .param("upTo", upToSequence)
+                .query((rs, i) -> new DaySum(rs.getObject("day", LocalDate.class), rs.getLong("debits"),
+                        rs.getLong("credits")))
                 .list();
     }
 

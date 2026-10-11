@@ -27,7 +27,7 @@ class ListAccountsServiceTest {
         assertThat(page.items()).extracting(Item::accountId)
                 .containsExactly(third.id(), second.id(), first.id());
         assertThat(page.nextCursor()).isNull(); // fewer results than the page size requested
-        // Settlement accounts (opened by the fixture's constructor) must never leak into the directory.
+        // Backing-account shards (opened by the fixture's constructor) must never leak into the directory.
         assertThat(page.items()).noneMatch(i -> i.accountFormatted() == null);
     }
 

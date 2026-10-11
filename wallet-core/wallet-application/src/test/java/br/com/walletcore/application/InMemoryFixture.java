@@ -3,6 +3,7 @@ package br.com.walletcore.application;
 import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.AccountRepository.AccountDirectoryItem;
 import br.com.walletcore.application.port.out.AccountRepository.AccountHolder;
+import br.com.walletcore.application.port.out.BackingAccountRepository;
 import br.com.walletcore.application.port.out.BalanceUpdateResult;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
@@ -15,10 +16,15 @@ import br.com.walletcore.application.service.AuditLedgerService;
 import br.com.walletcore.application.service.BalanceHistoryService;
 import br.com.walletcore.application.service.MoveMoneyService;
 import br.com.walletcore.application.service.QueryAccountService;
-import br.com.walletcore.application.service.SettlementRouter;
+import br.com.walletcore.application.service.BackingRouter;
+import br.com.walletcore.application.service.ClosingBalances;
+import br.com.walletcore.application.service.TreasuryService;
 import br.com.walletcore.domain.account.Account;
 import br.com.walletcore.domain.account.AccountType;
 import br.com.walletcore.domain.account.PaymentAccountNumber;
+import br.com.walletcore.domain.backing.BackingAccount;
+import br.com.walletcore.domain.backing.BackingType;
+import br.com.walletcore.domain.backing.TreasuryReference;
 import br.com.walletcore.domain.customer.Customer;
 import br.com.walletcore.domain.customer.TaxId;
 import br.com.walletcore.domain.event.DomainEvent;
@@ -27,11 +33,15 @@ import br.com.walletcore.domain.ledger.LedgerTransaction;
 import br.com.walletcore.domain.ledger.TransactionType;
 import br.com.walletcore.domain.pix.PixDetail;
 import br.com.walletcore.domain.shared.AccountId;
+import br.com.walletcore.domain.shared.BackingAccountId;
 import br.com.walletcore.domain.shared.CustomerId;
 import br.com.walletcore.domain.shared.Money;
 import br.com.walletcore.domain.shared.TenantId;
 import br.com.walletcore.domain.shared.TransactionId;
 import java.util.Collection;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.TreeMap;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.time.Clock;
@@ -141,12 +151,6 @@ final class InMemoryFixture {
         }
 
         @Override
-        public List<AccountId> findSettlementAccountIds(TenantId tenantId) {
-            return accounts.values().stream().filter(a -> a.kind() == Account.Kind.SETTLEMENT)
-                    .map(Account::id).sorted(Comparator.comparing(AccountId::value)).toList();
-        }
-
-        @Override
         public List<AccountId> findRecentlyActiveCustomerAccountIds(TenantId tenantId, int limit) {
             return accounts.values().stream().filter(a -> a.kind() == Account.Kind.CUSTOMER)
                     .map(Account::id).limit(limit).toList();
@@ -229,11 +233,90 @@ final class InMemoryFixture {
         }
 
         @Override
+        public List<DaySum> sumByDay(TenantId tenantId, AccountId accountId, long after, long upTo, ZoneId zone) {
+            Map<LocalDate, long[]> days = new TreeMap<>();
+            entries.stream()
+                    .filter(e -> e.accountId().equals(accountId) && e.sequence() > after && e.sequence() <= upTo)
+                    .forEach(e -> {
+                        long[] d = days.computeIfAbsent(LocalDate.ofInstant(e.occurredAt(), zone), k -> new long[2]);
+                        d[e.signedCents() < 0 ? 0 : 1] += e.amount().cents();
+                    });
+            return days.entrySet().stream().map(d -> new DaySum(d.getKey(), d.getValue()[0], d.getValue()[1])).toList();
+        }
+
+        @Override
         public void forEachInSequence(TenantId tenantId, AccountId accountId, Consumer<LedgerEntry> consumer) {
             entries.stream().filter(e -> e.accountId().equals(accountId))
                     .sorted(Comparator.comparingLong(LedgerEntry::sequence)).forEach(consumer);
         }
     };
+
+    final Map<BackingAccountId, BackingAccount> backingAccounts = new java.util.LinkedHashMap<>();
+    final Map<AccountId, BackingAccountId> shardOwners = new java.util.LinkedHashMap<>();
+    final Map<TransactionId, TreasuryReference> treasuryReferences = new HashMap<>();
+
+    final BackingAccountRepository backingRepository = new BackingAccountRepository() {
+        @Override
+        public void insert(BackingAccount account, List<Account> shards) {
+            backingAccounts.put(account.id(), account);
+            shards.forEach(s -> {
+                accounts.put(s.id(), s);
+                shardOwners.put(s.id(), account.id());
+            });
+        }
+
+        @Override
+        public List<BackingAccount> findAll(TenantId tenantId) {
+            return List.copyOf(backingAccounts.values());
+        }
+
+        @Override
+        public Optional<BackingAccount> findById(TenantId tenantId, BackingAccountId id) {
+            return Optional.ofNullable(backingAccounts.get(id));
+        }
+
+        @Override
+        public List<AccountId> findShardIds(TenantId tenantId, BackingAccountId id) {
+            return shardOwners.entrySet().stream().filter(e -> e.getValue().equals(id)).map(Map.Entry::getKey)
+                    .sorted(Comparator.comparing(AccountId::value)).toList();
+        }
+
+        @Override
+        public Map<AccountId, BackingAccountId> findShardOwners(TenantId tenantId) {
+            return Map.copyOf(shardOwners);
+        }
+
+        @Override
+        public Map<BackingAccountId, Long> sumBalances(TenantId tenantId) {
+            Map<BackingAccountId, Long> sums = new HashMap<>();
+            shardOwners.forEach((shard, owner) -> sums.merge(owner, accounts.get(shard).balance().cents(), Long::sum));
+            return sums;
+        }
+
+        @Override
+        public long lockAndSumBalance(TenantId tenantId, BackingAccountId id) {
+            return sumBalances(tenantId).getOrDefault(id, 0L);
+        }
+
+        @Override
+        public void insertTreasuryReference(TenantId tenantId, TransactionId transactionId, TreasuryReference reference) {
+            treasuryReferences.put(transactionId, reference);
+        }
+
+        @Override
+        public Map<TransactionId, TreasuryReference> findTreasuryReferences(TenantId tenantId,
+                                                                            Collection<TransactionId> ids) {
+            Map<TransactionId, TreasuryReference> found = new HashMap<>();
+            ids.forEach(id -> {
+                if (treasuryReferences.containsKey(id)) {
+                    found.put(id, treasuryReferences.get(id));
+                }
+            });
+            return found;
+        }
+    };
+
+    final BackingRouter router = new BackingRouter(backingRepository);
 
     final TransactionJournal transactionJournal = new TransactionJournal() {
         @Override
@@ -314,17 +397,35 @@ final class InMemoryFixture {
     };
 
     final MoveMoneyService moveMoney = new MoveMoneyService(runner, accountRepository, ledgerRepository,
-            transactionJournal, outbox, pixDetailRepository, new SettlementRouter(accountRepository), metrics, clock);
+            transactionJournal, outbox, pixDetailRepository, backingRepository, router, metrics, clock);
     final QueryAccountService query = new QueryAccountService(runner, accountRepository, ledgerRepository,
             pixDetailRepository);
     final AuditLedgerService audit = new AuditLedgerService(runner, accountRepository, ledgerRepository, metrics);
-    final BalanceHistoryService balanceHistory = new BalanceHistoryService(runner, accountRepository, ledgerRepository,
-            clock, java.time.Duration.ofMinutes(1));
+    final ClosingBalances closings = new ClosingBalances(ledgerRepository, clock, java.time.Duration.ofMinutes(1));
+    final BalanceHistoryService balanceHistory = new BalanceHistoryService(runner, accountRepository, closings);
+    final TreasuryService treasury = new TreasuryService(runner, accountRepository, backingRepository,
+            ledgerRepository, router, closings, clock);
 
+    /** The tenant's three default backing accounts (ADR-011), three shards each, as provisioning creates them. */
     InMemoryFixture() {
-        for (int i = 0; i < 3; i++) {
-            accountRepository.insert(Account.openSettlement(tenant, clock.instant()));
+        for (BackingType type : BackingType.values()) {
+            if (type.isDefault()) {
+                List<Account> shards = new ArrayList<>();
+                for (int i = 0; i < 3; i++) {
+                    shards.add(Account.openBackingShard(tenant, clock.instant()));
+                }
+                backingRepository.insert(BackingAccount.openDefault(tenant, type, clock.instant()), shards);
+            }
         }
+    }
+
+    BackingAccountId backing(BackingType type) {
+        return router.defaultAccount(tenant, type);
+    }
+
+    /** The expected balance of a backing account: its shards summed, with the sign the treasury reads. */
+    long expectedOf(BackingAccountId id) {
+        return -backingRepository.sumBalances(tenant).getOrDefault(id, 0L);
     }
 
     Account openCustomerAccount() {

@@ -1,6 +1,6 @@
 # ADR-011 — Contas de lastro e o dinheiro descoberto do tenant
 
-**Status:** proposta (substitui o rascunho de 10/10/2026, que separava só "com lastro" e "sem lastro")
+**Status:** aceita e implementada (substitui o rascunho de 10/10/2026, que separava só "com lastro" e "sem lastro")
 
 ## Contexto
 O saldo que o cliente vê é um registro no ledger. O dinheiro que o lastreia está **fora** dele, em vários
@@ -147,6 +147,27 @@ Nada aqui varre o ledger:
 - o saldo no fim de um dia é a busca binária da ADR-012 em cada shard;
 - os lançamentos são intercalados pela sequência de cada shard, sem índice novo;
 - o criado e o coberto por dia saem do extrato da A regularizar, que só recebe depósitos e coberturas.
+
+## Ajustes feitos na implementação
+- **O estorno de um saque vai para o Caixa**, não para A regularizar: ele desfaz o saque onde ele aconteceu e não
+  cria dinheiro. Na migração, é reconhecido pela chave de idempotência (`reversal:...`).
+- **Cobertura limitada ao descoberto.** Uma cobertura maior que o descoberto é recusada
+  (`COVERAGE_EXCEEDS_UNCOVERED`); as shards de A regularizar ficam travadas durante a conferência, então duas
+  coberturas ao mesmo tempo não passam juntas. Nada entra em A regularizar (`INVALID_TREASURY_DESTINATION`): ela só
+  recebe o que os depósitos criam.
+- **A reclassificação tem tipo próprio**, `RECLASSIFICATION`: uma transação por tenant, com várias pernas (zera
+  cada shard da settlement e põe o valor na primeira shard de cada conta de lastro). A settlement fica `CLOSED`.
+- **O histórico anterior à migração continua na settlement.** O saldo esperado de uma conta de lastro num dia
+  anterior à migração é zero; o valor aparece no dia da reclassificação, contado como "criado" em A regularizar.
+- **O extrato de uma conta de lastro** usa como cursor a sequência de cada shard (por exemplo `18.1.7`), não a data:
+  é exato e usa só o índice que já existe. O saldo esperado depois de cada lançamento é calculado a partir das
+  linhas imutáveis (o saldo da shard depois do lançamento mais o da próxima linha de cada outra shard), sem
+  depender de um snapshot.
+- **Shards:** as três contas iniciais têm o número de shards do provisionamento (o campo virou `backingShards`); as
+  cadastradas pela tesouraria têm uma, porque só a tesouraria as movimenta.
+- **Tela:** `/tesouraria` no console, com o descoberto em destaque, um cartão por conta de lastro, o extrato da
+  selecionada, os formulários de cobertura, recomposição e cadastro (só com `treasury:write`) e o descoberto no fim
+  dos últimos 14 dias.
 
 ## Fora do escopo (próximos passos)
 - **Conciliação com o extrato real.** Comparar o saldo esperado de cada conta de lastro com o extrato de

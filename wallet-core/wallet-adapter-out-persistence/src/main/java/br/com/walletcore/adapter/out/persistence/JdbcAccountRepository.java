@@ -186,14 +186,6 @@ class JdbcAccountRepository implements AccountRepository {
         return jdbc.sql("SELECT nextval('account_number_seq')").query(Long.class).single();
     }
 
-    @Override
-    public List<AccountId> findSettlementAccountIds(TenantId tenantId) {
-        return jdbc.sql("SELECT id FROM account WHERE tenant_id = :tenant AND kind = 'SETTLEMENT' ORDER BY id")
-                .param("tenant", tenantId.value())
-                .query((rs, i) -> new AccountId(Sql.uuid(rs, "id")))
-                .list();
-    }
-
     /**
      * The heart of concurrency control. A single statement checks the rules and changes the
      * balance; PostgreSQL takes a row lock, and a concurrent writer waiting on that lock

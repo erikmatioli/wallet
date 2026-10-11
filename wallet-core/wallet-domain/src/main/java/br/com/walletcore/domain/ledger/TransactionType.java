@@ -18,7 +18,11 @@ public enum TransactionType {
     /** Return received (incoming pacs.004) of a settled PIX_OUT. Credits the customer, in full or in part. */
     PIX_RETURN_IN,
     /** Return sent (outgoing pacs.004) of a settled PIX_IN. Debits the customer, in full or in part. */
-    PIX_RETURN_OUT;
+    PIX_RETURN_OUT,
+    /** The treasury moves money between two backing accounts (ADR-011): never touches a customer. */
+    TREASURY_TRANSFER,
+    /** One-off move of the settlement's balance to the backing accounts, when they were introduced (ADR-011). */
+    RECLASSIFICATION;
 
     public boolean isPix() {
         return name().startsWith("PIX_");
@@ -29,7 +33,7 @@ public enum TransactionType {
         return switch (this) {
             case PIX_IN, PIX_REFUND, PIX_RETURN_IN -> true;
             case PIX_OUT, PIX_RETURN_OUT -> false;
-            case DEPOSIT, WITHDRAWAL, TRANSFER ->
+            case DEPOSIT, WITHDRAWAL, TRANSFER, TREASURY_TRANSFER, RECLASSIFICATION ->
                     throw new IllegalStateException(this + " has no fixed customer direction");
         };
     }
