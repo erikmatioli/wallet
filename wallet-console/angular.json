@@ -60,6 +60,9 @@
         },
         "serve": {
           "builder": "@angular/build:dev-server",
+          "options": {
+            "allowedHosts": [".app.github.dev", "wallet-dev", ".ts.net"]
+          },
           "configurations": {
             "production": {
               "buildTarget": "wallet-console:build:production"

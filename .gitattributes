@@ -1,0 +1,2 @@
+# Shell scripts run on Linux (the remote dev VM, CI): always LF, whatever the checkout.
+*.sh text eol=lf
