@@ -40,7 +40,7 @@ As dependências apontam sempre para dentro. `wallet-domain` e `wallet-applicati
 | Módulo | Responsabilidade |
 |---|---|
 | `wallet-domain` | Modelo puro: `Money` (centavos), `TaxId` (CPF/CNPJ, inclusive **CNPJ alfanumérico**), `PaymentAccountNumber`, `Account`, `LedgerTransaction` (invariante de partidas dobradas), eventos de domínio |
-| `wallet-application` | Casos de uso (`OnboardCustomer`, `MoveMoney`, `QueryAccount`, `AuditLedger`, `ProvisionTenant`) e portas de saída |
+| `wallet-application` | Casos de uso (`OnboardCustomer`, `MoveMoney`, `QueryAccount`, `AuditLedger`, `ProvisionTenant`, `BalanceHistory`, `Treasury`, `AccountControl`) e portas de saída |
 | `wallet-adapter-out-persistence` | PostgreSQL: repositórios via `JdbcClient` (SQL explícito), idempotência, outbox + relay, migrations Flyway |
 | `wallet-adapter-out-messaging` | Publicação dos eventos do outbox (por padrão só loga; ponto de encaixe para Kafka/SNS) |
 | `wallet-adapter-in-rest` | API REST, segurança Basic → JWT, tratamento de erros |
@@ -149,9 +149,10 @@ Erros seguem `application/problem+json` com um campo estável `code`:
 | HTTP | Exemplos de `code` |
 |---|---|
 | 400 | `VALIDATION_FAILED`, `INVALID_TAX_ID`, `INVALID_AMOUNT`, `IDEMPOTENCY_KEY_REQUIRED`, `INVALID_DESTINATION` |
-| 404 | `ACCOUNT_NOT_FOUND`, `DESTINATION_ACCOUNT_NOT_FOUND` |
+| 403 | `SCOPE_REQUIRED` (o token entra na rota, mas não tem o escopo do tipo de bloqueio) |
+| 404 | `ACCOUNT_NOT_FOUND`, `DESTINATION_ACCOUNT_NOT_FOUND`, `BLOCK_NOT_FOUND`, `JUDICIAL_BLOCK_NOT_FOUND` |
 | 409 | `CUSTOMER_ALREADY_EXISTS`, `IDEMPOTENCY_KEY_REUSED` |
-| 422 | `INSUFFICIENT_FUNDS`, `ACCOUNT_NOT_ACTIVE`, `SAME_ACCOUNT` |
+| 422 | `INSUFFICIENT_FUNDS`, `ACCOUNT_BLOCKED` (um bloqueio recusa o movimento), `ACCOUNT_NOT_ACTIVE` (conta encerrada), `SAME_ACCOUNT`, `ACCOUNT_NOT_EMPTY`, `JUDICIAL_BLOCK_ACTIVE`, `COVERAGE_EXCEEDS_UNCOVERED`, `TRANSIT_OUT_EXCEEDS_TRANSFER` |
 | 503 | `TEMPORARILY_UNAVAILABLE` (contenção/timeout; repetir com a mesma `Idempotency-Key`) |
 
 Repetir uma requisição com a mesma `Idempotency-Key` e o mesmo corpo devolve a resposta original (`200` + header `Idempotent-Replayed: true`) sem mover dinheiro de novo. A mesma chave com corpo diferente retorna `409`.
@@ -167,6 +168,9 @@ Repetir uma requisição com a mesma `Idempotency-Key` e o mesmo corpo devolve a
 7. **Basic → JWT** (ADR-005): segredo do tenant guardado só como hash (bcrypt), JWT RS256 com `tenant_id` e `scope`, JWKS público, rotas desconhecidas negadas por padrão.
 8. **Outbox transacional**: eventos (`wallet.customer.onboarded.v1`, `wallet.transaction.posted.v1`) gravados na mesma transação do fato e entregues *at-least-once* por um relay (`FOR UPDATE SKIP LOCKED`). Os payloads não carregam CPF/CNPJ nem nome.
 9. **Observabilidade por padrão** (ADR-007): métricas de negócio pelo Micrometer, traces e logs pelo agente Java do OpenTelemetry sem código de instrumentação, a auditoria do ledger roda sozinha em segundo plano, e uma inconsistência vira alerta crítico sem que ninguém precise chamar a API manualmente. Detalhes na seção 6.
+10. **Saldo de fechamento sob demanda** (ADR-012): o saldo de um dia é lido do próprio ledger, por busca binária na sequência da conta, sem tabela de snapshot.
+11. **Tesouraria e contas de lastro** (ADR-011): cada meio tem a sua conta de lastro; a tesouraria cobre o que os depósitos criaram e recompõe entre os lugares, com comprovante.
+12. **Bloqueios e encerramento** (ADR-013): bloqueios de fraude, total e judicial convivem e são liberados cada um pelo seu escopo; o resumo deles entra no mesmo `UPDATE` do saldo. A transferência judicial cumpre a ordem acima dos outros bloqueios. Aberturas e encerramentos alimentam o feed do CCS.
 
 ## 6. Modelo da conta de pagamento
 
@@ -252,7 +256,8 @@ Pipeline (`ci.yml` + `release.yml` + `build-test.yml` reutilizável) assume **Gi
 - Particionamento do `ledger_entry` por tempo (exige incluir a chave de partição nas constraints únicas), arquivamento e réplicas de leitura.
 - Publisher real (Kafka/SNS/SQS), DLQ e limpeza do outbox publicado.
 - Trilha de *hash chain* por conta para evidência criptográfica de adulteração (a auditoria por replay já existe; isso adicionaria uma segunda camada, independente do banco).
-- Bloqueio/reserva de saldo (holds), limites e tarifas. Estorno e Pix já existem (ADR-010 e o projeto `../wallet-pix`); do Pix, faltam DICT e QR Code.
+- Bloqueio de um **valor** (o SISBAJUD "até R$ X"; o bloqueio da conta inteira já existe, ADR-013), reserva de saldo (holds), limites e tarifas. Estorno e Pix já existem (ADR-010 e o projeto `../wallet-pix`); do Pix, faltam DICT e QR Code.
+- Conciliação das contas de lastro com os extratos reais (camt.053 da Conta PI, extrato bancário) — ADR-011.
 - Roteamento de alertas para um canal real (Alertmanager + Slack/PagerDuty) — hoje os alertas só aparecem na aba *Alerts* do Prometheus.
 - Deploy contínuo de fato (o pipeline publica a imagem no GHCR, mas não a implanta em nenhum ambiente — depende de uma decisão de infraestrutura ainda não tomada) e cobertura de testes agregada (JaCoCo) no CI.
 

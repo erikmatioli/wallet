@@ -95,8 +95,14 @@ reconstruir o saldo) só precisam estar certas num lugar.
 - **Cliente** — a pessoa (CPF) ou empresa (CNPJ) que tem conta numa fintech.
 - **Conta de pagamento (`TRAN`)** — o tipo de conta do padrão do Banco Central para carteiras
   digitais: ISPB + agência + número + dígito.
-- **Conta de liquidação (settlement)** — conta **interna** do tenant, usada como contrapartida
-  quando dinheiro entra ou sai da plataforma. O cliente nunca a vê.
+- **Conta de lastro** — conta **interna** do tenant que representa um lugar onde o dinheiro dos
+  clientes fica guardado: **Conta PI** (Pix), **Caixa** (saques), **A regularizar** (o que um depósito
+  criou e a tesouraria ainda não cobriu) e as que a tesouraria cadastra (Reservas, investimentos).
+  É a contrapartida de todo movimento que entra ou sai da plataforma; o cliente nunca a vê
+  (ADR-011 do core). Substituiu a antiga conta de liquidação (*settlement*).
+- **Bloqueio** — uma restrição na conta, independente das outras: **fraude** (recebe, só sai a
+  devolução de Pix), **total** (nada entra nem sai, só estornos) ou **judicial** (recebe, só sai a
+  transferência por ordem judicial). Encerrar a conta é definitivo (ADR-013 do core).
 - **Partida dobrada** — todo movimento gera pelo menos um débito e um crédito que somam zero.
   Dinheiro nunca é criado nem destruído, só muda de conta.
 - **Ledger** — o livro-razão: a lista imutável de lançamentos. O saldo é consequência dele.
@@ -227,7 +233,10 @@ Pré-requisitos: Docker Desktop, JDK 25, Maven 3.9+, Node 22+ (console). O Gradl
 (`./gradlew`).
 
 **A ordem importa**, porque todos os composes entram na rede do `wallet-core`
-(`wallet-core_default`) e usam o Postgres dele:
+(`wallet-core_default`) e usam o Postgres dele. O `scripts/dev-stack.sh up` sobe tudo nessa ordem, esperando cada
+serviço responder (`down` para, `status` confere); para rodar a stack numa VM gratuita da Oracle e acessar de
+qualquer lugar, veja [docs/ambiente-remoto-oracle.md](docs/ambiente-remoto-oracle.md); para rodar no GitHub
+Codespaces, [docs/codespaces.md](docs/codespaces.md). À mão:
 
 ```bash
 cd wallet-core      && docker compose up -d           # Postgres, wallet-core, OTel, Jaeger, Prometheus, Loki, Grafana
@@ -345,14 +354,14 @@ que roda um script e termina. Por isso você vê `Exited (0)` no `docker ps -a`:
 
 Guia detalhado, classe por classe: [`wallet-core/docs/guia-do-desenvolvedor.md`](wallet-core/docs/guia-do-desenvolvedor.md).
 Modelo de dados: [`wallet-core/docs/data-model.md`](wallet-core/docs/data-model.md). ADRs 001 a
-010 em `wallet-core/docs/adr/`.
+013 em `wallet-core/docs/adr/`.
 
 ### 7.1 Módulos
 
 | Módulo Maven | Papel |
 |---|---|
 | `wallet-domain` | Java puro: `Money` (centavos em `long`), `TaxId`, `Account`, `LedgerTransaction`, `TransactionType`, eventos |
-| `wallet-application` | Casos de uso (`MoveMoneyService`, `OnboardCustomerService`, `QueryAccountService`, `AuditLedgerService`…) e portas |
+| `wallet-application` | Casos de uso (`MoveMoneyService`, `OnboardCustomerService`, `QueryAccountService`, `AuditLedgerService`, `TreasuryService`, `AccountControlService`…) e portas |
 | `wallet-adapter-out-persistence` | JDBC, migrations Flyway, `OutboxRelay` |
 | `wallet-adapter-out-messaging` | `LoggingEventPublisher` |
 | `wallet-adapter-in-rest` | Controllers, segurança (Basic → JWT), `ApiExceptionHandler` |
@@ -374,16 +383,30 @@ Modelo de dados: [`wallet-core/docs/data-model.md`](wallet-core/docs/data-model.
 | `POST /v1/accounts/{id}/pix-debits` | `pix:send` | pix |
 | `POST /v1/transactions/{id}/reversals` | `pix:send` | pix (estorno) |
 | `GET /v1/accounts/{id}/audit` | `ledger:audit` | console |
+| `GET /v1/accounts/{id}/balance?at=`, `/daily-balances` | `accounts:read` | console, app-api (saldo do dia, ADR-012) |
+| `GET /v1/treasury/**` | `ledger:audit` | console (tesouraria, ADR-011) |
+| `POST /v1/treasury/transfers`, `/backing-accounts` | `treasury:write` | console |
+| `POST /v1/accounts/{id}/blocks`, `/blocks/{id}/release` | `accounts:block` ou `accounts:judicial` | console (ADR-013) |
+| `POST /v1/accounts/{id}/judicial-transfers`, `/v1/judicial-transit/{id}/teds` | `accounts:judicial` | console |
+| `POST /v1/accounts/{id}/close` | `accounts:close` | console |
+| `GET /v1/accounts/{id}/blocks`, `/timeline` | `accounts:read` | console |
+| `GET /v1/ccs/account-events?after=` | `ccs:read` | wallet-ccs |
 
 ### 7.3 Tipos de transação
 
 | Tipo | Movimento na conta do cliente | Contrapartida |
 |---|---|---|
-| `DEPOSIT` | crédito | conta de liquidação do tenant |
-| `WITHDRAWAL` | débito | conta de liquidação |
+| `DEPOSIT` | crédito | lastro A regularizar (o estorno de um saque: Caixa) |
+| `WITHDRAWAL` | débito | lastro Caixa |
 | `TRANSFER` | débito na origem, crédito no destino | outra conta de cliente |
-| `PIX_IN` / `PIX_RETURN_IN` / `PIX_REFUND` | crédito | conta de liquidação |
-| `PIX_OUT` / `PIX_RETURN_OUT` | débito | conta de liquidação |
+| `PIX_IN` / `PIX_RETURN_IN` / `PIX_REFUND` | crédito | lastro Conta PI |
+| `PIX_OUT` / `PIX_RETURN_OUT` | débito | lastro Conta PI |
+| `TREASURY_TRANSFER` | — | entre duas contas de lastro (cobertura ou recomposição) |
+| `JUDICIAL_TRANSFER` | débito na conta bloqueada | outra conta de cliente ou o trânsito judicial |
+| `JUDICIAL_TRANSIT_OUT` | — | do trânsito judicial para o lastro de onde a TED saiu |
+
+`RECLASSIFICATION` aparece uma vez por tenant: a migração que moveu o saldo da antiga conta de
+liquidação para as contas de lastro.
 
 Todo `PIX_*` tem uma linha em `pix_transaction_detail` com a contraparte (nome, CPF/CNPJ
 **mascarado**, ISPB, conta), o EndToEndId e o motivo. É o que o extrato mostra no bloco `pix` e o
@@ -407,8 +430,12 @@ que permite filtrar o extrato por `?product=PIX` (ADR-010).
    distinguir "repetiu" de "reusou a chave com outro pedido".
 6. **Multi-tenant por RLS.** No começo de cada transação, `set_config('app.tenant_id', ...)`, e as
    policies do Postgres filtram o resto.
-7. **Várias contas de liquidação por tenant** (*shards*), para os depósitos de um tenant não
+7. **Contas de lastro em várias linhas** (*shards*), para os depósitos de um tenant não
    disputarem a mesma linha.
+8. **Bloqueio no mesmo `UPDATE` do saldo.** Os bloqueios ativos viram duas colunas da conta
+   (`credit_policy`, `debit_policy`), e o `applyDelta` só aplica o movimento se a política do
+   sentido aceitar aquele tipo de transação. Recusa: `ACCOUNT_BLOCKED`; conta encerrada:
+   `ACCOUNT_NOT_ACTIVE`.
 
 ---
 
@@ -563,11 +590,14 @@ tenant, e o operador vê **todas** as contas daquele tenant.
 src/app/
 ├── core/     AuthService, auth.interceptor (anexa o Bearer), auth.guard (protege rotas),
 │             WalletApiService (cliente HTTP tipado), models.ts (espelho dos DTOs do backend),
-│             transaction-labels.ts e schedule-labels.ts (código → texto em português)
+│             transaction-labels.ts, schedule-labels.ts, account-control.ts e treasury.ts
+│             (código → texto em português); http-error.util.ts traduz as recusas do operador
 ├── pages/    login, home (lista e busca de contas), onboard (abre conta),
-│             account (saldo, extrato, movimentos, auditoria)
+│             account (saldo, extrato, movimentos, auditoria),
+│             treasury (contas de lastro, coberturas, TEDs judiciais)
 │               ├── entry-detail/  popup com o detalhe do lançamento (dados já carregados, sem nova chamada)
-│               └── schedules/     seção de agendamentos da conta
+│               ├── schedules/     seção de agendamentos da conta
+│               └── control/       bloqueios, transferência judicial, encerramento e histórico da conta
 └── shared/   problem-banner (mostra erros no formato problem+json)
 ```
 
@@ -874,7 +904,8 @@ scheduler também no job e no listener, que rodam fora de uma requisição). No 
 
 - `RejectionReason` (pix-service).
 - `FailureReasons` (scheduler), se o agendamento precisar de texto e de regra de retentativa.
-- `transaction-labels.ts` / `schedule-labels.ts` (console).
+- `transaction-labels.ts` / `schedule-labels.ts` (console); uma recusa que o operador vê, também
+  em `OPERATOR_MESSAGES` (`http-error.util.ts`).
 - `CustomerMessages` (app-api).
 
 **Novo consumidor de eventos do Pix** (por exemplo, notificações)

@@ -8,7 +8,9 @@ backend, o `app-api`:
 - saldo (que pode ser escondido), a evolução do saldo nos últimos 30 dias, últimos lançamentos e extrato
   por dia, com o saldo de cada dia e o detalhe de cada lançamento (wallet-core, ADR-012);
 - **Pix** para outra instituição e **transferência** entre contas, com confirmação e comprovante;
-- **agendamentos**: lista, detalhe, cancelamento e novo agendamento (transferência ou Pix).
+- **agendamentos**: lista, detalhe, cancelamento e novo agendamento (transferência ou Pix);
+- **conta bloqueada** (ADR-013 do wallet-core): o início mostra o aviso e só deixa o extrato; uma conta
+  **encerrada** não entra (o login é recusado depois do código).
 
 Decisões: [ADR-001](docs/adr/001-pwa-do-cliente.md).
 

@@ -29,7 +29,7 @@ Três conceitos, cada um com a sua tabela:
   de amanhã até um ano.
 - **No dia** o job tenta nas janelas **06:00, 12:00 e 18:00 de Brasília**. A primeira paga; as
   outras retentam o que pode mudar no dia (saldo insuficiente, conta bloqueada). Um motivo que não
-  muda no dia (conta destino inexistente, AC03…) falha na hora.
+  muda no dia (conta destino inexistente, conta pagadora encerrada, AC03…) falha na hora.
 - **Nunca paga duas vezes:** a chave da tentativa (`sched-{execução}-{número}`) é gravada antes da
   chamada. Timeout, erro 5xx ou queda do serviço repetem a chamada com a mesma chave, e o core ou
   o wallet-pix respondem com o pagamento original.

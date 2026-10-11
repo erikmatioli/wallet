@@ -95,12 +95,13 @@ Representa o cliente white-label (quem contrata a plataforma, não o cliente fin
 
 - **`AccountType`** — hoje só tem um valor, `PAYMENT` (código BCB `TRAN`, conta de pagamento). É um enum e não uma constante solta porque o dia que existir um segundo tipo de conta, o compilador força você a decidir o que fazer em cada `switch` que usa isso.
 - **`PaymentAccountNumber`** — ISPB + agência + número + dígito verificador + tipo. `PaymentAccountNumber.generate(ispb, branch, sequence, type)` monta o número a partir de uma sequência numérica (que vem do banco, ver seção 6) e calcula o dígito com módulo 11. **Atenção:** o Banco Central não define um algoritmo único de dígito — cada instituição usa o seu. Se isso for para produção de verdade, o algoritmo em `computeCheckDigit` precisa ser substituído pelo que a sua instituição realmente usa.
-- **`Account`** — não é só a conta do cliente. Repare no campo `kind`: `CUSTOMER` (conta de um cliente, nunca pode ficar negativa) ou `SETTLEMENT` (conta interna, pode ficar negativa, existe só para servir de contrapartida contábil de depósitos/saques — ver seção 4.5). `Account.openPayment(...)` e `Account.openSettlement(...)` são as duas fábricas, uma para cada tipo.
+- **`Account`** — não é só a conta do cliente. Repare no campo `kind`: `CUSTOMER` (conta de um cliente, nunca pode ficar negativa), `BACKING` (uma *shard* de uma conta de lastro: a contrapartida contábil de todo movimento que entra ou sai do tenant, ADR-011), `JUDICIAL_TRANSIT` (os depósitos judiciais a transferir, ADR-013) e `SETTLEMENT` (a contrapartida antiga, mantida zerada só como histórico). As fábricas são `openPayment`, `openBackingShard` e `openJudicialTransit`. `status` diz só se a conta existe (`ACTIVE`/`CLOSED`); o que ela pode fazer está em `policy`.
+- **`AccountBlock`**, **`AccountPolicy`**, **`Actor`**, **`AccountStatusEvent`** (ADR-013) — um bloqueio (`FRAUD`, `ADMINISTRATIVE`, `JUDICIAL`) com quem o criou e liberou; `AccountPolicy.of(tiposAtivos)` resume os bloqueios ativos em uma política de crédito e uma de débito, e `AccountPolicy.gateFor(tipo, estorno)` diz quais políticas aceitam um movimento. A transferência judicial passa por todas; o MED passa pelo bloqueio de fraude; estornos e devoluções recebidas passam pelo administrativo.
 
 ### 4.5 `ledger/` — o mais importante do domínio inteiro
 
 - **`EntryDirection`** — `DEBIT` ou `CREDIT`. `CREDIT` aumenta o saldo, `DEBIT` diminui.
-- **`TransactionType`** — `DEPOSIT`, `WITHDRAWAL`, `TRANSFER` e os tipos Pix (`PIX_IN`, `PIX_OUT`, `PIX_REFUND`, `PIX_RETURN_IN`, `PIX_RETURN_OUT`), cada um com uma linha de detalhe em `pix_transaction_detail` (ver ADR-010).
+- **`TransactionType`** — `DEPOSIT`, `WITHDRAWAL`, `TRANSFER`; os tipos Pix (`PIX_IN`, `PIX_OUT`, `PIX_REFUND`, `PIX_RETURN_IN`, `PIX_RETURN_OUT`), cada um com uma linha de detalhe em `pix_transaction_detail` (ADR-010); `TREASURY_TRANSFER` e `RECLASSIFICATION` (tesouraria, ADR-011); `JUDICIAL_TRANSFER` e `JUDICIAL_TRANSIT_OUT` (ordem judicial, ADR-013).
 - **`Leg`** — uma "perna" de uma transação: uma conta, uma direção, um valor (sempre positivo — o sinal vem da direção, não do valor).
 - **`LedgerTransaction`** — **esta é a classe para entender de verdade antes de mexer em qualquer coisa relacionada a dinheiro.** O construtor dela (o bloco compacto `public LedgerTransaction { ... }`) valida, na hora da criação:
   - tem pelo menos 2 pernas;
@@ -108,9 +109,10 @@ Representa o cliente white-label (quem contrata a plataforma, não o cliente fin
   - **a soma dos débitos é igual à soma dos créditos** — essa é a regra de partida dobrada, e ela é impossível de violar em memória: se você tentar criar um `LedgerTransaction` desbalanceado, ele lança `BusinessRuleException` na hora, antes de qualquer coisa tocar o banco.
 
   As três fábricas explicam o desenho contábil:
-  - `LedgerTransaction.deposit(...)` — débito na conta de **settlement**, crédito na conta do **cliente**. Isto é: quando dinheiro "entra" na plataforma, ele sai de uma conta interna e vai para o cliente — nunca é criado do nada.
-  - `LedgerTransaction.withdrawal(...)` — o inverso: débito no cliente, crédito no settlement.
+  - `LedgerTransaction.deposit(...)` — débito numa shard da conta de **lastro** (A regularizar), crédito na conta do **cliente**. Isto é: quando dinheiro "entra" na plataforma, ele sai de uma conta interna e vai para o cliente — nunca é criado do nada.
+  - `LedgerTransaction.withdrawal(...)` — o inverso: débito no cliente, crédito no lastro (o Caixa).
   - `LedgerTransaction.transfer(...)` — débito na origem, crédito no destino, ambas contas de cliente.
+  - `LedgerTransaction.treasuryTransfer(...)` — entre duas contas de lastro, sem cliente; `judicialTransfer(...)` e `judicialTransitOut(...)` — a ordem judicial e a TED que a cumpre.
 
   O método `legsInLockOrder()` ordena as pernas por `accountId` — isso é o que garante que uma transferência A→B e outra B→A, acontecendo ao mesmo tempo, sempre travam as contas na mesma ordem (a de menor id primeiro), o que torna deadlock matematicamente impossível. Guarde esse detalhe; ele volta a aparecer na seção 6.
 
@@ -118,11 +120,11 @@ Representa o cliente white-label (quem contrata a plataforma, não o cliente fin
 
 ### 4.6 `event/`
 
-- **`DomainEvent`** — interface sealed, só duas implementações permitidas: `CustomerOnboarded` e `TransactionPosted`. Repare que os campos desses eventos são só identificadores e números — nunca CPF, nunca nome. Isso é proposital: o evento pode acabar sendo consumido por um sistema externo, fora do perímetro de segurança do banco.
+- **`DomainEvent`** — interface sealed, só duas implementações permitidas: `CustomerOnboarded` e `TransactionPosted`. (Aberturas e encerramentos de conta não são eventos de domínio: ficam em `account_status_event`, que o `wallet-ccs` lê por um feed com o documento completo.) Repare que os campos desses eventos são só identificadores e números — nunca CPF, nunca nome. Isso é proposital: o evento pode acabar sendo consumido por um sistema externo, fora do perímetro de segurança do banco.
 
 ### 4.7 `exception/`
 
-Cinco classes: `DomainException` (base, carrega um `code` estável tipo `"INSUFFICIENT_FUNDS"`) e quatro subclasses (`ValidationException`, `NotFoundException`, `ConflictException`, `BusinessRuleException`). O `code` de cada uma é o que a API HTTP transforma em corpo de erro (`ApiExceptionHandler`, seção 7) — se você lançar uma exceção nova, o `code` que você escolher é o que o cliente da API vai ver.
+Seis classes: `DomainException` (base, carrega um `code` estável tipo `"INSUFFICIENT_FUNDS"`) e cinco subclasses (`ValidationException`, `NotFoundException`, `ConflictException`, `BusinessRuleException`, `ForbiddenException` — esta para "o token entra na rota, mas não para isto", como liberar um bloqueio judicial com o escopo de fraude). O `code` de cada uma é o que a API HTTP transforma em corpo de erro (`ApiExceptionHandler`, seção 7) — se você lançar uma exceção nova, o `code` que você escolher é o que o cliente da API vai ver.
 
 ---
 
@@ -138,33 +140,40 @@ Pacote raiz: `br.com.walletcore.application`. Ainda sem framework — os `servic
 
 Cada porta `in` costuma declarar, dentro dela mesma, os records de `Command`/`Result` daquele caso de uso — por exemplo, `MoveMoneyUseCase.DepositCommand` é um record aninhado dentro da interface `MoveMoneyUseCase`. Isso mantém "o que esse caso de uso recebe e devolve" no mesmo arquivo que "o que esse caso de uso faz".
 
-### 5.2 `MoveMoneyService` — deposit / withdraw / transfer
+### 5.2 `MoveMoneyService` — todo movimento de dinheiro
 
-Este é o serviço mais denso do projeto. Ele implementa `MoveMoneyUseCase` (três métodos: `deposit`, `withdraw`, `transfer`) e todos os três convergem para um único método privado, `post(...)`. Ler `post()` é ler o algoritmo inteiro:
+Este é o serviço mais denso do projeto. Ele implementa `MoveMoneyUseCase` (`deposit`, `withdraw`, `transfer`, `reverseWithdrawal`, `postPix`, `treasuryTransfer`, `judicialTransfer`, `judicialTransitOut`) e todos convergem para um único método privado, `post(...)`. Ler `post()` é ler o algoritmo inteiro:
 
 ```java
-private TransactionResult post(LedgerTransaction lt, String key, String fingerprint, AccountId settlementId) {
+private TransactionResult post(LedgerTransaction lt, String key, String fingerprint,
+                               Map<AccountId, Account.Kind> internal, PixDetail pixDetail, Runnable rules,
+                               Runnable onPosted, boolean refund) {
     // 1. idempotência: essa chave já foi usada?
     Optional<StoredTransaction> existing = journal.insertIfAbsent(lt, key, fingerprint);
     if (existing.isPresent()) {
         // já existe: ou é um replay (devolve o resultado antigo) ou é conflito (chave reusada com payload diferente → 409)
         ...
     }
-    // 2. para cada perna da transação, em ordem determinística de conta (legsInLockOrder):
+    // 2. as regras que só valem para uma transação nova (devolução até o valor do Pix, cobertura até o descoberto...)
+    rules.run();
+    // 3. para cada perna da transação, em ordem determinística de conta (legsInLockOrder):
     for (Leg leg : lt.legsInLockOrder()) {
+        // as pernas internas (lastro, trânsito) passam sempre; a do cliente, só se a política dos bloqueios aceitar
+        AccountPolicy.Gate gate = ... AccountPolicy.gateFor(lt.type(), refund) ...;
         // aplica o delta atomicamente no banco (ver JdbcAccountRepository.applyDelta, seção 6)
-        BalanceUpdateResult result = accounts.applyDelta(...);
-        // sucesso vira um LedgerEntry; rejeição (saldo insuficiente, conta inativa...) lança exceção e desfaz tudo
+        BalanceUpdateResult result = accounts.applyDelta(..., gate);
+        // sucesso vira um LedgerEntry; rejeição (saldo insuficiente, conta bloqueada ou encerrada...) lança exceção e desfaz tudo
     }
-    // 3. grava os lançamentos (append-only) e enfileira o evento no outbox
+    // 4. grava os lançamentos (append-only), o detalhe (Pix, tesouraria, ordem judicial) e o evento no outbox
     ledger.append(entries);
+    onPosted.run();
     outbox.enqueue(...);
     metrics.transactionPosted(...);
     return ...;
 }
 ```
 
-Tudo isso roda dentro de **uma única transação de banco** (`tx.inTransaction(...)`, chamado por quem invoca `deposit`/`withdraw`/`transfer`) — se qualquer passo falhar, tudo é desfeito, nunca existe uma transação "meio postada".
+Tudo isso roda dentro de **uma única transação de banco** (`tx.inTransaction(...)`, chamado pelo método público) — se qualquer passo falhar, tudo é desfeito, nunca existe uma transação "meio postada".
 
 Dois detalhes que vale entender bem:
 
@@ -173,7 +182,7 @@ Dois detalhes que vale entender bem:
 
 ### 5.3 `OnboardCustomerService`
 
-Mais simples que o anterior: valida o `TaxId`, confere que o tenant existe e está ativo, confere que não existe outro cliente com o mesmo documento, gera o número da conta (`accounts.nextAccountSequence()` + `PaymentAccountNumber.generate`), insere cliente e conta, enfileira o evento `CustomerOnboarded`, registra a métrica. Tudo dentro de uma transação.
+Mais simples que o anterior: valida o `TaxId`, confere que o tenant existe e está ativo, confere que não existe outro cliente com o mesmo documento, gera o número da conta (`accounts.nextAccountSequence()` + `PaymentAccountNumber.generate`), insere cliente e conta, grava a abertura em `account_status_event` (o começo do relacionamento, para o CCS), enfileira o evento `CustomerOnboarded`, registra a métrica. Tudo dentro de uma transação.
 
 ### 5.4 `AuditLedgerService` — o replay
 
@@ -184,11 +193,20 @@ Implementa o "recriar o saldo a partir dos eventos" que é a proposta central do
 
 No final, compara o saldo replay acumulado com `account.balance()` (o que está gravado na projeção) e a última sequência com `account.version()`. Qualquer divergência vira uma string na lista `findings`; se a lista estiver vazia, `consistent = true`. É esse relatório que tanto o endpoint `GET /v1/accounts/{id}/audit` quanto o `AuditSweepJob` (seção 9) consomem.
 
-### 5.5 `QueryAccountService`, `ProvisionTenantService`, `SettlementRouter`
+### 5.5 `QueryAccountService`, `ProvisionTenantService`, `BackingRouter`
 
-- **`QueryAccountService`** — só leitura (`tx.readOnly`, nunca `inTransaction`). O método privado `load()` é reusado tanto por `getAccount` quanto por `getStatement`, e filtra `kind == CUSTOMER` — contas de settlement nunca são visíveis pela API, mesmo que alguém adivinhe o UUID.
-- **`ProvisionTenantService`** — cria um tenant novo e abre N contas de settlement para ele (`settlementShards`, tipicamente 4). Usado hoje só pelo `DevDataSeeder` (seção 9); não existe endpoint HTTP para isso ainda (ver README, "fora do escopo").
-- **`SettlementRouter`** — escolhe qual das N contas de settlement de um tenant vai ser a contrapartida de um depósito/saque específico, usando o hash do `TransactionId` (`transactionId.value().hashCode() % número de shards`). Existe para que um tenant com muito tráfego não sirialize todos os depósitos numa única linha de banco (que é exatamente o gargalo que uma única conta de settlement teria). Mantém um cache em memória (`ConcurrentHashMap`) dos ids de settlement por tenant, para não consultar o banco a cada transação.
+- **`QueryAccountService`** — só leitura (`tx.readOnly`, nunca `inTransaction`). O método privado `load()` é reusado tanto por `getAccount` quanto por `getStatement`, e filtra `kind == CUSTOMER` — contas internas nunca são visíveis pela API, mesmo que alguém adivinhe o UUID. O detalhe da conta traz os bloqueios ativos; o holder-check responde `ACCOUNT_BLOCKED` só com um bloqueio administrativo (fraude e judicial recebem Pix).
+- **`ProvisionTenantService`** — cria um tenant novo com as três contas de lastro padrão (Conta PI, Caixa, A regularizar), cada uma com N shards (`backingShards`, tipicamente 4), e o trânsito judicial. Usado hoje só pelo `DevDataSeeder` (seção 9); não existe endpoint HTTP para isso ainda (ver README, "fora do escopo").
+- **`BackingRouter`** — escolhe qual shard de uma conta de lastro vai ser a contrapartida de um movimento, usando o hash do `TransactionId`. Existe para que um tenant com muito tráfego não serialize todos os depósitos numa única linha de banco. Mantém um cache em memória das shards por tenant.
+
+### 5.6 `TreasuryService`, `BalanceHistoryService`, `ClosingBalances`
+
+- **`TreasuryService`** (ADR-011) — as posições das contas de lastro, o extrato de cada uma (intercalando as shards) e o dinheiro descoberto por dia. A movimentação em si (`treasuryTransfer`) fica no `MoveMoneyService`.
+- **`ClosingBalances`** (ADR-012) — o saldo de fechamento de um dia por busca binária na sequência da conta; usado pelo `BalanceHistoryService` (saldos diários do cliente) e pela tesouraria.
+
+### 5.7 `AccountControlService` — bloqueios e encerramento (ADR-013)
+
+`block`, `release`, `close`, `timeline`, `ccsEvents` e `pendingJudicialTransit`. Toda mudança trava a linha da conta primeiro (`AccountRepository.lockForUpdate`), grava o bloqueio ou a liberação e reescreve as políticas a partir dos bloqueios ativos (`updatePolicy`), na mesma transação: dois bloqueios ao mesmo tempo não calculam a política com uma lista desatualizada. O escopo é conferido aqui pelo tipo do bloqueio (`accounts:block` ou `accounts:judicial`). O encerramento exige saldo zero e nenhum bloqueio judicial, libera os outros e grava o evento `ACTIVE → CLOSED`.
 
 ---
 
@@ -221,7 +239,9 @@ UPDATE account
 RETURNING balance_cents, version
 ```
 
-O PostgreSQL trava a linha durante esse `UPDATE`; se outra transação tentar o mesmo `UPDATE` ao mesmo tempo, ela **espera** e, quando a primeira commitar, reavalia o `WHERE` contra o valor já atualizado — então nunca acontece de duas movimentações lerem o mesmo saldo antigo e "perderem" uma atualização uma da outra (o clássico *lost update*). Se o `WHERE` não bater (saldo insuficiente, conta inativa, conta não existe), a query não atualiza nenhuma linha, e o método volta a consultar (`findById`) só para decidir qual dos três motivos foi — isso vira um `BalanceUpdateResult.Rejected` com o motivo certo.
+(Desde a ADR-013 o `WHERE` também confere a política do sentido do movimento — `credit_policy IN (:credits)` num crédito, `debit_policy IN (:debits)` num débito —, com as listas que o `AccountPolicy.Gate` daquela perna aceita. Desde a ADR-012, o mesmo `UPDATE` grava `last_occurred_at`.)
+
+O PostgreSQL trava a linha durante esse `UPDATE`; se outra transação tentar o mesmo `UPDATE` ao mesmo tempo, ela **espera** e, quando a primeira commitar, reavalia o `WHERE` contra o valor já atualizado — então nunca acontece de duas movimentações lerem o mesmo saldo antigo e "perderem" uma atualização uma da outra (o clássico *lost update*). Se o `WHERE` não bater (saldo insuficiente, conta bloqueada, conta encerrada, conta não existe), a query não atualiza nenhuma linha, e o método volta a consultar (`findById`) só para decidir qual dos quatro motivos foi — isso vira um `BalanceUpdateResult.Rejected` com o motivo certo.
 
 O `version` retornado por essa query é exatamente o `sequence` que o `LedgerEntry` daquela movimentação vai usar (ver `MoveMoneyService.post`, seção 5.2) — é assim que a sequência por conta nunca tem buraco, mesmo sob concorrência.
 
@@ -237,7 +257,7 @@ Seguem todas o mesmo padrão: implementam uma porta `out`, usam `JdbcClient` (a 
 
 Roda a cada 500ms (`@Scheduled`), pega até 100 linhas de `outbox_event` ainda não publicadas (`FOR UPDATE SKIP LOCKED` — permite mais de uma instância do relay rodar em paralelo sem disputar a mesma linha), entrega cada uma ao `EventPublisher` (seção 8), e marca `published_at`. Mantém um `Gauge` (`wallet.outbox.pending`) com a contagem de pendências, para alertar se esse número crescer sem parar.
 
-### 6.5 A migration (`V1__core_schema.sql`)
+### 6.5 As migrations (`V1__core_schema.sql` a `V10__account_blocks.sql`)
 
 Não repito aqui — está inteiramente documentada em [`data-model.md`](data-model.md), que é o lugar certo para consultar quando a dúvida for "que coluna existe em tal tabela" ou "por que essa constraint existe".
 
@@ -257,10 +277,11 @@ Pacote raiz: `br.com.walletcore.adapter.in.rest`. É aqui que uma requisição H
 
 ### 7.2 Os controllers de negócio
 
-- **`CustomerController`** — um único endpoint, `POST /v1/customers`, que chama `OnboardCustomerUseCase`.
+- **`CustomerController`** — `POST /v1/customers` (onboarding), o e-mail do cliente e o contato por CPF/CNPJ.
 - **`AccountController`** — `GET /balance`, `GET /statement`, `POST /deposits`, `POST /withdrawals`, `GET /audit`. Repare no método estático `respond(TransactionResult)`, compartilhado com `TransferController` — ele decide entre `201 Created` (transação nova) e `200 OK` + header `Idempotent-Replayed: true` (transação repetida).
 - **`TransferController`** — `POST /v1/transfers`. Valida que o corpo trouxe exatamente um jeito de identificar o destino (`destinationAccountId` OU `destination` por número, nunca os dois, nunca nenhum).
-- **`CurrentTenant`** — uma classe utilitária de uma linha: extrai o `TenantId` do claim `tenant_id` dentro do JWT já validado. Sempre é o JWT que decide o tenant, nunca um parâmetro da requisição — é assim que fica impossível um tenant acessar dados de outro só trocando um id na URL.
+- **`TreasuryController`** (ADR-011), **`AccountControlController`**, **`JudicialTransitController`** e **`CcsController`** (ADR-013) — tesouraria; bloqueios, transferência judicial, encerramento e linha do tempo; as TEDs judiciais; o feed do CCS.
+- **`CurrentTenant`** — extrai o `TenantId` do claim `tenant_id` dentro do JWT já validado (e, para registrar quem fez, o `client_id` e os escopos do token). Sempre é o JWT que decide o tenant, nunca um parâmetro da requisição — é assim que fica impossível um tenant acessar dados de outro só trocando um id na URL.
 
 ### 7.3 `ApiExceptionHandler`
 
@@ -284,7 +305,7 @@ Pacote raiz: `br.com.walletcore.bootstrap` (mais a classe solta `WalletCoreAppli
 
 - **`WalletCoreApplication`** — o `@SpringBootApplication` de sempre. `@EnableScheduling` está aqui porque o `OutboxRelay` e o `AuditSweepJob` usam `@Scheduled`.
 - **`UseCaseConfig`** — **este arquivo é o que literalmente transforma os serviços "puros" de `wallet-application` em beans Spring.** Cada `@Bean` chama o construtor de um `XxxService` passando as portas que o Spring já injetou (que por sua vez são os adapters JDBC/REST). Se você criar um caso de uso novo, é aqui que ele precisa ser registrado.
-- **`DevDataSeeder`** — só ativo no profile `dev` (`@Profile("dev")`). Roda uma vez na inicialização e cria o tenant `demo-tenant` (via `ProvisionTenantUseCase`) se ele ainda não existir — é de onde vêm as credenciais que você usa para testar localmente.
+- **`DevDataSeeder`** — só ativo no profile `dev` (`@Profile("dev")`). Roda uma vez na inicialização e cria os tenants `demo-tenant` e `segundo-tenant` (via `ProvisionTenantUseCase`) se ainda não existirem — é de onde vêm as credenciais que você usa para testar localmente.
 - **`observability/MicrometerMetricsRecorder`** — implementa a porta `MetricsRecorder` usando `Counter` do Micrometer. Cada método (`transactionPosted`, `transactionRejected`, `customerOnboarded`, `auditCompleted`) vira um contador Prometheus com as tags certas.
 - **`observability/AuditSweepJob`** — roda a cada 5 minutos, itera os tenants ativos (`TenantRepository.findAllActiveIds()`) e, para cada um, reaudita uma amostra das contas mais recentemente movimentadas (`AccountRepository.findRecentlyActiveCustomerAccountIds`), chamando `AuditLedgerUseCase.audit(...)` — o mesmo caso de uso que o endpoint HTTP usa. Qualquer inconsistência vira log `ERROR` + métrica, que é o que os alertas do Prometheus (`docker/prometheus/alerts.yml`) observam.
 - **`ArchitectureTest`** e **`WalletCoreConcurrencyTest`** — ver seção 12.
@@ -298,7 +319,7 @@ A melhor forma de realmente entender o sistema é seguir um `POST /v1/accounts/{
 1. **`SecurityConfig`** já validou o JWT antes de qualquer controller rodar (é um filtro, roda antes do Spring MVC despachar a requisição).
 2. **`TenantLoggingInterceptor.preHandle`** coloca `tenant_id` no MDC de log.
 3. **`AccountController.deposit(...)`** recebe a requisição, extrai o tenant via **`CurrentTenant.from(jwt)`**, converte o `BigDecimal` do JSON para **`Money.ofDecimal(...)`**, monta um **`MoveMoneyUseCase.DepositCommand`** e chama `moveMoney.deposit(command)`.
-4. **`MoveMoneyService.deposit(...)`** valida a `Idempotency-Key` e o valor, calcula o `fingerprint`, escolhe uma conta de settlement via **`SettlementRouter.pick(...)`**, monta um **`LedgerTransaction.deposit(...)`** (que já valida sozinho que está balanceado) e chama `tx.inTransaction(...)`.
+4. **`MoveMoneyService.deposit(...)`** valida a `Idempotency-Key` e o valor, calcula o `fingerprint`, escolhe uma shard de A regularizar via **`BackingRouter.pick(...)`**, monta um **`LedgerTransaction.deposit(...)`** (que já valida sozinho que está balanceado) e chama `tx.inTransaction(...)`.
 5. **`JdbcTransactionRunner.inTransaction(...)`** abre a transação, chama `bindTenant` (RLS), e roda o trabalho dentro de retry + Observation.
 6. Dentro da transação, `post(...)` chama **`JdbcTransactionJournal.insertIfAbsent(...)`** (idempotência), depois, para cada perna, **`JdbcAccountRepository.applyDelta(...)`** (o `UPDATE` atômico da seção 6.2).
 7. Ainda dentro da mesma transação: **`JdbcLedgerRepository.append(...)`** grava os `LedgerEntry`, **`JdbcOutboxRepository.enqueue(...)`** grava o evento `TransactionPosted` na tabela `outbox_event`.
@@ -343,7 +364,8 @@ Para rodar tudo: `mvn verify` na raiz de `wallet-core/` (precisa de Docker rodan
 | Sintoma | Onde olhar primeiro |
 |---|---|
 | `403` numa rota nova que você criou | `SecurityConfig.apiChain(...)` — provavelmente falta a linha da rota |
-| `INSUFFICIENT_FUNDS` inesperado | Confira se a conta é `CUSTOMER` (nunca fica negativa) vs `SETTLEMENT` (pode); `Account.Kind` |
+| `INSUFFICIENT_FUNDS` inesperado | Confira se a conta é `CUSTOMER` ou `JUDICIAL_TRANSIT` (nunca ficam negativas) vs `BACKING` (pode); `Account.Kind` |
+| `ACCOUNT_BLOCKED` inesperado | Veja os bloqueios ativos (`GET /v1/accounts/{id}/blocks?active=true`) e `AccountPolicy.gateFor`: qual tipo de transação cada política aceita |
 | Saldo "sumindo" ou duplicando em teste de carga | `JdbcAccountRepository.applyDelta` — confira se o `WHERE` da query não foi alterado |
 | `IDEMPOTENCY_KEY_REUSED` (409) inesperado | O `fingerprint` mudou entre duas chamadas com a mesma chave — confira `MoveMoneyService.fingerprint(...)` e os parâmetros que entram nele |
 | Auditoria (`/audit`) reportando inconsistência | Veja `docs/adr/007-observabilidade.md`; comece pelo `AuditLedgerService`, confira se algum código está gravando `LedgerEntry` fora do fluxo normal de `MoveMoneyService` |

@@ -1,0 +1,50 @@
+// GitHub Codespaces (ou VS Code Dev Containers): a stack inteira numa máquina remota. Guia: docs/codespaces.md
+{
+  "name": "wallet (stack completa)",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  // A stack usa ~6 GB rodando e ~10 GB compilando: a máquina de 4 núcleos e 16 GB.
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb",
+    "storage": "32gb"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "25",
+      "jdkDistro": "tem",
+      "installMaven": "true"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    }
+  },
+  "postCreateCommand": "cd wallet-console && npm ci",
+  // Sobe a stack e o console em segundo plano a cada início; o progresso fica em /tmp/dev-stack.log.
+  "postStartCommand": "bash .devcontainer/start.sh",
+  "forwardPorts": [4200, 8086, 8087, 8025, 8080, 8081, 8082, 8083, 8084, 8085, 3000, 16686],
+  "portsAttributes": {
+    "4200": { "label": "Console", "onAutoForward": "notify" },
+    "8086": { "label": "M-Wall demo-tenant", "onAutoForward": "silent" },
+    "8087": { "label": "M-Wall segundo-tenant", "onAutoForward": "silent" },
+    "8025": { "label": "Mailpit (códigos de login)", "onAutoForward": "silent" },
+    "8080": { "label": "wallet-core", "onAutoForward": "silent" },
+    "8081": { "label": "wallet-pix", "onAutoForward": "silent" },
+    "8082": { "label": "wallet-scheduler", "onAutoForward": "silent" },
+    "8083": { "label": "app-api demo-tenant", "onAutoForward": "silent" },
+    "8084": { "label": "app-api segundo-tenant", "onAutoForward": "silent" },
+    "8085": { "label": "wallet-otp", "onAutoForward": "silent" },
+    "3000": { "label": "Grafana", "onAutoForward": "silent" },
+    "16686": { "label": "Jaeger", "onAutoForward": "silent" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "angular.ng-template",
+        "fwcd.kotlin",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  }
+}
