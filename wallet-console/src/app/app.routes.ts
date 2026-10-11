@@ -18,6 +18,11 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./pages/account/account').then((m) => m.AccountPage),
   },
+  {
+    path: 'tesouraria',
+    canActivate: [authGuard],
+    loadComponent: () => import('./pages/treasury/treasury').then((m) => m.TreasuryPage),
+  },
   { path: '', pathMatch: 'full', redirectTo: 'home' },
   { path: '**', redirectTo: 'home' },
 ];

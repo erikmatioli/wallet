@@ -2,6 +2,7 @@ import { Component, OnInit, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { AuthService } from '../../core/auth.service';
 import { WalletApiService } from '../../core/wallet-api.service';
 import { extractErrorMessage } from '../../core/http-error.util';
 import { AccountListItem } from '../../core/models';
@@ -29,10 +30,16 @@ export class Home implements OnInit {
   searchCheckDigit = '';
   readonly searching = signal(false);
 
+  /** The treasury (ADR-011 of wallet-core) is read with ledger:audit. */
+  readonly canSeeTreasury: boolean;
+
   constructor(
     private readonly api: WalletApiService,
     private readonly router: Router,
-  ) {}
+    auth: AuthService,
+  ) {
+    this.canSeeTreasury = auth.hasScope('ledger:audit');
+  }
 
   ngOnInit(): void {
     this.loadPage(true);

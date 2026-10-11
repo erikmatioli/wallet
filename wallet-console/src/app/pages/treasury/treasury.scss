@@ -1,0 +1,184 @@
+@use '../../../styles/page' as *;
+
+.page.wide {
+  max-width: 1040px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+}
+
+.page-header h1 {
+  margin: 0.25rem 0 0;
+  font-size: 1.3rem;
+}
+
+.back {
+  color: var(--color-accent);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.right {
+  text-align: right;
+}
+
+.done {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  border: 1px solid var(--color-success-border);
+}
+
+.uncovered {
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  flex-wrap: wrap;
+  border-left: 6px solid var(--color-success-border);
+}
+
+.uncovered.alert {
+  border-left-color: var(--color-danger-text);
+}
+
+.uncovered.alert .big {
+  color: var(--color-danger-text);
+}
+
+.kicker {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.big {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0.2rem 0;
+}
+
+.explain {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+  max-width: 34rem;
+}
+
+.backing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+button.backing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  padding: 1rem;
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: 400;
+  border: 2px solid transparent;
+  box-shadow: var(--shadow-card);
+  text-align: left;
+
+  &:hover:not(:disabled) {
+    background: var(--color-surface);
+  }
+}
+
+button.backing.selected {
+  border-color: var(--color-accent);
+}
+
+button.backing .name {
+  font-weight: 700;
+}
+
+button.backing .type,
+button.backing .yesterday {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  min-height: 1em;
+}
+
+button.backing .value {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-top: 0.3rem;
+}
+
+button.backing.negative .value,
+button.backing .warn {
+  color: var(--color-danger-text);
+}
+
+button.backing .warn {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.forms {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.tabs button {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+.tabs button.on {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+}
+
+.forms .hint {
+  margin: 0.75rem 0 0;
+}
+
+.row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.row label {
+  min-width: 160px;
+}
+
+.row label.grow {
+  flex: 1;
+}
+
+summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.sub {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}

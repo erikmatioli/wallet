@@ -9,6 +9,8 @@ const LABELS: Record<TransactionType, string> = {
   PIX_REFUND: 'Estorno de Pix',
   PIX_RETURN_IN: 'Devolução recebida',
   PIX_RETURN_OUT: 'Devolução enviada',
+  TREASURY_TRANSFER: 'Movimentação de tesouraria',
+  RECLASSIFICATION: 'Reclassificação',
 };
 
 /** Readable name of a transaction type; an unknown one (a newer API) is shown as it came. */

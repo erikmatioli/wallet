@@ -80,7 +80,9 @@ export type TransactionType =
   | 'PIX_OUT'
   | 'PIX_REFUND'
   | 'PIX_RETURN_IN'
-  | 'PIX_RETURN_OUT';
+  | 'PIX_RETURN_OUT'
+  | 'TREASURY_TRANSFER'
+  | 'RECLASSIFICATION';
 
 export interface TransactionResponse {
   id: string;
@@ -243,4 +245,83 @@ export interface CreateScheduleRequest {
     payerTaxId: string;
     payee: { ispb: string; branch: string; accountNumber: string; taxId: string; name: string };
   };
+}
+
+// ---------------------------------------------------------------- treasury (ADR-011 of wallet-core)
+// Amounts of a backing account are its "expected balance": what the tenant should have in that place.
+
+export type BackingType = 'PIX_PI' | 'RESERVES' | 'CCME' | 'INVESTMENT' | 'CASH' | 'CREDIT_PORTFOLIO' | 'UNASSIGNED';
+
+export interface BackingAccount {
+  id: string;
+  type: BackingType;
+  name: string;
+  externalRef: string | null;
+  createdAt: string;
+}
+
+export interface BackingPosition {
+  account: BackingAccount;
+  expected: number;
+  /** Null in the first minute after midnight, while yesterday may still be closing. */
+  expectedYesterday: number | null;
+  currency: string;
+}
+
+export interface PositionsResponse {
+  accounts: BackingPosition[];
+  total: number;
+  currency: string;
+}
+
+export interface TreasuryReference {
+  document: string | null;
+  note: string | null;
+}
+
+export interface BackingEntry {
+  transactionId: string;
+  type: TransactionType;
+  direction: 'IN' | 'OUT';
+  amount: number;
+  expectedAfter: number;
+  description: string;
+  occurredAt: string;
+  customerName: string | null;
+  customerAccount: string | null;
+  otherBackingAccount: BackingAccount | null;
+  reference: TreasuryReference | null;
+}
+
+export interface BackingStatementResponse {
+  account: BackingAccount;
+  entries: BackingEntry[];
+  next: string | null;
+  currency: string;
+}
+
+export interface UncoveredDay {
+  date: string;
+  created: number;
+  covered: number;
+  uncoveredAtEnd: number;
+}
+
+export interface UncoveredDailyResponse {
+  currency: string;
+  days: UncoveredDay[];
+}
+
+export interface TreasuryTransferRequest {
+  from: string;
+  to: string;
+  amount: number;
+  description?: string;
+  reference?: TreasuryReference;
+}
+
+export interface RegisterBackingAccountRequest {
+  type: BackingType;
+  name: string;
+  externalRef?: string;
 }
