@@ -72,7 +72,11 @@ class FakeCore : CoreBanking {
         return id
     }
 
-    override fun me(accountId: AccountId) = Me("Cliente", "0001", "100", "1", "ACTIVE", 0)
+    /** Accounts wallet-core closed (its ADR-013). */
+    val closed = mutableSetOf<AccountId>()
+
+    override fun me(accountId: AccountId) =
+        Me("Cliente", "0001", "100", "1", if (accountId in closed) "CLOSED" else "ACTIVE", 0)
 
     override fun statement(accountId: AccountId, before: Long?, limit: Int) = StatementPage(emptyList())
 
@@ -308,6 +312,18 @@ class AuthServiceTest {
 
         val session = auth.confirmLogin(started.challengeId, cpf, otp.last().code)
         assertThat(session.customerName).isEqualTo("Maria Silva")
+    }
+
+    @Test
+    fun `a closed account is refused at login, only after the code`() {
+        auth.signUp(otp, cpf, "Maria Silva", email = "maria@example.com")
+        core.closed += core.customers.getValue("52998224725")
+
+        val started = auth.startLogin(cpf) // the start answers as always: nothing tells the account is closed
+        assertThat(otp.last().email).isEqualTo("maria@example.com")
+        assertThatThrownBy { auth.confirmLogin(started.challengeId, cpf, otp.last().code) }
+            .isInstanceOf(BusinessRuleException::class.java)
+            .hasMessageContaining("encerrada")
     }
 
     @Test

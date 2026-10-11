@@ -73,9 +73,16 @@ fun HomeScreen(viewModel: HomeViewModel, onStatement: () -> Unit, onTransfer: ()
                 }
             }
             s.history?.takeIf { it.days.size > 1 }?.let { BalanceChart(it.days) }
+            // wallet-core's ADR-013: a blocked account still shows its money, but cannot pay.
+            if (!s.me.canPay) {
+                Text("Sua conta está bloqueada para pagamentos. Procure o atendimento.",
+                    color = MaterialTheme.colorScheme.error)
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = onTransfer) { Text("Transferir") }
-                Button(onClick = onPix) { Text("Pix") }
+                if (s.me.canPay) {
+                    Button(onClick = onTransfer) { Text("Transferir") }
+                    Button(onClick = onPix) { Text("Pix") }
+                }
                 OutlinedButton(onClick = onSchedules) { Text("Agendamentos") }
             }
             Text("Últimos lançamentos", style = MaterialTheme.typography.titleMedium)

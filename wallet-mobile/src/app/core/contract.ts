@@ -12,6 +12,10 @@ export interface Me {
   checkDigit: string;
   status: string;
   balanceCents: number;
+  /** wallet-core's ADR-013: false under any block. Absent from an older app-api: read it as true. */
+  canPay?: boolean;
+  /** False only under a total block. */
+  canReceive?: boolean;
 }
 
 /** `GET /app/v1/statement?before=&limit=`: newest first; `nextBefore` is the next page's cursor, or null. */

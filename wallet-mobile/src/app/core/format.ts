@@ -75,6 +75,7 @@ const TYPES: Record<string, string> = {
   PIX_REFUND: 'Estorno de Pix',
   PIX_RETURN_IN: 'Devolução recebida',
   PIX_RETURN_OUT: 'Devolução enviada',
+  JUDICIAL_TRANSFER: 'Transferência por ordem judicial',
 };
 
 /** Same names as the console's statement. */

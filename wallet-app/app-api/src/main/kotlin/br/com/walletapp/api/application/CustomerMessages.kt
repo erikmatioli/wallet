@@ -8,7 +8,10 @@ object CustomerMessages {
 
     private val messages = mapOf(
         "INSUFFICIENT_FUNDS" to "Saldo insuficiente.",
-        "ACCOUNT_NOT_ACTIVE" to "Sua conta não pode movimentar no momento. Procure o atendimento.",
+        // wallet-core's ADR-013: a blocked account answers ACCOUNT_BLOCKED; one no longer active is closed.
+        "ACCOUNT_BLOCKED" to "Sua conta está bloqueada para pagamentos. Procure o atendimento.",
+        "ACCOUNT_NOT_ACTIVE" to "Sua conta está encerrada. Procure o atendimento.",
+        "ACCOUNT_CLOSED" to "Sua conta foi encerrada. Para voltar a usar o app, procure o atendimento.",
         "DESTINATION_ACCOUNT_NOT_FOUND" to "Conta de destino não encontrada.",
         "ACCOUNT_NOT_FOUND" to "Conta não encontrada.",
         "SAME_ACCOUNT" to "A conta de destino é a sua própria conta.",

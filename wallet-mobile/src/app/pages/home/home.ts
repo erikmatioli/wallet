@@ -60,8 +60,10 @@ import { Logo } from '../../ui/logo';
           <p class="acct num">
             Ag {{ me.branch }} · Conta {{ me.accountNumber }}-{{ me.checkDigit }}
           </p>
-          @if (me.status !== 'ACTIVE') {
-            <p class="status">Conta {{ me.status === 'BLOCKED' ? 'bloqueada' : 'inativa' }}</p>
+          @if (me.status === 'CLOSED') {
+            <p class="status">Conta encerrada</p>
+          } @else if (me.canPay === false) {
+            <p class="status">Bloqueada para pagamentos</p>
           }
         } @else if (flow.loading()) {
           <div class="skeleton bar-lg" aria-hidden="true"></div>
@@ -93,8 +95,15 @@ import { Logo } from '../../ui/logo';
         }
       }
 
+      @if (blocked()) {
+        <div class="alert alert-error" role="status">
+          <mw-icon name="alert" [size]="20" />
+          <span class="grow">Sua conta está bloqueada para pagamentos. Procure o atendimento.</span>
+        </div>
+      }
+
       <nav class="actions" aria-label="Atalhos">
-        @for (a of actions; track a.path) {
+        @for (a of visibleActions(); track a.path) {
           <a [routerLink]="a.path" class="action">
             <span class="action-icon"><mw-icon [name]="a.icon" /></span>
             <span>{{ a.label }}</span>
@@ -266,6 +275,14 @@ export class Home implements OnInit {
     { path: '/agenda/novo', label: 'Agendar', icon: 'calendar' },
     { path: '/extrato', label: 'Extrato', icon: 'statement' },
   ];
+  /** wallet-core's ADR-013: a blocked account still shows its money and statement, but cannot pay. */
+  protected readonly blocked = computed(() => {
+    const me = this.flow.me();
+    return !!me && me.status !== 'CLOSED' && me.canPay === false;
+  });
+  protected readonly visibleActions = computed(() =>
+    this.blocked() ? this.actions.filter((a) => a.path === '/extrato') : this.actions,
+  );
 
   ngOnInit(): void {
     void this.flow.load();
