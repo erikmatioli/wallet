@@ -20,8 +20,13 @@
     }
   },
   "postCreateCommand": "cd wallet-console && npm ci",
-  // Sobe a stack e o console em segundo plano a cada início; o progresso fica em /tmp/dev-stack.log.
-  "postStartCommand": "bash .devcontainer/start.sh",
+  // Ao abrir o Codespace, sobe a stack e o console, cada um num terminal do VS Code: os dois ficam vivos enquanto
+  // o Codespace estiver aberto e mostram o andamento. (Um processo em segundo plano no postStartCommand é encerrado
+  // quando o comando termina.)
+  "postAttachCommand": {
+    "stack": "bash .devcontainer/start.sh",
+    "console": "bash .devcontainer/start.sh console"
+  },
   "forwardPorts": [4200, 8086, 8087, 8025, 8080, 8081, 8082, 8083, 8084, 8085, 3000, 16686],
   "portsAttributes": {
     "4200": { "label": "Console", "onAutoForward": "notify" },

@@ -27,15 +27,14 @@ Para a cota render:
 3. **Create codespace**. O VS Code abre no navegador; o Codespace instala o JDK 25, o Maven, o Node 22 e o Docker
    (alguns minutos) e depois sobe a stack.
 
-A primeira subida compila todas as imagens: **15 a 25 minutos**. Acompanhe num terminal do VS Code:
+Ao abrir, o VS Code ganha dois terminais: **stack**, que sobe os serviços um a um e termina com a tabela de status
+(tudo `200`), e **console**, que fica rodando o `ng serve`. A primeira subida compila todas as imagens: **15 a 25
+minutos** (no teste, a stack ficou pronta em ~8 minutos). Nas aberturas seguintes, sobe em poucos minutos: as
+imagens já existem. A qualquer momento:
 
 ```bash
-tail -f /tmp/dev-stack.log     # a stack, serviço por serviço
-tail -f /tmp/console.log       # o console (ng serve)
 scripts/dev-stack.sh status    # containers e health
 ```
-
-Nos inícios seguintes (depois de parado), sobe em 2 a 3 minutos: as imagens já existem.
 
 ## Acessar
 
@@ -67,7 +66,9 @@ Como o endereço é HTTPS, o M-Wall instala como app ("Adicionar à tela inicial
 
 ## Se algo não subir
 
-- `tail -n 80 /tmp/dev-stack.log` mostra em que serviço parou; `(cd <serviço> && docker compose logs --tail 80)`
-  mostra o porquê.
+- O terminal **stack** mostra em que serviço parou; `(cd <serviço> && docker compose logs --tail 80)` mostra o
+  porquê.
+- Os terminais não apareceram, ou foram fechados: `bash .devcontainer/start.sh` (stack) e
+  `bash .devcontainer/start.sh console` (console), cada um num terminal.
 - `scripts/dev-stack.sh up` de novo continua de onde parou.
 - Disco cheio (`no space left on device`): `docker builder prune -af` libera o cache de build.
