@@ -49,11 +49,58 @@ Aba **PORTS** do VS Code: cada serviço tem uma linha com o endereço (`https://
 | 8080 | wallet-core (`/swagger-ui.html`) |
 | 3000 / 16686 | Grafana / Jaeger |
 
-As portas são **privadas**: só abrem para quem está logado no GitHub com a sua conta. No celular, entre no GitHub
-pelo navegador antes de abrir o M-Wall. Não mude a visibilidade para *Public*: os serviços usam segredos de
-desenvolvimento.
+As portas são **privadas**: só abrem num navegador logado no GitHub com a sua conta. Nelas, as chamadas que levam
+`Authorization: Bearer` (o M-Wall depois de entrar, o "Try it out" do Swagger) recebem **401** do encaminhamento do
+GitHub, antes de chegar ao serviço. Para usar o M-Wall, torne a porta dele pública; para chamar as APIs, use o
+terminal do Codespace (`localhost`) ou traga as portas para o seu PC com
+`gh codespace ports forward 8080:8080 8090:8090`.
+
+### Tornar uma porta pública
+
+Aba **PORTS** → botão direito na linha → **Port Visibility** → **Public** (ou, no terminal,
+`gh codespace ports visibility 8086:public -c $CODESPACE_NAME`). Volte para *Private* ao terminar.
+
+| Porta | Pública? |
+|---|---|
+| 8086 / 8087 (M-Wall) | pode, durante o uso: para entrar é preciso o código do Mailpit, que continua privado |
+| 8090 (simulador do SPI) | só se precisar e por pouco tempo: quem tiver o endereço "manda Pix" para as contas de teste |
+| 8080 (core), 4200 (console), 8025 (Mailpit) | **nunca**: aceitam o login de desenvolvimento escrito neste repositório, ou mostram os códigos de qualquer cliente |
+
+- O navegador mostra uma vez por sessão o aviso **"Codespaces Access Port"** do GitHub: toque em **Continue**.
+- **Ao religar o Codespace, todas as portas voltam a *Private*.** Torne a porta pública de novo e **copie um link
+  novo** da aba PORTS: um link aberto enquanto a porta era privada fica preso no login do GitHub.
 
 Como o endereço é HTTPS, o M-Wall instala como app ("Adicionar à tela inicial").
+
+### Mandar um Pix "de outro banco"
+
+O simulador do SPI (porta 8090) faz o papel do outro banco. No terminal do Codespace:
+
+```bash
+python3 wallet-pix/scripts/pixdev.py incoming --account 001000029 --taxid 52998224725 --amount 25.00
+```
+
+A conta é o número com o dígito, sem traço (`0001 / 00100002-9` vira `001000029`), e o CPF é o do titular. Pelo
+navegador, abra `https://<nome>-8090.app.github.dev/simulate/messages` e, no Console do DevTools dessa aba, faça um
+`fetch('/simulate/incoming', { method: 'POST', ... })` com o mesmo corpo (veja `wallet-pix/README.md`).
+
+## Os dados
+
+Todos os bancos (core, app, Pix, agendamentos, OTP) ficam no Postgres do core, num volume do Docker que está no disco
+do Codespace: **parar e religar o Codespace não perde nada**. Perdem-se só o que fica em memória (os e-mails do
+Mailpit, um Pix em andamento no simulador, a fila do LocalStack naquele instante).
+
+Os dados somem quando o Codespace é **apagado**, à mão ou depois de 30 dias sem uso (*Default retention period*, em
+<https://github.com/settings/codespaces>). Antes de apagar, ou de um *Rebuild Container*, faça um backup:
+
+```bash
+mkdir -p /workspaces/backup
+for db in wallet app app_segundo pix scheduler otp; do
+  docker exec wallet-core-postgres-1 pg_dump -U wallet_owner -d $db -Fc > /workspaces/backup/$db.dump
+done
+```
+
+Para guardar fora do Codespace: botão direito na pasta `backup`, no explorador do VS Code → **Download**.
 
 ## Trabalhar
 
@@ -72,3 +119,6 @@ Como o endereço é HTTPS, o M-Wall instala como app ("Adicionar à tela inicial
   `bash .devcontainer/start.sh console` (console), cada um num terminal.
 - `scripts/dev-stack.sh up` de novo continua de onde parou.
 - Disco cheio (`no space left on device`): `docker builder prune -af` libera o cache de build.
+- `service "app-db-init-segundo" didn't complete successfully` num Codespace novo: era a corrida entre os dois
+  inicializadores do wallet-app criando os mesmos usuários do Postgres, corrigida no `init-app-db.sh`. Em versões
+  anteriores, `scripts/dev-stack.sh up --fast` de novo resolve.
