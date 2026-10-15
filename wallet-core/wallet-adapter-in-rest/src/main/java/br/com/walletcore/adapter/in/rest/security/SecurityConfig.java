@@ -68,7 +68,8 @@ class SecurityConfig {
                         // Treasury (ADR-011): reading is auditing the ledger; moving money between backing accounts
                         // and registering them is treasury:write - who creates money (a deposit) is not who covers it.
                         .requestMatchers(HttpMethod.GET, "/v1/treasury/**").hasAuthority("SCOPE_ledger:audit")
-                        .requestMatchers(HttpMethod.POST, "/v1/treasury/transfers", "/v1/treasury/backing-accounts")
+                        .requestMatchers(HttpMethod.POST, "/v1/treasury/transfers", "/v1/treasury/backing-accounts",
+                                "/v1/treasury/revenue/withdrawals")
                         .hasAuthority("SCOPE_treasury:write")
                         // Bare "/v1/accounts" (the directory listing) explicitly, rather than relying on
                         // "/v1/accounts/**" to also match the zero-segment case: Spring Security 6 uses

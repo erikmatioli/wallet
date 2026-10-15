@@ -32,9 +32,15 @@ public interface AccountRepository {
      * Read-model row for the accounts directory: an Account joined with its customer's display name.
      *
      * @param documentType CPF or CNPJ: the type only, never the document (wallet-fees prices by it, ADR-014)
+     * @param document     the holder's full CPF/CNPJ; the API shows it only to a token with customers:document
      */
     record AccountDirectoryItem(Account account, String customerName, String documentMasked, String customerEmail,
-                                String documentType) {
+                                String documentType, String document) {
+
+        public AccountDirectoryItem(Account account, String customerName, String documentMasked, String customerEmail,
+                                    String documentType) {
+            this(account, customerName, documentMasked, customerEmail, documentType, null);
+        }
 
         public AccountDirectoryItem(Account account, String customerName, String documentMasked, String customerEmail) {
             this(account, customerName, documentMasked, customerEmail, null);

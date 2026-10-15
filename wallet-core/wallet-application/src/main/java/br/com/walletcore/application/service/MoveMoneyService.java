@@ -19,6 +19,7 @@ import br.com.walletcore.domain.account.AccountBlock;
 import br.com.walletcore.domain.account.AccountPolicy;
 import br.com.walletcore.domain.backing.BackingAccount;
 import br.com.walletcore.domain.backing.BackingType;
+import br.com.walletcore.domain.backing.RevenueWithdrawal;
 import br.com.walletcore.domain.backing.TreasuryReference;
 import br.com.walletcore.domain.event.TransactionPosted;
 import br.com.walletcore.domain.exception.BusinessRuleException;
@@ -355,6 +356,35 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
                     }, () -> judicial.insert(c.tenantId(), new JudicialTransferRepository.Detail(id,
                             JudicialTransferRepository.Kind.TRANSIT_OUT, null, transfer.blockId(), transfer.process(),
                             transfer.protocol(), false, c.transferId(), c.actor(), note, document)));
+        });
+    }
+
+    @Override
+    public TransactionResult revenueWithdrawal(RevenueWithdrawalCommand c) {
+        String key = validateKey(c.idempotencyKey());
+        requirePositive(c.amount());
+        if (c.actor() == null) {
+            throw new ValidationException("INVALID_OPERATOR", "operator is required, at most 80 characters");
+        }
+        TransactionId id = TransactionId.newId();
+        // Validates the destination, the receipt and the note before anything is read.
+        RevenueWithdrawal detail = new RevenueWithdrawal(id, c.from(), c.destination(), c.document(), c.note(),
+                c.actor());
+        String fp = fingerprint("REVENUE_WITHDRAWAL", c.from(), c.amount().cents(), detail.destination().describe(),
+                detail.document(), detail.note(), c.actor().operator());
+        return tx.inTransaction(c.tenantId(), () -> {
+            BackingAccount from = loadBacking(c.tenantId(), c.from());
+            if (from.type() == BackingType.UNASSIGNED) {
+                throw new BusinessRuleException("INVALID_TREASURY_SOURCE",
+                        "the revenue leaves from a real place, never from \"a regularizar\"");
+            }
+            AccountId revenue = accounts.findTenantRevenue(c.tenantId())
+                    .orElseThrow(() -> new IllegalStateException("tenant has no revenue account"));
+            AccountId shard = router.pick(c.tenantId(), from.id(), id);
+            LedgerTransaction lt = LedgerTransaction.revenueWithdrawal(c.tenantId(), id, revenue, shard, c.amount(),
+                    "Retirada de receita: " + detail.destination().describe(), clock.instant());
+            return post(lt, key, fp, Map.of(revenue, Account.Kind.TENANT_REVENUE, shard, Account.Kind.BACKING), null,
+                    () -> { }, () -> backing.insertRevenueWithdrawal(c.tenantId(), detail));
         });
     }
 

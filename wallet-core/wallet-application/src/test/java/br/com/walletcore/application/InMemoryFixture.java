@@ -33,6 +33,7 @@ import br.com.walletcore.domain.account.AccountType;
 import br.com.walletcore.domain.account.PaymentAccountNumber;
 import br.com.walletcore.domain.backing.BackingAccount;
 import br.com.walletcore.domain.backing.BackingType;
+import br.com.walletcore.domain.backing.RevenueWithdrawal;
 import br.com.walletcore.domain.backing.TreasuryReference;
 import br.com.walletcore.domain.customer.Customer;
 import br.com.walletcore.domain.customer.TaxId;
@@ -397,6 +398,7 @@ final class InMemoryFixture {
     final Map<BackingAccountId, BackingAccount> backingAccounts = new java.util.LinkedHashMap<>();
     final Map<AccountId, BackingAccountId> shardOwners = new java.util.LinkedHashMap<>();
     final Map<TransactionId, TreasuryReference> treasuryReferences = new HashMap<>();
+    final Map<TransactionId, RevenueWithdrawal> revenueWithdrawals = new HashMap<>();
 
     final BackingAccountRepository backingRepository = new BackingAccountRepository() {
         @Override
@@ -444,6 +446,28 @@ final class InMemoryFixture {
         @Override
         public void insertTreasuryReference(TenantId tenantId, TransactionId transactionId, TreasuryReference reference) {
             treasuryReferences.put(transactionId, reference);
+        }
+
+        @Override
+        public void insertRevenueWithdrawal(TenantId tenantId, RevenueWithdrawal withdrawal) {
+            revenueWithdrawals.put(withdrawal.transactionId(), withdrawal);
+            treasuryReferences.put(withdrawal.transactionId(),
+                    new TreasuryReference(withdrawal.document(), withdrawal.note()));
+        }
+
+        @Override
+        public Map<TransactionId, RevenueWithdrawal> findRevenueWithdrawals(TenantId tenantId,
+                                                                             Collection<TransactionId> ids) {
+            Map<TransactionId, RevenueWithdrawal> found = new HashMap<>();
+            ids.stream().filter(revenueWithdrawals::containsKey).forEach(id -> found.put(id, revenueWithdrawals.get(id)));
+            return found;
+        }
+
+        @Override
+        public Money sumRevenueWithdrawnSince(TenantId tenantId, Instant since) {
+            return Money.ofCents(journal.values().stream()
+                    .filter(t -> revenueWithdrawals.containsKey(t.id()) && !t.occurredAt().isBefore(since))
+                    .mapToLong(t -> t.amount().cents()).sum());
         }
 
         @Override

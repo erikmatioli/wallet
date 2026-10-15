@@ -153,6 +153,18 @@ public record LedgerTransaction(
     }
 
     /**
+     * The tenant's revenue left the platform (ADR-015): the revenue account is debited and the backing account the
+     * money left from is credited, as the TED of a judicial transfer credits it.
+     */
+    public static LedgerTransaction revenueWithdrawal(TenantId tenantId, TransactionId id, AccountId revenueAccount,
+                                                      AccountId backingShard, Money amount, String description,
+                                                      Instant now) {
+        return new LedgerTransaction(id, tenantId, TransactionType.REVENUE_WITHDRAWAL, amount, description,
+                List.of(new Leg(revenueAccount, EntryDirection.DEBIT, amount),
+                        new Leg(backingShard, EntryDirection.CREDIT, amount)), now);
+    }
+
+    /**
      * Legs sorted by account id. Locking accounts in this deterministic order in every
      * transaction makes deadlocks impossible (A->B and B->A both lock the lower id first).
      */

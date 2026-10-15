@@ -118,7 +118,8 @@ class AccountControlController {
         control.close(new CloseCommand(tenant, new AccountId(accountId), request.reason(), request.note(),
                 actor(jwt, request.operator())));
         log.info("account closed: account={} reason={}", accountId, request.reason());
-        return AccountDetailResponse.from(query.getAccountDetail(tenant, new AccountId(accountId)));
+        return AccountDetailResponse.from(query.getAccountDetail(tenant, new AccountId(accountId)),
+                CurrentTenant.seesDocument(jwt));
     }
 
     @GetMapping("/timeline")

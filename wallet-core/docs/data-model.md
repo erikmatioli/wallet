@@ -10,7 +10,7 @@ O modelo tem doze tabelas, organizadas em cinco grupos:
 |---|---|---|
 | **Identidade** | `tenant`, `customer` | Quem é o cliente white label e quem são os clientes finais dele |
 | **Saldo e ledger** | `account`, `financial_transaction`, `ledger_entry` | O núcleo financeiro: contas, transações e os lançamentos contábeis imutáveis |
-| **Detalhe das transações** | `pix_transaction_detail`, `treasury_transfer_detail`, `judicial_transfer_detail`, `fee_detail` | O que um Pix, uma movimentação de tesouraria e uma transferência judicial carregam além do ledger |
+| **Detalhe das transações** | `pix_transaction_detail`, `treasury_transfer_detail`, `judicial_transfer_detail`, `fee_detail`, `revenue_withdrawal_detail` | O que um Pix, uma movimentação de tesouraria, uma transferência judicial, uma tarifa e uma retirada de receita carregam além do ledger |
 | **Lastro, bloqueios e status** | `backing_account`, `account_block`, `account_status_event` | Onde o dinheiro dos clientes está guardado (ADR-011), os bloqueios das contas e as aberturas e encerramentos (ADR-013) |
 | **Integração** | `outbox_event` | Publicação assíncrona e confiável de eventos de domínio |
 
@@ -193,7 +193,7 @@ A tabela mais importante do modelo. Representa **quatro tipos de conta na mesma 
 | `CUSTOMER` | Conta de pagamento (tipo `TRAN`) de um cliente final | obrigatório | obrigatórios | `false` (nunca fica negativa) |
 | `BACKING` | Uma *shard* de uma conta de lastro (ADR-011): a contrapartida de todo movimento que entra ou sai do tenant, no lugar onde o dinheiro daquele meio fica (Conta PI, Caixa, A regularizar…). Várias por conta de lastro, para não haver uma linha quente | nulo | nulos | `true` (o saldo é negativo: é o espelho do dinheiro guardado ali) |
 | `JUDICIAL_TRANSIT` | "Depósitos judiciais a transferir" (ADR-013), uma por tenant: recebe a transferência judicial até a tesouraria registrar a TED | nulo | nulos | `false` (é dinheiro devido ao juízo) |
-| `TENANT_REVENUE` | A conta de receitas do tenant (ADR-014), uma por tenant: recebe as tarifas e devolve as estornadas. Dinheiro do tenant, fora do lastro | nulo | nulos | `false` |
+| `TENANT_REVENUE` | A conta de receitas do tenant (ADR-014), uma por tenant: recebe as tarifas, devolve as estornadas e sai pela retirada da tesouraria (ADR-015). Dinheiro do tenant, não dos clientes, mas guardado nas mesmas contas de lastro | nulo | nulos | `false` |
 | `SETTLEMENT` | A contrapartida única que as contas de lastro substituíram. Fica no banco, zerada e `CLOSED`, só como histórico | nulo | nulos | `true` |
 
 | Coluna | Tipo | Regra |
@@ -370,6 +370,13 @@ As TEDs de uma transferência nunca somam mais que ela: o `MoveMoneyService` con
 Uma linha por `FEE` e por `FEE_REFUND`: `transaction_id` (PK), `tenant_id`, `operation` (o código da operação da cesta
 de tarifas: `PIX_OUT`, `WITHDRAWAL`, `MONTHLY`…), `source_transaction_id` (a transação que gerou a tarifa; no estorno,
 a tarifa estornada) e `reference` (livre, como o mês da mensalidade). Append-only.
+
+### 3.5.5 `revenue_withdrawal_detail` — a retirada da receita (ADR-015)
+
+Uma linha por `REVENUE_WITHDRAWAL`: `transaction_id` (PK), `tenant_id`, `backing_account_id` (a conta de lastro de onde
+o dinheiro saiu), `destination_bank`, `destination_branch`, `destination_account` (a conta do tenant fora da
+plataforma), `document` (o comprovante, obrigatório), `note`, `operator` e `client_id`. Append-only. O extrato da conta
+de lastro mostra o comprovante e a observação, como numa movimentação de tesouraria.
 
 ### 3.6 `outbox_event` — fila transacional de eventos
 

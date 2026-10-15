@@ -1,6 +1,7 @@
 package br.com.walletcore.application.port.in;
 
 import br.com.walletcore.domain.account.Actor;
+import br.com.walletcore.domain.backing.RevenueWithdrawal;
 import br.com.walletcore.domain.backing.TreasuryReference;
 import br.com.walletcore.domain.ledger.TransactionType;
 import br.com.walletcore.domain.pix.PixDetail;
@@ -78,6 +79,12 @@ public interface MoveMoneyUseCase {
     TransactionResult feeRefund(FeeRefundCommand command);
 
     /**
+     * The treasury took the tenant's revenue out of the platform (ADR-015): out of the revenue account, against the
+     * backing account the money left from (never "a regularizar"). At most the revenue's balance.
+     */
+    TransactionResult revenueWithdrawal(RevenueWithdrawalCommand command);
+
+    /**
      * @param operation   the fee basket's operation (PIX_OUT, PIX_IN, TRANSFER_OUT, WITHDRAWAL, MONTHLY...)
      * @param description what the customer reads in the statement ("Tarifa: Pix enviado")
      * @param source      the transaction that caused the fee; null for a monthly fee
@@ -107,6 +114,12 @@ public interface MoveMoneyUseCase {
     /** @param document the TED's receipt (required) */
     record JudicialTransitOutCommand(TenantId tenantId, TransactionId transferId, BackingAccountId from, Money amount,
                                      String document, String note, Actor actor, String idempotencyKey) {
+    }
+
+    /** @param document the receipt (required) */
+    record RevenueWithdrawalCommand(TenantId tenantId, BackingAccountId from, Money amount,
+                                    RevenueWithdrawal.Destination destination, String document, String note,
+                                    Actor actor, String idempotencyKey) {
     }
 
     record TreasuryTransferCommand(TenantId tenantId, BackingAccountId from, BackingAccountId to, Money amount,

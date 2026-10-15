@@ -156,9 +156,11 @@ public final class ApiModels {
             @Schema(description = "Se a conta pode receber agora (sem bloqueio administrativo)") boolean canReceive,
             @Schema(description = "Se a conta pode pagar agora (sem bloqueio)") boolean canPay,
             @Schema(description = "Bloqueios ativos, mais novos primeiro") List<AccountControlModels.BlockResponse> blocks,
-            @Schema(description = "CPF ou CNPJ: só o tipo do documento do titular", example = "CPF") String documentType) {
+            @Schema(description = "CPF ou CNPJ: só o tipo do documento do titular", example = "CPF") String documentType,
+            @Schema(description = "CPF/CNPJ completo do titular, sem formatação; só com o escopo customers:document",
+                    example = "52998224725") String document) {
 
-        static AccountDetailResponse from(QueryAccountUseCase.AccountDetail d) {
+        static AccountDetailResponse from(QueryAccountUseCase.AccountDetail d, boolean withDocument) {
             Account a = d.account();
             return new AccountDetailResponse(
                     a.id().value(), a.number().ispb(), a.number().branch(), a.number().number(),
@@ -167,7 +169,7 @@ public final class ApiModels {
                     a.customerId() == null ? null : a.customerId().value(), d.customerEmail(), a.closedAt(),
                     a.isActive() && a.policy().canReceive(), a.isActive() && a.policy().canPay(),
                     d.activeBlocks().stream().map(AccountControlModels.BlockResponse::from).toList(),
-                    d.documentType());
+                    d.documentType(), withDocument ? d.document() : null);
         }
     }
 
@@ -356,13 +358,16 @@ public final class ApiModels {
             @Schema(description = "Data de criação", example = "2026-10-01T10:00:00Z") Instant createdAt,
             @Schema(description = "Se a conta pode receber agora") boolean canReceive,
             @Schema(description = "Se a conta pode pagar agora") boolean canPay,
-            @Schema(description = "CPF ou CNPJ: só o tipo do documento do titular", example = "CPF") String documentType) {
+            @Schema(description = "CPF ou CNPJ: só o tipo do documento do titular", example = "CPF") String documentType,
+            @Schema(description = "CPF/CNPJ completo do titular, sem formatação; só com o escopo customers:document",
+                    example = "52998224725") String document) {
 
-        static AccountListItemResponse from(ListAccountsUseCase.Item i) {
+        static AccountListItemResponse from(ListAccountsUseCase.Item i, boolean withDocument) {
             boolean active = "ACTIVE".equals(i.status());
             return new AccountListItemResponse(i.accountId().value(), i.customerName(), i.documentMasked(),
                     i.accountFormatted(), i.accountType(), i.status(), i.balance().toDecimal(), i.currency(),
-                    i.createdAt(), active && i.canReceive(), active && i.canPay(), i.documentType());
+                    i.createdAt(), active && i.canReceive(), active && i.canPay(), i.documentType(),
+                    withDocument ? i.document() : null);
         }
     }
 
@@ -371,8 +376,8 @@ public final class ApiModels {
             @Schema(description = "Itens da página atual") List<AccountListItemResponse> items,
             @Schema(description = "Cursor para a próxima página", example = "d3ffdc88-5c0a-2ef6-bb6d-3bb9bd380f44") UUID nextCursor) {
 
-        static AccountListResponse from(ListAccountsUseCase.Page page) {
-            return new AccountListResponse(page.items().stream().map(AccountListItemResponse::from).toList(),
+        static AccountListResponse from(ListAccountsUseCase.Page page, boolean withDocument) {
+            return new AccountListResponse(page.items().stream().map(i -> AccountListItemResponse.from(i, withDocument)).toList(),
                     page.nextCursor() == null ? null : page.nextCursor().value());
         }
     }

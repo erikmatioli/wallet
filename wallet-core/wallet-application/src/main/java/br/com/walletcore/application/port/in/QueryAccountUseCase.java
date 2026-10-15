@@ -21,12 +21,18 @@ public interface QueryAccountUseCase {
     /**
      * @param customerEmail the holder's email as the operator registered it; null when there is none
      * @param activeBlocks  the account's active blocks (ADR-013), newest first
+     * @param document      the holder's full CPF/CNPJ; the API shows it only to a token with customers:document
      */
     record AccountDetail(Account account, String customerName, String documentMasked, String customerEmail,
-                         List<AccountBlock> activeBlocks, String documentType) {
+                         List<AccountBlock> activeBlocks, String documentType, String document) {
 
         public AccountDetail {
             activeBlocks = activeBlocks == null ? List.of() : List.copyOf(activeBlocks);
+        }
+
+        public AccountDetail(Account account, String customerName, String documentMasked, String customerEmail,
+                             List<AccountBlock> activeBlocks, String documentType) {
+            this(account, customerName, documentMasked, customerEmail, activeBlocks, documentType, null);
         }
 
         public AccountDetail(Account account, String customerName, String documentMasked, String customerEmail,

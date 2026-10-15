@@ -2,16 +2,20 @@ package br.com.walletcore.adapter.out.persistence;
 
 import br.com.walletcore.application.port.out.BackingAccountRepository;
 import br.com.walletcore.domain.account.Account;
+import br.com.walletcore.domain.account.Actor;
 import br.com.walletcore.domain.backing.BackingAccount;
 import br.com.walletcore.domain.backing.BackingType;
+import br.com.walletcore.domain.backing.RevenueWithdrawal;
 import br.com.walletcore.domain.backing.TreasuryReference;
 import br.com.walletcore.domain.shared.AccountId;
 import br.com.walletcore.domain.shared.BackingAccountId;
+import br.com.walletcore.domain.shared.Money;
 import br.com.walletcore.domain.shared.TenantId;
 import br.com.walletcore.domain.shared.TransactionId;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -152,6 +156,9 @@ class JdbcBackingAccountRepository implements BackingAccountRepository {
         }
         jdbc.sql("""
                 SELECT transaction_id, document, note FROM treasury_transfer_detail
+                 WHERE tenant_id = :tenant AND transaction_id IN (:ids)
+                UNION ALL
+                SELECT transaction_id, document, note FROM revenue_withdrawal_detail
                  WHERE tenant_id = :tenant AND transaction_id IN (:ids)""")
                 .param("tenant", tenantId.value())
                 .param("ids", ids.stream().map(TransactionId::value).toList())
@@ -160,6 +167,61 @@ class JdbcBackingAccountRepository implements BackingAccountRepository {
                             new TreasuryReference(rs.getString("document"), rs.getString("note")));
                 });
         return found;
+    }
+
+    @Override
+    public void insertRevenueWithdrawal(TenantId tenantId, RevenueWithdrawal w) {
+        jdbc.sql("""
+                INSERT INTO revenue_withdrawal_detail (transaction_id, tenant_id, backing_account_id, destination_bank,
+                                                       destination_branch, destination_account, document, note,
+                                                       operator, client_id)
+                VALUES (:tx, :tenant, :backing, :bank, :branch, :account, :document, :note, :operator, :client)""")
+                .param("tx", w.transactionId().value())
+                .param("tenant", tenantId.value())
+                .param("backing", w.from().value())
+                .param("bank", w.destination().bank())
+                .param("branch", w.destination().branch())
+                .param("account", w.destination().account())
+                .param("document", w.document())
+                .param("note", w.note(), Types.VARCHAR)
+                .param("operator", w.actor().operator())
+                .param("client", w.actor().clientId())
+                .update();
+    }
+
+    @Override
+    public Map<TransactionId, RevenueWithdrawal> findRevenueWithdrawals(TenantId tenantId,
+                                                                         Collection<TransactionId> ids) {
+        Map<TransactionId, RevenueWithdrawal> found = new HashMap<>();
+        if (ids.isEmpty()) {
+            return found;
+        }
+        jdbc.sql("""
+                SELECT * FROM revenue_withdrawal_detail
+                 WHERE tenant_id = :tenant AND transaction_id IN (:ids)""")
+                .param("tenant", tenantId.value())
+                .param("ids", ids.stream().map(TransactionId::value).toList())
+                .query(rs -> {
+                    TransactionId id = new TransactionId(Sql.uuid(rs, "transaction_id"));
+                    found.put(id, new RevenueWithdrawal(id, new BackingAccountId(Sql.uuid(rs, "backing_account_id")),
+                            new RevenueWithdrawal.Destination(rs.getString("destination_bank"),
+                                    rs.getString("destination_branch"), rs.getString("destination_account")),
+                            rs.getString("document"), rs.getString("note"),
+                            new Actor(rs.getString("operator"), rs.getString("client_id"))));
+                });
+        return found;
+    }
+
+    @Override
+    public Money sumRevenueWithdrawnSince(TenantId tenantId, Instant since) {
+        Long cents = jdbc.sql("""
+                SELECT coalesce(sum(t.amount_cents), 0) FROM revenue_withdrawal_detail d
+                  JOIN financial_transaction t ON t.id = d.transaction_id
+                 WHERE d.tenant_id = :tenant AND t.occurred_at >= :since""")
+                .param("tenant", tenantId.value())
+                .param("since", Sql.ts(since))
+                .query(Long.class).single();
+        return Money.ofCents(cents);
     }
 
     private static BackingAccount map(ResultSet rs, int rowNum) throws SQLException {

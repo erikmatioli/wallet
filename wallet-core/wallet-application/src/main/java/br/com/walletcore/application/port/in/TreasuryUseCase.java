@@ -2,13 +2,17 @@ package br.com.walletcore.application.port.in;
 
 import br.com.walletcore.domain.backing.BackingAccount;
 import br.com.walletcore.domain.backing.BackingType;
+import br.com.walletcore.domain.backing.RevenueWithdrawal;
 import br.com.walletcore.domain.backing.TreasuryReference;
 import br.com.walletcore.domain.ledger.LedgerEntry;
 import br.com.walletcore.domain.shared.BackingAccountId;
 import br.com.walletcore.domain.shared.Money;
 import br.com.walletcore.domain.shared.TenantId;
+import br.com.walletcore.domain.shared.TransactionId;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The treasury's view of the tenant (ADR-011): where the money that backs the customers should be, and how much
@@ -80,7 +84,19 @@ public interface TreasuryUseCase {
      * The tenant's revenue account (ADR-014): what the fees took in, net of the refunds, and its movements, newest
      * first. {@code before} is the sequence cursor of the previous page; {@code next} that of the next one.
      */
-    record Revenue(Money balance, List<LedgerEntry> entries, Long next) {
+    record Revenue(Money balance, List<LedgerEntry> entries, Long next, Map<TransactionId, Withdrawal> withdrawals,
+                   RevenueMonth month) {
+    }
+
+    /** A withdrawal of the revenue (ADR-015), with the name of the backing account the money left from. */
+    record Withdrawal(RevenueWithdrawal detail, String fromName) {
+    }
+
+    /**
+     * The current month in Brasília: what the fees took in, net of the refunds, and what was withdrawn. {@code earned}
+     * is the balance now, less the balance at the end of the previous month (ADR-012), plus what was withdrawn.
+     */
+    record RevenueMonth(YearMonth month, Money earned, Money withdrawn) {
     }
 
     Revenue revenue(TenantId tenantId, Long before, int limit);

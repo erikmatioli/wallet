@@ -350,6 +350,6 @@ class JdbcAccountRepository implements AccountRepository {
                 Sql.instantOrNull(rs, "closed_at"));
         TaxId taxId = new TaxId(rs.getString("tax_id"), TaxId.DocumentType.valueOf(rs.getString("tax_id_type")));
         return new AccountDirectoryItem(account, rs.getString("customer_name"), taxId.masked(),
-                rs.getString("customer_email"), taxId.type().name());
+                rs.getString("customer_email"), taxId.type().name(), taxId.value());
     }
 }

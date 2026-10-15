@@ -48,10 +48,14 @@ public record Tenant(
      *
      * <p>ADR-014: {@code fees:read} and {@code fees:admin} for the operator of the fee basket (wallet-fees), and
      * {@code fees:write}, with which wallet-fees charges and refunds fees and handles the fee block.
+     *
+     * <p>{@code customers:document}: the holder's full CPF/CNPJ in the account's list and detail, for the operator
+     * who has to use it. Without it the API answers only the masked document.
      */
     public static final Set<String> DEFAULT_SCOPES = Set.of("customers:write", "accounts:read", "ledger:write",
             "ledger:audit", "pix:send", "pix:receive", "schedules:read", "schedules:write", "otp:use", "treasury:write",
-            "accounts:block", "accounts:judicial", "accounts:close", "ccs:read", "fees:read", "fees:admin", "fees:write");
+            "accounts:block", "accounts:judicial", "accounts:close", "ccs:read", "fees:read", "fees:admin", "fees:write",
+            "customers:document");
 
     private static final Pattern CLIENT_ID = Pattern.compile("[a-z0-9][a-z0-9-]{2,62}");
     private static final Pattern ISPB = Pattern.compile("[0-9]{8}");

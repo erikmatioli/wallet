@@ -28,7 +28,7 @@ public final class ListAccountsService implements ListAccountsUseCase {
             List<AccountDirectoryItem> rows = accounts.findAccountDirectory(tenantId, cursor, pageSize);
             List<Item> items = rows.stream()
                     .map(row -> ListAccountsUseCase.toItem(row.account(), row.customerName(), row.documentMasked(),
-                            row.documentType()))
+                            row.documentType(), row.document()))
                     .toList();
             AccountId next = rows.size() == pageSize ? rows.get(rows.size() - 1).account().id() : null;
             return new Page(items, next);

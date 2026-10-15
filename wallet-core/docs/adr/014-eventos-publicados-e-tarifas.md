@@ -1,6 +1,6 @@
 # ADR-014 — Eventos publicados, conta de receitas e cobrança de tarifas
 
-**Status:** aceita e implementada (15/10/2026)
+**Status:** aceita e implementada (15/10/2026). O item 2 é precisado pela [ADR-015](015-receita-do-tenant-na-tesouraria.md): a receita não tem lugar próprio, fica nas contas de lastro, e a tesouraria a retira por uma delas.
 
 ## Contexto
 A cesta de tarifas (ADR-001 do `wallet-fees`) cobra dos clientes uma mensalidade pelo pacote contratado e tarifas por

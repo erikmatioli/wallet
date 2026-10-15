@@ -23,6 +23,7 @@ import br.com.walletcore.domain.shared.TenantId;
 import br.com.walletcore.domain.shared.TransactionId;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -209,7 +210,7 @@ public final class TreasuryService implements TreasuryUseCase {
             if (e.counterpartyAccountId() != null && !owners.containsKey(e.counterpartyAccountId())) {
                 customerIds.add(e.counterpartyAccountId());
             }
-            if (e.type() == TransactionType.TREASURY_TRANSFER) {
+            if (e.type() == TransactionType.TREASURY_TRANSFER || e.type() == TransactionType.REVENUE_WITHDRAWAL) {
                 treasury.add(e.transactionId());
             }
         }
@@ -283,13 +284,38 @@ public final class TreasuryService implements TreasuryUseCase {
     @Override
     public Revenue revenue(TenantId tenantId, Long before, int limit) {
         int pageSize = Math.min(Math.max(limit, 1), MAX_PAGE);
+        YearMonth month = YearMonth.from(closings.today());
+        LocalDate endOfPrevious = month.atDay(1).minusDays(1);
+        boolean previousClosed = closings.isClosed(endOfPrevious);
         return tx.readOnly(tenantId, () -> {
             AccountId revenue = accounts.findTenantRevenue(tenantId)
                     .orElseThrow(() -> new IllegalStateException("tenant has no revenue account"));
-            Money balance = accounts.findById(tenantId, revenue).orElseThrow().balance();
+            Account account = accounts.findById(tenantId, revenue).orElseThrow();
             List<LedgerEntry> page = ledger.findPage(tenantId, revenue, before, pageSize, null);
             Long next = page.size() == pageSize ? page.get(page.size() - 1).sequence() : null;
-            return new Revenue(balance, page, next);
+
+            Set<TransactionId> withdrawalIds = page.stream()
+                    .filter(e -> e.type() == TransactionType.REVENUE_WITHDRAWAL)
+                    .map(LedgerEntry::transactionId).collect(Collectors.toSet());
+            Map<TransactionId, Withdrawal> withdrawals = Map.of();
+            if (!withdrawalIds.isEmpty()) {
+                Map<BackingAccountId, String> names = backing.findAll(tenantId).stream()
+                        .collect(Collectors.toMap(BackingAccount::id, BackingAccount::name));
+                withdrawals = backing.findRevenueWithdrawals(tenantId, withdrawalIds).entrySet().stream()
+                        .collect(Collectors.toMap(Map.Entry::getKey,
+                                w -> new Withdrawal(w.getValue(), names.get(w.getValue().from()))));
+            }
+
+            // In the first minute of the month the previous one may still be receiving entries: no total yet.
+            RevenueMonth thisMonth = null;
+            if (previousClosed) {
+                long atStart = closings.closing(tenantId, revenue, endOfPrevious, account.version()).balance().cents();
+                Money withdrawn = backing.sumRevenueWithdrawnSince(tenantId,
+                        month.atDay(1).atStartOfDay(ClosingBalances.BRASILIA).toInstant());
+                thisMonth = new RevenueMonth(month,
+                        Money.ofCents(account.balance().cents() - atStart + withdrawn.cents()), withdrawn);
+            }
+            return new Revenue(account.balance(), page, next, withdrawals, thisMonth);
         });
     }
 }
