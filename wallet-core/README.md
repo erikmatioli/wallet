@@ -110,11 +110,11 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 | `POST /v1/customers` | `customers:write` | Onboarding + abertura de conta de pagamento (201). `email` opcional: para onde os produtos do cliente (o app) mandam códigos de acesso |
 | `PUT /v1/customers/{id}/email` | `customers:write` | Define, troca ou (vazio) remove o e-mail do cliente (204) |
 | `GET /v1/customers/contact?taxId=` | `accounts:read` | Nome, e-mail e conta de pagamento do cliente pelo CPF/CNPJ (ADR-003 do wallet-app) |
-| `GET /v1/accounts` | `accounts:read` | Lista as contas do tenant, mais nova primeiro (paginação por `cursor`) |
+| `GET /v1/accounts` | `accounts:read` | Lista as contas do tenant, mais nova primeiro (paginação por `cursor`). O CPF/CNPJ completo do titular (`document`) só vem para um token com `customers:document`; sem ele, só `documentMasked` |
 | `GET /v1/accounts/lookup?branch=&number=&checkDigit=` | `accounts:read` | Busca uma conta pelo número bancário em vez do id |
 | `GET /v1/accounts/findByTaxId?taxId=` | `accounts:read` | Busca a conta do cliente pelo CPF/CNPJ |
 | `POST /v1/accounts/holder-check` | `accounts:read` | Confere se agência + conta + dígito são de uma conta apta a receber e se pertencem ao CPF/CNPJ do corpo. Responde `result` (`VALID`, `ACCOUNT_NOT_FOUND`, `ACCOUNT_BLOCKED`, `ACCOUNT_CLOSED`, `TAX_ID_MISMATCH`) e `accountId` só quando `VALID`, sem dados do titular. POST para o documento não ir na URL. Usado na autorização de Pix recebidos (`../wallet-pix`) |
-| `GET /v1/accounts/{id}` | `accounts:read` | Dados da conta (ISPB, agência, número, dígito, tipo `TRAN`, saldo), titular, `customerId`, `customerEmail`, os bloqueios ativos, `canReceive`, `canPay` e `closedAt` |
+| `GET /v1/accounts/{id}` | `accounts:read` | Dados da conta (ISPB, agência, número, dígito, tipo `TRAN`, saldo), titular, `customerId`, `customerEmail`, os bloqueios ativos, `canReceive`, `canPay` e `closedAt`; `document` (CPF/CNPJ completo) só com `customers:document` |
 | `GET /v1/accounts/{id}/balance` | `accounts:read` | Saldo |
 | `GET /v1/accounts/{id}/balance?at=AAAA-MM-DD` | `accounts:read` | Saldo de fechamento do dia (meia-noite de Brasília), lido do ledger por busca binária ([ADR-012](docs/adr/012-saldo-de-fechamento-sob-demanda.md)). Hoje e o futuro: `422 DAY_NOT_CLOSED` |
 | `GET /v1/accounts/{id}/daily-balances?from=&to=` | `accounts:read` | Saldo de fechamento dia a dia, até 366 dias encerrados; dias sem movimento repetem o saldo |
@@ -140,6 +140,10 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 | `POST /v1/judicial-transit/{transferId}/teds` | `accounts:judicial` | Registra a TED enviada pela tesouraria: sai do trânsito, contra a conta de lastro de onde ela saiu |
 | `POST /v1/accounts/{id}/close` | `accounts:close` | Encerra a conta, para sempre. Recusa com saldo (`ACCOUNT_NOT_EMPTY`) ou bloqueio judicial ativo (`JUDICIAL_BLOCK_ACTIVE`) |
 | `GET /v1/accounts/{id}/timeline` | `accounts:read` | Abertura, bloqueios, liberações e encerramento, com quem fez |
+| `POST /v1/accounts/{id}/fees` | `fees:write` | Cobra uma tarifa da cesta de tarifas ([ADR-014](docs/adr/014-eventos-publicados-e-tarifas.md)): debita o cliente e credita a conta de receitas do tenant. Só de conta sem bloqueio, ou com o bloqueio de tarifa (`FEE_PENDING`), e só inteira. `Idempotency-Key` derivada da origem |
+| `POST /v1/fees/{feeTransactionId}/refunds` | `fees:write` | Estorna a tarifa inteira, uma vez; entra mesmo com a conta bloqueada |
+| `GET /v1/treasury/revenue?before=&limit=` | `ledger:audit` | Conta de receitas do tenant: o saldo, o faturado e o retirado no mês e os lançamentos (cada retirada com origem, destino e comprovante) |
+| `POST /v1/treasury/revenue/withdrawals` | `treasury:write` | Retirada da receita do tenant ([ADR-015](docs/adr/015-receita-do-tenant-na-tesouraria.md)): debita a conta de receitas contra a conta de lastro de onde o dinheiro saiu (nunca A regularizar), com destino, comprovante e operador. No máximo o saldo da receita. `Idempotency-Key` |
 | `GET /v1/ccs/account-events?after=&limit=` | `ccs:read` | Feed de aberturas e encerramentos em ordem de `seq`, com o documento completo do titular, para o `wallet-ccs` |
 
 Valores monetários são decimais em BRL com no máximo 2 casas (`"amount": 250.00`); internamente tudo é `long` em centavos.
@@ -171,6 +175,8 @@ Repetir uma requisição com a mesma `Idempotency-Key` e o mesmo corpo devolve a
 10. **Saldo de fechamento sob demanda** (ADR-012): o saldo de um dia é lido do próprio ledger, por busca binária na sequência da conta, sem tabela de snapshot.
 11. **Tesouraria e contas de lastro** (ADR-011): cada meio tem a sua conta de lastro; a tesouraria cobre o que os depósitos criaram e recompõe entre os lugares, com comprovante.
 12. **Bloqueios e encerramento** (ADR-013): bloqueios de fraude, total e judicial convivem e são liberados cada um pelo seu escopo; o resumo deles entra no mesmo `UPDATE` do saldo. A transferência judicial cumpre a ordem acima dos outros bloqueios. Aberturas e encerramentos alimentam o feed do CCS.
+13. **Eventos publicados e tarifas** (ADR-014): o outbox é publicado no SNS (transações num tópico, clientes e contas em outro); as tarifas da cesta de tarifas são partidas dobradas comuns (`FEE`, `FEE_REFUND`) para a conta de receitas do tenant; o bloqueio de tarifa deixa sair só a tarifa e o MED.
+14. **Receita do tenant na tesouraria** (ADR-015): a receita fica no lastro junto com o dinheiro dos clientes (lastro = clientes + receita + trânsito judicial); a tesouraria acompanha o faturado no mês e a retira da plataforma por uma conta de lastro real (`REVENUE_WITHDRAWAL`), com destino e comprovante.
 
 ## 6. Modelo da conta de pagamento
 
@@ -256,7 +262,7 @@ Pipeline (`ci.yml` + `release.yml` + `build-test.yml` reutilizável) assume **Gi
 - Particionamento do `ledger_entry` por tempo (exige incluir a chave de partição nas constraints únicas), arquivamento e réplicas de leitura.
 - Publisher real (Kafka/SNS/SQS), DLQ e limpeza do outbox publicado.
 - Trilha de *hash chain* por conta para evidência criptográfica de adulteração (a auditoria por replay já existe; isso adicionaria uma segunda camada, independente do banco).
-- Bloqueio de um **valor** (o SISBAJUD "até R$ X"; o bloqueio da conta inteira já existe, ADR-013), reserva de saldo (holds), limites e tarifas. Estorno e Pix já existem (ADR-010 e o projeto `../wallet-pix`); do Pix, faltam DICT e QR Code.
+- Bloqueio de um **valor** (o SISBAJUD "até R$ X"; o bloqueio da conta inteira já existe, ADR-013), reserva de saldo (holds) e limites. Estorno, Pix e tarifas já existem (ADR-010 e o projeto `../wallet-pix`); do Pix, faltam DICT e QR Code.
 - Conciliação das contas de lastro com os extratos reais (camt.053 da Conta PI, extrato bancário) — ADR-011.
 - Roteamento de alertas para um canal real (Alertmanager + Slack/PagerDuty) — hoje os alertas só aparecem na aba *Alerts* do Prometheus.
 - Deploy contínuo de fato (o pipeline publica a imagem no GHCR, mas não a implanta em nenhum ambiente — depende de uma decisão de infraestrutura ainda não tomada) e cobertura de testes agregada (JaCoCo) no CI.

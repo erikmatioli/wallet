@@ -59,7 +59,8 @@ class AccountDirectoryController {
             @Parameter(description = "Número máximo de registros a retornar na página", example = "20")
             @RequestParam(defaultValue = "20") int limit) {
         AccountId cursorId = cursor == null ? null : new AccountId(cursor);
-        return AccountListResponse.from(listAccounts.list(CurrentTenant.from(jwt), cursorId, limit));
+        return AccountListResponse.from(listAccounts.list(CurrentTenant.from(jwt), cursorId, limit),
+                CurrentTenant.seesDocument(jwt));
     }
 
     /** Finds one account by its bank-style number instead of its internal id. 404 if not found. */

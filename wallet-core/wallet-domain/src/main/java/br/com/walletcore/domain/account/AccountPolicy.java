@@ -24,6 +24,8 @@ public record AccountPolicy(Credit credit, Debit debit) {
         MED_ONLY,
         /** A JUDICIAL block: the only way out is the judicial transfer. */
         JUDICIAL_ONLY,
+        /** Only a FEE_PENDING block (ADR-014): the fee and the MED leave, nothing else. */
+        FEE_ONLY,
         /** An ADMINISTRATIVE block: nothing leaves, but a judicial transfer still does. */
         NONE
     }
@@ -40,7 +42,9 @@ public record AccountPolicy(Credit credit, Debit debit) {
         } else if (active.contains(AccountBlock.Type.JUDICIAL)) {
             debit = Debit.JUDICIAL_ONLY; // also with FRAUD: the MED would take out money the court holds
         } else if (active.contains(AccountBlock.Type.FRAUD)) {
-            debit = Debit.MED_ONLY;
+            debit = Debit.MED_ONLY; // also with FEE_PENDING: the MED is what both let out
+        } else if (active.contains(AccountBlock.Type.FEE_PENDING)) {
+            debit = Debit.FEE_ONLY;
         } else {
             debit = Debit.ALLOWED;
         }
@@ -63,10 +67,14 @@ public record AccountPolicy(Credit credit, Debit debit) {
      *               Pix are the same, and say so by their type
      */
     public static Gate gateFor(TransactionType type, boolean refund) {
-        boolean undoesADebit = refund || type == TransactionType.PIX_REFUND || type == TransactionType.PIX_RETURN_IN;
+        boolean undoesADebit = refund || type == TransactionType.PIX_REFUND || type == TransactionType.PIX_RETURN_IN
+                || type == TransactionType.FEE_REFUND;
         Set<Credit> credits = undoesADebit ? EnumSet.allOf(Credit.class) : EnumSet.of(Credit.ALLOWED);
         Set<Debit> debits = switch (type) {
-            case PIX_RETURN_OUT -> EnumSet.of(Debit.ALLOWED, Debit.MED_ONLY);
+            // The MED is a regulatory duty: it leaves under the fraud block and the fee block.
+            case PIX_RETURN_OUT -> EnumSet.of(Debit.ALLOWED, Debit.MED_ONLY, Debit.FEE_ONLY);
+            // A fee is charged only from an account free of blocks, or under the fee block made for it (ADR-014).
+            case FEE -> EnumSet.of(Debit.ALLOWED, Debit.FEE_ONLY);
             // The court's order prevails over the fraud and administrative blocks; only a closed account stops it.
             case JUDICIAL_TRANSFER -> EnumSet.allOf(Debit.class);
             default -> EnumSet.of(Debit.ALLOWED);

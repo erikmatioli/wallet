@@ -69,6 +69,8 @@ public final class ProvisionTenantService implements ProvisionTenantUseCase {
             }
             // "Depósitos judiciais a transferir" (ADR-013): judicial transfers are rare, one row is enough.
             accounts.insert(Account.openJudicialTransit(tenant.id(), now));
+            // The tenant's own money from fees (ADR-014).
+            accounts.insert(Account.openTenantRevenue(tenant.id(), now));
             return tenant;
         });
     }

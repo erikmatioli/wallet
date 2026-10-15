@@ -12,7 +12,11 @@ import {
   BalanceResponse,
   BlockRequest,
   CloseReason,
+  CreateFeeScheduleRequest,
   CreateScheduleRequest,
+  FeeAccount,
+  FeePackage,
+  FeeSchedule,
   JudicialTedRequest,
   JudicialTransferRequest,
   MoneyMovementRequest,
@@ -21,6 +25,8 @@ import {
   PendingTransit,
   PositionsResponse,
   RegisterBackingAccountRequest,
+  RevenueResponse,
+  RevenueWithdrawalRequest,
   ScheduleResponse,
   StatementResponse,
   TimelineItem,
@@ -36,8 +42,8 @@ import {
  * nginx does the same reverse-proxying. The app never needs to know the backend's real address,
  * and there is no CORS configuration to keep in sync on the backend because of it.
  *
- * /v1/schedules is wallet-scheduler's API, not wallet-core's: the proxy and nginx route it there,
- * and it accepts the same token.
+ * /v1/schedules is wallet-scheduler's API, not wallet-core's, and /v1/fees is wallet-fees': the proxy
+ * and nginx route them there, and they accept the same token.
  */
 @Injectable({ providedIn: 'root' })
 export class WalletApiService {
@@ -147,6 +153,20 @@ export class WalletApiService {
     return this.http.get<UncoveredDailyResponse>('/v1/treasury/unassigned/daily', { params });
   }
 
+  /** The tenant's revenue: balance, this month's totals and the statement, newest first. */
+  revenue(before?: number, limit = 20): Observable<RevenueResponse> {
+    let params = new HttpParams().set('limit', limit);
+    if (before != null) params = params.set('before', before);
+    return this.http.get<RevenueResponse>('/v1/treasury/revenue', { params });
+  }
+
+  /** Takes the revenue out of the platform, from a backing account (ADR-015 of the core). */
+  withdrawRevenue(request: RevenueWithdrawalRequest, idempotencyKey: string): Observable<TransactionResponse> {
+    return this.http.post<TransactionResponse>('/v1/treasury/revenue/withdrawals', request, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    });
+  }
+
   treasuryTransfer(request: TreasuryTransferRequest, idempotencyKey: string): Observable<TransactionResponse> {
     return this.http.post<TransactionResponse>('/v1/treasury/transfers', request, {
       headers: { 'Idempotency-Key': idempotencyKey },
@@ -185,5 +205,30 @@ export class WalletApiService {
     return this.http.post<TransactionResponse>(`/v1/judicial-transit/${transferId}/teds`, request, {
       headers: { 'Idempotency-Key': idempotencyKey },
     });
+  }
+
+  // ---------------------------------------------------------------- fee basket (wallet-fees, fees:read / fees:admin)
+
+  /** The tenant's six packages, each with the schedule in force and the next one. */
+  feePackages(): Observable<FeePackage[]> {
+    return this.http.get<FeePackage[]>('/v1/fees/packages');
+  }
+
+  /** Every schedule of a package, the past ones included: they explain what was charged. */
+  feeSchedules(packageId: string): Observable<FeeSchedule[]> {
+    return this.http.get<FeeSchedule[]>(`/v1/fees/packages/${packageId}/schedules`);
+  }
+
+  /** A new schedule from a date on; one of the same date not in force yet is replaced. */
+  createFeeSchedule(packageId: string, request: CreateFeeScheduleRequest): Observable<FeeSchedule> {
+    return this.http.post<FeeSchedule>(`/v1/fees/packages/${packageId}/schedules`, request);
+  }
+
+  feeAccount(accountId: string): Observable<FeeAccount> {
+    return this.http.get<FeeAccount>(`/v1/fees/accounts/${accountId}`);
+  }
+
+  changeFeePackage(accountId: string, packageId: string, operator: string): Observable<FeeAccount> {
+    return this.http.put<FeeAccount>(`/v1/fees/accounts/${accountId}/package`, { packageId, operator });
   }
 }

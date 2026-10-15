@@ -4,6 +4,11 @@
     "secure": false,
     "logLevel": "debug"
   },
+  "/v1/fees": {
+    "target": "http://localhost:8088",
+    "secure": false,
+    "logLevel": "debug"
+  },
   "/v1/**": {
     "target": "http://localhost:8080",
     "secure": false,

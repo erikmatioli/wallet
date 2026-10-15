@@ -36,7 +36,7 @@ Leia de cima para baixo na primeira vez. Depois, use o índice para voltar a uma
 **tenant**) contrata a plataforma e oferece contas de pagamento aos seus clientes. Vários tenants
 usam a mesma instalação, e um nunca enxerga os dados do outro.
 
-O repositório é um **monorepo** com sete produtos. Cada um tem build, deploy, banco e release
+O repositório é um **monorepo** com oito produtos. Cada um tem build, deploy, banco e release
 próprios:
 
 | Produto | O que faz | Linguagem | Porta local |
@@ -45,9 +45,10 @@ próprios:
 | `wallet-pix` | Recebe e envia Pix conversando com o SPI (o sistema do Banco Central) por filas | Java 25 + Spring Boot 4 (Maven) | 8081 (+ simulador 8090) |
 | `wallet-scheduler` | Agenda transferências e Pix para uma data e executa no dia | Kotlin + Spring Boot 4 (Maven) | 8082 |
 | `wallet-console` | Tela web **do operador** da fintech | TypeScript + Angular 21 | 4200 |
-| `wallet-app` | App desktop **do cliente final** e seu backend (`app-api`) | Kotlin: Compose Desktop + Spring Boot 4 (Gradle) | 8083 / 8084 |
-| `wallet-mobile` | **M-Wall**: o app do cliente final para celular (PWA), sobre o mesmo `app-api` | TypeScript: Angular 21 + service worker | 8086 / 8087 |
+| `wallet-app` | App desktop **do cliente final** e seu backend (`app-api`) | Kotlin: Compose Desktop + Spring Boot 4 (Gradle) | 8083 (8084 opcional) |
+| `wallet-mobile` | **M-Wall**: o app do cliente final para celular (PWA), sobre o mesmo `app-api` | TypeScript: Angular 21 + service worker | 8086 (8087 opcional) |
 | `wallet-otp` | Códigos de uso único por e-mail: cadastro e login do app, aprovações no futuro | Kotlin + Spring Boot 4 (Maven) | 8085 (+ Mailpit 8025) |
+| `wallet-fees` | **Cesta de tarifas**: pacotes PF e PJ com mensalidade e preço por operação; ouve os eventos do core e cobra pela API dele ([README](wallet-fees/README.md), [ADR-001](wallet-fees/docs/adr/001-cesta-de-tarifas.md)) | C# + .NET 10 (ASP.NET Core) | 8088 |
 
 ```
                  OPERADOR DA FINTECH                       CLIENTE FINAL
@@ -243,11 +244,16 @@ cd wallet-core      && docker compose up -d           # Postgres, wallet-core, O
 cd ../wallet-pix    && docker compose up -d --build   # LocalStack (filas), pix-service, spi-simulator
 cd ../wallet-scheduler && docker compose up -d --build
 cd ../wallet-otp    && docker compose up -d --build   # códigos por e-mail (8085) e o Mailpit (8025)
-cd ../wallet-app    && docker compose up -d --build   # app-api do demo-tenant (8083) e do segundo-tenant (8084)
-cd ../wallet-mobile && docker compose up -d --build   # M-Wall (PWA) do demo-tenant (8086) e do segundo-tenant (8087)
+cd ../wallet-fees   && docker compose up -d --build   # cesta de tarifas (8088)
+cd ../wallet-app    && docker compose up -d --build   # app-api do demo-tenant (8083)
+cd ../wallet-mobile && docker compose up -d --build   # M-Wall (PWA) do demo-tenant (8086)
 cd ../wallet-console && npm ci && npm start           # console em http://localhost:4200
-cd ../wallet-app    && ./gradlew :app-desktop:run     # app do cliente (demo-tenant)
 ```
+
+Opcionais, só quando o teste pedir: o **app desktop** (`cd wallet-app && ./gradlew :app-desktop:run`) e o
+**segundo-tenant**, para testar o isolamento entre tenants (`docker compose --profile segundo-tenant up -d --build`
+no `wallet-app` e no `wallet-mobile`, ou `scripts/dev-stack.sh up --segundo-tenant`). Com tudo no ar, a máquina
+fica sem memória e os serviços passam a responder devagar.
 
 | O quê | Endereço | Credencial de dev |
 |---|---|---|
@@ -255,11 +261,12 @@ cd ../wallet-app    && ./gradlew :app-desktop:run     # app do cliente (demo-ten
 | pix-service | http://localhost:8081 | token do core com `pix:send` |
 | spi-simulator | http://localhost:8090 | — |
 | wallet-scheduler | http://localhost:8082 | token do core com `schedules:*` |
-| app-api | http://localhost:8083 (demo) / 8084 (segundo) | CPF do cliente + código que chega por e-mail |
+| app-api | http://localhost:8083 (demo) / 8084 (segundo, opcional) | CPF do cliente + código que chega por e-mail |
 | wallet-otp | http://localhost:8085 | token do core com `otp:use` |
 | Mailpit | http://localhost:8025 | — (os e-mails com os códigos) |
 | console | http://localhost:4200 | as credenciais do tenant |
-| M-Wall (PWA) | http://localhost:8086 (demo) / 8087 (segundo) | CPF do cliente + código que chega por e-mail |
+| wallet-fees | http://localhost:8088 | token do core com `fees:read` / `fees:admin` |
+| M-Wall (PWA) | http://localhost:8086 (demo) / 8087 (segundo, opcional) | CPF do cliente + código que chega por e-mail |
 | Grafana | http://localhost:3000 | pasta "Wallet Core" |
 | Jaeger | http://localhost:16686 | — |
 | Prometheus | http://localhost:9090 | — |
@@ -590,13 +597,16 @@ tenant, e o operador vê **todas** as contas daquele tenant.
 src/app/
 ├── core/     AuthService, auth.interceptor (anexa o Bearer), auth.guard (protege rotas),
 │             WalletApiService (cliente HTTP tipado), models.ts (espelho dos DTOs do backend),
-│             transaction-labels.ts, schedule-labels.ts, account-control.ts e treasury.ts
-│             (código → texto em português); http-error.util.ts traduz as recusas do operador
+│             transaction-labels.ts, schedule-labels.ts, account-control.ts, treasury.ts e fees.ts
+│             (código → texto em português); document.ts formata o CPF/CNPJ;
+│             http-error.util.ts traduz as recusas do operador
 ├── pages/    login, home (lista e busca de contas), onboard (abre conta),
 │             account (saldo, extrato, movimentos, auditoria),
-│             treasury (contas de lastro, coberturas, TEDs judiciais)
+│             treasury (contas de lastro, coberturas, TEDs judiciais, receitas do tenant e a retirada),
+│             fees (pacotes e tabelas de preço da cesta de tarifas)
 │               ├── entry-detail/  popup com o detalhe do lançamento (dados já carregados, sem nova chamada)
 │               ├── schedules/     seção de agendamentos da conta
+│               ├── fees/          seção "Pacote e tarifas" da conta (wallet-fees)
 │               └── control/       bloqueios, transferência judicial, encerramento e histórico da conta
 └── shared/   problem-banner (mostra erros no formato problem+json)
 ```
@@ -604,7 +614,7 @@ src/app/
 ### 10.3 Decisões
 
 - **Chamadas sempre relativas** (`/v1/...`). Em dev, o `proxy.conf.json` encaminha; no Docker, o
-  `nginx.conf`. Regra de roteamento: `/v1/schedules` → scheduler (8082); o resto de `/v1/**` e
+  `nginx.conf`. Regra de roteamento: `/v1/schedules` → scheduler (8082); `/v1/fees` → wallet-fees (8088); o resto de `/v1/**` e
   `/.well-known/**` → core (8080). O prefixo mais longo vence. Resultado: **zero CORS** e nenhuma
   URL de backend dentro do bundle.
 - **Sessão em `sessionStorage`**: some ao fechar a aba. O secret nunca é guardado.

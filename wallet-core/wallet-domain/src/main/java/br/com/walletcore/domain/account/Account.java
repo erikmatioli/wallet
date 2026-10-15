@@ -16,6 +16,8 @@ import java.time.Instant;
  *       account avoid a single hot row;</li>
  *   <li>{@code JUDICIAL_TRANSIT}: "depósitos judiciais a transferir" (ADR-013), one per tenant. A judicial transfer
  *       to a court deposit in another bank lands here until the treasury sends the TED and records it;</li>
+ *   <li>{@code TENANT_REVENUE}: the tenant's own money from fees (ADR-014), one per tenant. Not the customers'
+ *       money, so it is not part of the backing accounts;</li>
  *   <li>{@code SETTLEMENT}: the single counter-account the backing accounts replaced. Its shards are kept, closed
  *       and at zero, only as history.</li>
  * </ul>
@@ -37,7 +39,7 @@ public record Account(
         AccountPolicy policy,
         Instant closedAt) {
 
-    public enum Kind { CUSTOMER, SETTLEMENT, BACKING, JUDICIAL_TRANSIT }
+    public enum Kind { CUSTOMER, SETTLEMENT, BACKING, JUDICIAL_TRANSIT, TENANT_REVENUE }
 
     /** Whether the account exists; blocks are kept apart (ADR-013). CLOSED is final. */
     public enum Status { ACTIVE, CLOSED }
@@ -74,6 +76,12 @@ public record Account(
      */
     public static Account openJudicialTransit(TenantId tenantId, Instant now) {
         return new Account(AccountId.newId(), tenantId, Kind.JUDICIAL_TRANSIT, null, null,
+                Status.ACTIVE, false, Money.ZERO, 0L, now);
+    }
+
+    /** The tenant's revenue account: what the fees take in. It holds money, so it never goes negative. */
+    public static Account openTenantRevenue(TenantId tenantId, Instant now) {
+        return new Account(AccountId.newId(), tenantId, Kind.TENANT_REVENUE, null, null,
                 Status.ACTIVE, false, Money.ZERO, 0L, now);
     }
 

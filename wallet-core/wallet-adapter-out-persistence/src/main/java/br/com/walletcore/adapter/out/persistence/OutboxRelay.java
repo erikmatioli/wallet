@@ -37,6 +37,10 @@ class OutboxRelay {
     private final EventPublisher publisher;
     private final int batchSize;
     private final AtomicLong pendingCount = new AtomicLong();
+    /** While the broker is down (the bus starts after the core, ADR-014), warn once a minute, not every tick. */
+    private long failingSince;
+    private long lastWarning;
+    private long failures;
 
     OutboxRelay(JdbcClient jdbc, PlatformTransactionManager transactionManager, EventPublisher publisher,
                 MeterRegistry registry, @Value("${wallet.outbox.batch-size:100}") int batchSize) {
@@ -58,8 +62,20 @@ class OutboxRelay {
                 published = tx.execute(status -> publishBatch());
             } while (published != null && published == batchSize);
             refreshPendingCount();
+            if (failures > 0) {
+                log.info("Outbox relay publishing again after {} failed attempts", failures);
+                failures = 0;
+            }
         } catch (RuntimeException e) {
-            log.warn("Outbox relay failed, will retry on next tick: {}", e.toString());
+            long now = System.currentTimeMillis();
+            if (failures++ == 0) {
+                failingSince = now;
+            }
+            if (failures == 1 || now - lastWarning >= 60_000) {
+                lastWarning = now;
+                log.warn("Outbox relay failed {} time(s) in {} s, events wait in the outbox: {}", failures,
+                        (now - failingSince) / 1000, e.toString());
+            }
         }
     }
 

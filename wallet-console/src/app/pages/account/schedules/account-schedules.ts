@@ -20,6 +20,8 @@ import { ScheduleDetail } from './schedule-detail';
 })
 export class AccountSchedules {
   readonly accountId = input.required<string>();
+  /** The holder's full CPF/CNPJ, when the token sees it: a Pix's payer document starts filled in. */
+  readonly payerDocument = input<string | null>(null);
 
   readonly schedules = signal<ScheduleResponse[]>([]);
   readonly busy = signal(false);
@@ -53,6 +55,7 @@ export class AccountSchedules {
   constructor(private readonly api: WalletApiService) {
     // Navigating from one account to another reuses this component with a new accountId.
     effect(() => this.load(this.accountId()));
+    effect(() => (this.payerTaxId = this.payerDocument() ?? ''));
   }
 
   load(accountId: string = this.accountId()): void {

@@ -283,6 +283,14 @@ class JdbcAccountRepository implements AccountRepository {
     }
 
     @Override
+    public Optional<AccountId> findTenantRevenue(TenantId tenantId) {
+        return jdbc.sql("SELECT id FROM account WHERE tenant_id = :tenant AND kind = 'TENANT_REVENUE'")
+                .param("tenant", tenantId.value())
+                .query((rs, i) -> new AccountId(Sql.uuid(rs, "id")))
+                .optional();
+    }
+
+    @Override
     public Optional<AccountId> findJudicialTransit(TenantId tenantId) {
         return jdbc.sql("SELECT id FROM account WHERE tenant_id = :tenant AND kind = 'JUDICIAL_TRANSIT'")
                 .param("tenant", tenantId.value())
@@ -341,6 +349,7 @@ class JdbcAccountRepository implements AccountRepository {
                 policy(rs),
                 Sql.instantOrNull(rs, "closed_at"));
         TaxId taxId = new TaxId(rs.getString("tax_id"), TaxId.DocumentType.valueOf(rs.getString("tax_id_type")));
-        return new AccountDirectoryItem(account, rs.getString("customer_name"), taxId.masked(), rs.getString("customer_email"));
+        return new AccountDirectoryItem(account, rs.getString("customer_name"), taxId.masked(),
+                rs.getString("customer_email"), taxId.type().name(), taxId.value());
     }
 }

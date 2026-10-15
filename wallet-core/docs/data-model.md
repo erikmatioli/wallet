@@ -1,16 +1,16 @@
 # Modelo de Dados — Wallet Core
 
-Este documento descreve as entidades, relacionamentos e regras de integridade do schema PostgreSQL definido pelas migrations em `wallet-adapter-out-persistence/src/main/resources/db/migration/` (`V1__core_schema.sql` a `V10__account_blocks.sql`). É a fonte de verdade do banco; qualquer divergência entre este documento e o SQL, o SQL vence.
+Este documento descreve as entidades, relacionamentos e regras de integridade do schema PostgreSQL definido pelas migrations em `wallet-adapter-out-persistence/src/main/resources/db/migration/` (`V1__core_schema.sql` a `V11__fees.sql`). É a fonte de verdade do banco; qualquer divergência entre este documento e o SQL, o SQL vence.
 
 ## 1. Visão geral
 
-O modelo tem onze tabelas, organizadas em cinco grupos:
+O modelo tem doze tabelas, organizadas em cinco grupos:
 
 | Grupo | Tabelas | Papel |
 |---|---|---|
 | **Identidade** | `tenant`, `customer` | Quem é o cliente white label e quem são os clientes finais dele |
 | **Saldo e ledger** | `account`, `financial_transaction`, `ledger_entry` | O núcleo financeiro: contas, transações e os lançamentos contábeis imutáveis |
-| **Detalhe das transações** | `pix_transaction_detail`, `treasury_transfer_detail`, `judicial_transfer_detail` | O que um Pix, uma movimentação de tesouraria e uma transferência judicial carregam além do ledger |
+| **Detalhe das transações** | `pix_transaction_detail`, `treasury_transfer_detail`, `judicial_transfer_detail`, `fee_detail`, `revenue_withdrawal_detail` | O que um Pix, uma movimentação de tesouraria, uma transferência judicial, uma tarifa e uma retirada de receita carregam além do ledger |
 | **Lastro, bloqueios e status** | `backing_account`, `account_block`, `account_status_event` | Onde o dinheiro dos clientes está guardado (ADR-011), os bloqueios das contas e as aberturas e encerramentos (ADR-013) |
 | **Integração** | `outbox_event` | Publicação assíncrona e confiável de eventos de domínio |
 
@@ -193,19 +193,20 @@ A tabela mais importante do modelo. Representa **quatro tipos de conta na mesma 
 | `CUSTOMER` | Conta de pagamento (tipo `TRAN`) de um cliente final | obrigatório | obrigatórios | `false` (nunca fica negativa) |
 | `BACKING` | Uma *shard* de uma conta de lastro (ADR-011): a contrapartida de todo movimento que entra ou sai do tenant, no lugar onde o dinheiro daquele meio fica (Conta PI, Caixa, A regularizar…). Várias por conta de lastro, para não haver uma linha quente | nulo | nulos | `true` (o saldo é negativo: é o espelho do dinheiro guardado ali) |
 | `JUDICIAL_TRANSIT` | "Depósitos judiciais a transferir" (ADR-013), uma por tenant: recebe a transferência judicial até a tesouraria registrar a TED | nulo | nulos | `false` (é dinheiro devido ao juízo) |
+| `TENANT_REVENUE` | A conta de receitas do tenant (ADR-014), uma por tenant: recebe as tarifas, devolve as estornadas e sai pela retirada da tesouraria (ADR-015). Dinheiro do tenant, não dos clientes, mas guardado nas mesmas contas de lastro | nulo | nulos | `false` |
 | `SETTLEMENT` | A contrapartida única que as contas de lastro substituíram. Fica no banco, zerada e `CLOSED`, só como histórico | nulo | nulos | `true` |
 
 | Coluna | Tipo | Regra |
 |---|---|---|
 | `id` | uuid | PK |
 | `tenant_id` | uuid | FK → `tenant.id` |
-| `kind` | text | `CUSTOMER` \| `BACKING` \| `JUDICIAL_TRANSIT` \| `SETTLEMENT` |
+| `kind` | text | `CUSTOMER` \| `BACKING` \| `JUDICIAL_TRANSIT` \| `TENANT_REVENUE` \| `SETTLEMENT` |
 | `customer_id` | uuid | FK → `customer.id`; obrigatório só para `CUSTOMER` |
 | `ispb`, `branch`, `account_number`, `check_digit` | text | identificação bancária da conta; obrigatórios só para `CUSTOMER` |
 | `account_type` | text | hoje só `TRAN` (conta de pagamento) |
 | `status` | text | `ACTIVE` \| `CLOSED`: se a conta existe. `CLOSED` é definitivo (ADR-013) |
 | `credit_policy` | text | `ALLOWED` \| `REFUND_ONLY` (há um bloqueio administrativo): o resumo dos bloqueios ativos para créditos |
-| `debit_policy` | text | `ALLOWED` \| `MED_ONLY` (só bloqueio de fraude) \| `JUDICIAL_ONLY` (há um judicial) \| `NONE` (há um administrativo) |
+| `debit_policy` | text | `ALLOWED` \| `MED_ONLY` (há um bloqueio de fraude) \| `JUDICIAL_ONLY` (há um judicial) \| `FEE_ONLY` (só o bloqueio de tarifa: sai a tarifa e o MED) \| `NONE` (há um administrativo) |
 | `closed_at` | timestamptz | quando a conta foi encerrada; obrigatório numa conta `CUSTOMER` `CLOSED` |
 | `backing_account_id` | uuid | FK → `backing_account.id`; obrigatório só para `BACKING` |
 | `allow_negative` | boolean | se `false`, o saldo nunca pode ficar abaixo de zero |
@@ -249,8 +250,8 @@ Uma conta pode ter vários bloqueios ativos; cada um é liberado sozinho. Uma li
 |---|---|---|
 | `id` | uuid | PK |
 | `tenant_id`, `account_id` | uuid | FKs |
-| `type` | text | `FRAUD` (recebe; só sai o MED) \| `ADMINISTRATIVE` (só entram estornos e devoluções) \| `JUDICIAL` (recebe; só sai a transferência judicial) |
-| `reason` | text | `FRAUD_SUSPICION`, `CUSTOMER_REQUEST`, `REGISTRATION_PENDING`, `INSTITUTION_DECISION`, `COURT_ORDER`, `OTHER` |
+| `type` | text | `FRAUD` (recebe; só sai o MED) \| `ADMINISTRATIVE` (só entram estornos e devoluções) \| `JUDICIAL` (recebe; só sai a transferência judicial) \| `FEE_PENDING` (ADR-014: recebe; só saem a tarifa e o MED) |
+| `reason` | text | `FRAUD_SUSPICION`, `CUSTOMER_REQUEST`, `REGISTRATION_PENDING`, `INSTITUTION_DECISION`, `COURT_ORDER`, `UNPAID_FEES` (só do bloqueio de tarifa), `OTHER` |
 | `note` | text | obrigatória com `OTHER` |
 | `court_process`, `court_protocol` | text | a ordem judicial; o processo é obrigatório no `JUDICIAL` |
 | `created_operator`, `created_client` | text | quem bloqueou: o operador declarado pelo console e o `client_id` do token |
@@ -282,7 +283,7 @@ Um registro por movimentação de dinheiro, independentemente de quantas contas 
 | `tenant_id` | uuid | FK → `tenant.id` |
 | `idempotency_key` | text | a chave enviada pelo cliente no header `Idempotency-Key` |
 | `fingerprint` | text | hash SHA-256 dos parâmetros do pedido (conta, valor, tipo, descrição) |
-| `type` | text | `DEPOSIT` \| `WITHDRAWAL` \| `TRANSFER`; os tipos Pix (`V4`, ADR-010) `PIX_IN` \| `PIX_OUT` \| `PIX_REFUND` \| `PIX_RETURN_IN` \| `PIX_RETURN_OUT`; os da tesouraria (`V9`, ADR-011) `TREASURY_TRANSFER` \| `RECLASSIFICATION`; e os judiciais (`V10`, ADR-013) `JUDICIAL_TRANSFER` \| `JUDICIAL_TRANSIT_OUT` |
+| `type` | text | `DEPOSIT` \| `WITHDRAWAL` \| `TRANSFER`; os tipos Pix (`V4`, ADR-010) `PIX_IN` \| `PIX_OUT` \| `PIX_REFUND` \| `PIX_RETURN_IN` \| `PIX_RETURN_OUT`; os da tesouraria (`V9`, ADR-011) `TREASURY_TRANSFER` \| `RECLASSIFICATION`; os judiciais (`V10`, ADR-013) `JUDICIAL_TRANSFER` \| `JUDICIAL_TRANSIT_OUT`; e as tarifas (`V11`, ADR-014) `FEE` \| `FEE_REFUND` |
 | `amount_cents` | bigint | valor da transação, sempre positivo |
 | `description` | text | |
 | `status` | text | hoje só existe `POSTED` (reservado para estender no futuro, ex. `REVERSED`) |
@@ -332,6 +333,7 @@ Adicionada na migration `V4` (ADR-010). Uma linha por transação `PIX_*`, grava
 | `counterparty_tax_id_masked` | text | CPF/CNPJ **só mascarado** (`***7735`); o completo fica no banco `pix` |
 | `counterparty_ispb`, `counterparty_branch`, `counterparty_account`, `counterparty_account_type` | text | conta da contraparte; agência e tipo são opcionais |
 | `reason_code` | text | motivo do estorno ou da devolução (ex.: `AC03`, `MD06`) |
+| `counterparty_tax_id_type` | text | `CPF` ou `CNPJ` da contraparte (`V11`, ADR-014): só o tipo, para tarifar o Pix recebido conforme quem pagou; nulo nos Pix anteriores |
 | `remittance_info` | text | mensagem do pagador |
 
 Regras no banco:
@@ -362,6 +364,19 @@ Uma linha por `JUDICIAL_TRANSFER` e por `JUDICIAL_TRANSIT_OUT`. Append-only.
 | `document` | text | no `TRANSIT_OUT`, o comprovante da TED (obrigatório) |
 
 As TEDs de uma transferência nunca somam mais que ela: o `MoveMoneyService` confere sob um advisory lock da transferência.
+
+### 3.5.4 `fee_detail` — a tarifa (ADR-014)
+
+Uma linha por `FEE` e por `FEE_REFUND`: `transaction_id` (PK), `tenant_id`, `operation` (o código da operação da cesta
+de tarifas: `PIX_OUT`, `WITHDRAWAL`, `MONTHLY`…), `source_transaction_id` (a transação que gerou a tarifa; no estorno,
+a tarifa estornada) e `reference` (livre, como o mês da mensalidade). Append-only.
+
+### 3.5.5 `revenue_withdrawal_detail` — a retirada da receita (ADR-015)
+
+Uma linha por `REVENUE_WITHDRAWAL`: `transaction_id` (PK), `tenant_id`, `backing_account_id` (a conta de lastro de onde
+o dinheiro saiu), `destination_bank`, `destination_branch`, `destination_account` (a conta do tenant fora da
+plataforma), `document` (o comprovante, obrigatório), `note`, `operator` e `client_id`. Append-only. O extrato da conta
+de lastro mostra o comprovante e a observação, como numa movimentação de tesouraria.
 
 ### 3.6 `outbox_event` — fila transacional de eventos
 
@@ -426,7 +441,7 @@ Todas as tabelas com `tenant_id` (`customer`, `account`, `financial_transaction`
 
 ## 8. O que os eventos publicam (e o que não publicam)
 
-Os dois eventos de domínio hoje são `CustomerOnboarded` e `TransactionPosted`. Os payloads carregam apenas identificadores (`UUID`), valores em centavos e metadados estruturais (agência, tipo de conta) — **nunca CPF/CNPJ nem nome do cliente**, por design, já que o outbox pode ser consumido por sistemas externos (fila, outro serviço) fora do perímetro de segurança do banco.
+Os eventos de domínio são `CustomerOnboarded`, `TransactionPosted` e, desde a ADR-014, `AccountBlocked`, `AccountBlockReleased` e `AccountClosed`; o relay os publica no SNS (`wallet-core-transaction-events` e `wallet-core-account-events`). Os payloads carregam apenas identificadores (`UUID`), valores em centavos e metadados estruturais (agência, tipo de conta) — **nunca CPF/CNPJ nem nome do cliente**, por design, já que o outbox pode ser consumido por sistemas externos (fila, outro serviço) fora do perímetro de segurança do banco.
 
 ## 9. O que fica fora do V1 (e exigiria mudança de modelo)
 

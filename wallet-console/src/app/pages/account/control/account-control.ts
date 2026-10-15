@@ -118,7 +118,9 @@ export class AccountControl {
     return [timelineReason(i), i.court ? `processo ${i.court.process}` : null, i.note].filter(Boolean).join(' · ') || '—';
   }
 
+  /** The fee block is never released here: wallet-fees releases it when the open fees are paid (ADR-014). */
   canRelease(block: AccountBlock): boolean {
+    if (block.type === 'FEE_PENDING') return false;
     return block.active && !this.closed() && (block.type === 'JUDICIAL' ? this.canJudicial : this.canBlock);
   }
 

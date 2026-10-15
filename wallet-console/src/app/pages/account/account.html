@@ -11,7 +11,11 @@
       <div>
         <h1>{{ acc.customerName }}</h1>
         <span class="hint">
-          {{ acc.documentMasked }} · {{ acc.formatted }} · {{ acc.type }} ·
+          {{ doc(acc.document, acc.documentMasked) }}
+          @if (acc.document) {
+            <button type="button" class="link" (click)="copyDocument(acc.document)" title="Copiar o documento, só os números">copiar</button>
+          }
+          · {{ acc.formatted }} · {{ acc.type }} ·
           <span class="badge" [class.ok]="situation(acc) === 'Ativa'" [class.bad]="situation(acc) !== 'Ativa'">{{ situation(acc) }}</span>
         </span>
         @if (editingEmail()) {
@@ -92,7 +96,10 @@
   </div>
 
   @if (account(); as acc) {
-    <app-account-schedules [accountId]="acc.id" />
+    @if (canSeeFees) {
+      <app-account-fees [accountId]="acc.id" />
+    }
+    <app-account-schedules [accountId]="acc.id" [payerDocument]="acc.document ?? null" />
     <app-account-control [account]="acc" (changed)="afterMutation($event)" />
   }
 

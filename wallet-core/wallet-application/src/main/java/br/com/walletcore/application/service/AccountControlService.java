@@ -6,11 +6,16 @@ import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.AccountStatusEventRepository;
 import br.com.walletcore.application.port.out.JudicialTransferRepository;
 import br.com.walletcore.application.port.out.JudicialTransferRepository.PendingTransit;
+import br.com.walletcore.application.port.out.OutboxRepository;
 import br.com.walletcore.application.port.out.TransactionRunner;
 import br.com.walletcore.domain.account.Account;
 import br.com.walletcore.domain.account.AccountBlock;
 import br.com.walletcore.domain.account.AccountPolicy;
 import br.com.walletcore.domain.account.AccountStatusEvent;
+import br.com.walletcore.domain.event.AccountBlockReleased;
+import br.com.walletcore.domain.event.AccountBlocked;
+import br.com.walletcore.domain.event.AccountClosed;
+import br.com.walletcore.domain.event.DomainEvent;
 import br.com.walletcore.domain.exception.BusinessRuleException;
 import br.com.walletcore.domain.exception.ForbiddenException;
 import br.com.walletcore.domain.exception.NotFoundException;
@@ -38,16 +43,18 @@ public final class AccountControlService implements AccountControlUseCase {
     private final AccountBlockRepository blocks;
     private final AccountStatusEventRepository events;
     private final JudicialTransferRepository judicial;
+    private final OutboxRepository outbox;
     private final Clock clock;
 
     public AccountControlService(TransactionRunner tx, AccountRepository accounts, AccountBlockRepository blocks,
                                  AccountStatusEventRepository events, JudicialTransferRepository judicial,
-                                 Clock clock) {
+                                 OutboxRepository outbox, Clock clock) {
         this.tx = tx;
         this.accounts = accounts;
         this.blocks = blocks;
         this.events = events;
         this.judicial = judicial;
+        this.outbox = outbox;
         this.clock = clock;
     }
 
@@ -63,6 +70,7 @@ public final class AccountControlService implements AccountControlUseCase {
             }
             blocks.insert(block);
             refreshPolicy(c.tenantId(), c.accountId());
+            outbox.enqueue(List.of(AccountBlocked.of(block)));
             return block;
         });
     }
@@ -81,7 +89,8 @@ public final class AccountControlService implements AccountControlUseCase {
             requireScope(c.scopes(), block.type());
             AccountBlock released = block.release(c.actor(), c.note(), clock.instant());
             blocks.markReleased(released);
-            refreshPolicy(c.tenantId(), c.accountId());
+            boolean stillBlocked = !refreshPolicy(c.tenantId(), c.accountId()).isEmpty();
+            outbox.enqueue(List.of(AccountBlockReleased.of(released, stillBlocked)));
             return released;
         });
     }
@@ -122,11 +131,18 @@ public final class AccountControlService implements AccountControlUseCase {
                         "the court's order must be carried out or released before the account closes");
             }
             Instant now = clock.instant();
-            active.forEach(b -> blocks.markReleased(b.release(c.actor(), CLOSING_NOTE, now)));
+            List<DomainEvent> published = new ArrayList<>();
+            for (AccountBlock b : active) {
+                AccountBlock released = b.release(c.actor(), CLOSING_NOTE, now);
+                blocks.markReleased(released);
+                published.add(AccountBlockReleased.of(released, false));
+            }
             accounts.updatePolicy(c.tenantId(), c.accountId(), AccountPolicy.OPEN);
             accounts.close(c.tenantId(), c.accountId(), now);
             events.append(c.tenantId(), new AccountStatusEvent(0, c.accountId(), Account.Status.ACTIVE,
                     Account.Status.CLOSED, now, c.actor(), c.reason(), note));
+            published.add(AccountClosed.of(c.tenantId(), c.accountId(), c.reason().name(), now));
+            outbox.enqueue(published);
             return loadCustomer(c.tenantId(), c.accountId());
         });
     }
@@ -172,10 +188,12 @@ public final class AccountControlService implements AccountControlUseCase {
         return tx.readOnly(tenantId, () -> judicial.findPendingTransit(tenantId));
     }
 
-    private void refreshPolicy(TenantId tenantId, AccountId accountId) {
+    /** Rewrites the policy from the active blocks and answers their types. */
+    private List<AccountBlock.Type> refreshPolicy(TenantId tenantId, AccountId accountId) {
         List<AccountBlock.Type> active = blocks.findByAccount(tenantId, accountId, true).stream()
                 .map(AccountBlock::type).toList();
         accounts.updatePolicy(tenantId, accountId, AccountPolicy.of(active));
+        return active;
     }
 
     private static void requireScope(Set<String> scopes, AccountBlock.Type type) {

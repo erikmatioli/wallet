@@ -236,5 +236,13 @@ class ViewModelsTest {
         assertEquals("R$ 1.234,56", Format.money(123456))
         assertEquals("R$ 0,05", Format.money(5))
         assertEquals("Pix recebido", Format.type("PIX_IN"))
+        assertEquals("Tarifa", Format.type("FEE"))
+        assertEquals("Estorno de tarifa", Format.type("FEE_REFUND"))
+    }
+
+    @Test
+    fun `the fee block says a credit frees the account`() {
+        assertTrue(Format.blocked(true).contains("tarifas em aberto"))
+        assertTrue(Format.blocked(false).contains("Procure o atendimento"))
     }
 }

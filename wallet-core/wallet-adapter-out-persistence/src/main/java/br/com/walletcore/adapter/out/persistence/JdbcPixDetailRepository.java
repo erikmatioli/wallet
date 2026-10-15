@@ -25,7 +25,7 @@ class JdbcPixDetailRepository implements PixDetailRepository {
     private static final String COLUMNS = """
             transaction_id, type, end_to_end_id, return_id, related_transaction_id, counterparty_name,
             counterparty_tax_id_masked, counterparty_ispb, counterparty_branch, counterparty_account,
-            counterparty_account_type, reason_code, remittance_info""";
+            counterparty_account_type, reason_code, remittance_info, counterparty_tax_id_type""";
 
     private final JdbcClient jdbc;
 
@@ -42,9 +42,10 @@ class JdbcPixDetailRepository implements PixDetailRepository {
                                                         related_transaction_id, counterparty_name,
                                                         counterparty_tax_id_masked, counterparty_ispb,
                                                         counterparty_branch, counterparty_account,
-                                                        counterparty_account_type, reason_code, remittance_info)
+                                                        counterparty_account_type, reason_code, remittance_info,
+                                                        counterparty_tax_id_type)
                     VALUES (:tx, :tenant, :type, :e2e, :returnId, :related, :name, :taxId, :ispb, :branch, :account,
-                            :accountType, :reason, :remittance)""")
+                            :accountType, :reason, :remittance, :taxIdType)""")
                     .param("tx", transactionId.value())
                     .param("tenant", tenantId.value())
                     .param("type", d.type().name())
@@ -60,6 +61,7 @@ class JdbcPixDetailRepository implements PixDetailRepository {
                     .param("accountType", c.accountType(), Types.VARCHAR)
                     .param("reason", d.reasonCode(), Types.VARCHAR)
                     .param("remittance", d.remittanceInfo(), Types.VARCHAR)
+                    .param("taxIdType", c.taxIdType(), Types.VARCHAR)
                     .update();
         } catch (DuplicateKeyException e) {
             // Two requests with different Idempotency-Keys for the same Pix, racing past the
@@ -146,7 +148,8 @@ class JdbcPixDetailRepository implements PixDetailRepository {
                         rs.getString("counterparty_ispb"),
                         rs.getString("counterparty_branch"),
                         rs.getString("counterparty_account"),
-                        rs.getString("counterparty_account_type")),
+                        rs.getString("counterparty_account_type"),
+                        rs.getString("counterparty_tax_id_type")),
                 rs.getString("reason_code"),
                 rs.getString("remittance_info"));
     }

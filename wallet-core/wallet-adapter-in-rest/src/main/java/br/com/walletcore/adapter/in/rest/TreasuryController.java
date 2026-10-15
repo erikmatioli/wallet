@@ -8,22 +8,34 @@ import br.com.walletcore.adapter.in.rest.TreasuryModels.PositionsResponse;
 import br.com.walletcore.adapter.in.rest.TreasuryModels.RegisterBackingAccountRequest;
 import br.com.walletcore.adapter.in.rest.TreasuryModels.TreasuryTransferRequest;
 import br.com.walletcore.adapter.in.rest.TreasuryModels.UncoveredDailyResponse;
-import br.com.walletcore.application.port.in.MoveMoneyUseCase;
+import br.com.walletcore.application.port.in.MoveMoneyUseCase.RevenueWithdrawalCommand;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.TreasuryTransferCommand;
+import br.com.walletcore.application.port.in.MoveMoneyUseCase;
 import br.com.walletcore.application.port.in.TreasuryUseCase;
+import br.com.walletcore.domain.account.Actor;
 import br.com.walletcore.domain.backing.BackingType;
+import br.com.walletcore.domain.backing.RevenueWithdrawal;
 import br.com.walletcore.domain.backing.TreasuryReference;
 import br.com.walletcore.domain.exception.ValidationException;
 import br.com.walletcore.domain.shared.BackingAccountId;
 import br.com.walletcore.domain.shared.Money;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -56,6 +68,88 @@ class TreasuryController {
     TreasuryController(TreasuryUseCase treasury, MoveMoneyUseCase moveMoney) {
         this.treasury = treasury;
         this.moveMoney = moveMoney;
+    }
+
+    /**
+     * The tenant's revenue account (ADR-014): what the fees took in, and its movements, newest first. {@code month}:
+     * the current month's net fees and withdrawals (ADR-015); absent in the first minute of a month.
+     */
+    record RevenueResponse(BigDecimal balance, String currency, RevenueMonthResponse month, List<RevenueEntry> entries,
+                           Long next) {
+    }
+
+    record RevenueMonthResponse(String month, BigDecimal earned, BigDecimal withdrawn) {
+    }
+
+    /** {@code withdrawal}: only on a REVENUE_WITHDRAWAL, where the money left from and went to. */
+    record RevenueEntry(UUID transactionId, long sequence, String type, String direction, BigDecimal amount,
+                        BigDecimal balanceAfter, String description, Instant occurredAt,
+                        WithdrawalResponse withdrawal) {
+    }
+
+    record WithdrawalResponse(UUID backingAccountId, String backingAccountName, DestinationBody destination,
+                              String document, String note, String operator) {
+    }
+
+    @Schema(description = "A conta do tenant fora da plataforma, para onde a receita foi")
+    record DestinationBody(
+            @Schema(example = "Itaú (341)") @NotBlank @Size(max = 80) String bank,
+            @Schema(example = "0001") @NotBlank @Size(max = 10) String branch,
+            @Schema(example = "12345-6") @NotBlank @Size(max = 30) String account) {
+    }
+
+    @Schema(description = "A retirada da receita do tenant (ADR-015)")
+    record RevenueWithdrawalRequest(
+            @Schema(description = "A conta de lastro de onde o dinheiro saiu") @NotNull UUID backingAccountId,
+            @Schema(example = "500.00") @NotNull @DecimalMin("0.01") @Digits(integer = 13, fraction = 2)
+            BigDecimal amount,
+            @NotNull @Valid DestinationBody destination,
+            @Schema(description = "Comprovante da TED", example = "TED 000123") @NotBlank @Size(max = 140)
+            String document,
+            @Size(max = 280) String note,
+            @Schema(description = "Nome do operador", example = "ana.tesouraria") @NotBlank @Size(max = 80)
+            String operator) {
+    }
+
+    @PostMapping("/revenue/withdrawals")
+    @Operation(summary = "Retirar a receita do tenant",
+            description = "Tira o valor da conta de receitas contra a conta de lastro de onde o dinheiro saiu (nunca "
+                    + "A regularizar), registrando o destino e o comprovante. No máximo o saldo da receita. Exige "
+                    + "Idempotency-Key.")
+    ResponseEntity<TransactionResponse> withdrawRevenue(@AuthenticationPrincipal Jwt jwt,
+                                                        @RequestHeader(AccountController.IDEMPOTENCY_KEY) String key,
+                                                        @Valid @RequestBody RevenueWithdrawalRequest request) {
+        DestinationBody d = request.destination();
+        var result = moveMoney.revenueWithdrawal(new RevenueWithdrawalCommand(CurrentTenant.from(jwt),
+                new BackingAccountId(request.backingAccountId()), Money.ofDecimal(request.amount()),
+                new RevenueWithdrawal.Destination(d.bank(), d.branch(), d.account()), request.document(),
+                request.note(), new Actor(request.operator(), CurrentTenant.clientId(jwt)), key));
+        return AccountController.respond(result);
+    }
+
+    @GetMapping("/revenue")
+    @Operation(summary = "Conta de receitas do tenant",
+            description = "O que as tarifas arrecadaram, já descontados os estornos, e os lançamentos, mais novos primeiro.")
+    RevenueResponse revenue(@AuthenticationPrincipal Jwt jwt,
+                            @RequestParam(required = false) Long before,
+                            @RequestParam(defaultValue = "50") int limit) {
+        var r = treasury.revenue(CurrentTenant.from(jwt), before, limit);
+        var month = r.month() == null ? null : new RevenueMonthResponse(r.month().month().toString(),
+                r.month().earned().toDecimal(), r.month().withdrawn().toDecimal());
+        return new RevenueResponse(r.balance().toDecimal(), Money.CURRENCY, month,
+                r.entries().stream().map(e -> new RevenueEntry(e.transactionId().value(), e.sequence(), e.type().name(),
+                        e.direction().name(), e.amount().toDecimal(), e.balanceAfter().toDecimal(), e.description(),
+                        e.occurredAt(), withdrawal(r.withdrawals().get(e.transactionId())))).toList(),
+                r.next());
+    }
+
+    private static WithdrawalResponse withdrawal(TreasuryUseCase.Withdrawal w) {
+        if (w == null) {
+            return null;
+        }
+        var d = w.detail();
+        return new WithdrawalResponse(d.from().value(), w.fromName(), new DestinationBody(d.destination().bank(),
+                d.destination().branch(), d.destination().account()), d.document(), d.note(), d.actor().operator());
     }
 
     @GetMapping("/backing-accounts")

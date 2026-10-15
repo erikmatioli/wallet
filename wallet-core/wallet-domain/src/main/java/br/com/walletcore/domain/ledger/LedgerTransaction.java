@@ -135,6 +135,35 @@ public record LedgerTransaction(
                         new Leg(backingShard, EntryDirection.CREDIT, amount)), now);
     }
 
+    /** A fee (ADR-014): the customer is debited, the tenant's revenue account is credited. */
+    public static LedgerTransaction fee(TenantId tenantId, TransactionId id, AccountId customerAccount,
+                                        AccountId revenueAccount, Money amount, String description, Instant now) {
+        return new LedgerTransaction(id, tenantId, TransactionType.FEE, amount, description,
+                List.of(new Leg(customerAccount, EntryDirection.DEBIT, amount),
+                        new Leg(revenueAccount, EntryDirection.CREDIT, amount)), now);
+    }
+
+    /** A fee given back: the revenue account is debited, the customer is credited. */
+    public static LedgerTransaction feeRefund(TenantId tenantId, TransactionId id, AccountId customerAccount,
+                                              AccountId revenueAccount, Money amount, String description,
+                                              Instant now) {
+        return new LedgerTransaction(id, tenantId, TransactionType.FEE_REFUND, amount, description,
+                List.of(new Leg(revenueAccount, EntryDirection.DEBIT, amount),
+                        new Leg(customerAccount, EntryDirection.CREDIT, amount)), now);
+    }
+
+    /**
+     * The tenant's revenue left the platform (ADR-015): the revenue account is debited and the backing account the
+     * money left from is credited, as the TED of a judicial transfer credits it.
+     */
+    public static LedgerTransaction revenueWithdrawal(TenantId tenantId, TransactionId id, AccountId revenueAccount,
+                                                      AccountId backingShard, Money amount, String description,
+                                                      Instant now) {
+        return new LedgerTransaction(id, tenantId, TransactionType.REVENUE_WITHDRAWAL, amount, description,
+                List.of(new Leg(revenueAccount, EntryDirection.DEBIT, amount),
+                        new Leg(backingShard, EntryDirection.CREDIT, amount)), now);
+    }
+
     /**
      * Legs sorted by account id. Locking accounts in this deterministic order in every
      * transaction makes deadlocks impossible (A->B and B->A both lock the lower id first).

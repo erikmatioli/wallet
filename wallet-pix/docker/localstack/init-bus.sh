@@ -34,4 +34,16 @@ subscribe "$EVENTS"     "$(queue pix-events-dev)"
 # wallet-scheduler: results of the Pix it sends (its ADR-001). Own queue and DLQ on the same topic.
 subscribe "$EVENTS"     "$(queue wallet-scheduler-pix-events wallet-scheduler-pix-events-dlq)"
 
-echo "Pix bus ready: topics spi-to-psp, psp-to-spi, pix-payment-events"
+# wallet-core's own events (its ADR-014): transactions, and customers/accounts. The core runs before this LocalStack;
+# its outbox holds the events until the topics exist. A dev queue on each topic, to look at what was published.
+CORE_TX=$(topic wallet-core-transaction-events)
+CORE_ACCOUNTS=$(topic wallet-core-account-events)
+CORE_DEV=$(queue wallet-core-events-dev)
+subscribe "$CORE_TX"       "$CORE_DEV"
+subscribe "$CORE_ACCOUNTS" "$CORE_DEV"
+# wallet-fees (its ADR-001): the fee basket reacts to the core's transactions, openings, blocks and closings.
+FEES=$(queue wallet-fees-core-events wallet-fees-core-events-dlq)
+subscribe "$CORE_TX"       "$FEES"
+subscribe "$CORE_ACCOUNTS" "$FEES"
+
+echo "Bus ready: topics spi-to-psp, psp-to-spi, pix-payment-events, wallet-core-transaction-events, wallet-core-account-events"

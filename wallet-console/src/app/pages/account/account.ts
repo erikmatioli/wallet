@@ -11,15 +11,18 @@ import { brasiliaToday } from '../../core/schedule-labels';
 import { EntryDetail } from './entry-detail/entry-detail';
 import { AccountSchedules } from './schedules/account-schedules';
 import { AccountControl } from './control/account-control';
+import { AccountFees } from './fees/account-fees';
+import { AuthService } from '../../core/auth.service';
 import { accountSituation } from '../../core/account-control';
 import { ProblemBanner } from '../../shared/problem-banner/problem-banner';
 import { dayLabel, statementDays } from '../../core/statement-days';
+import { formatDocument } from '../../core/document';
 
 type TransferMethod = 'id' | 'number';
 
 @Component({
   selector: 'app-account',
-  imports: [FormsModule, RouterLink, DecimalPipe, DatePipe, ProblemBanner, EntryDetail, AccountSchedules, AccountControl],
+  imports: [FormsModule, RouterLink, DecimalPipe, DatePipe, ProblemBanner, EntryDetail, AccountSchedules, AccountControl, AccountFees],
   templateUrl: './account.html',
   styleUrl: './account.scss',
 })
@@ -63,11 +66,17 @@ export class AccountPage implements OnInit {
   transferAmount = 0;
   transferDescription = '';
 
+  /** The fee basket's section (wallet-fees): only for whoever can read it. */
+  protected readonly canSeeFees: boolean;
+
   constructor(
     private readonly route: ActivatedRoute,
     private readonly api: WalletApiService,
     private readonly destroyRef: DestroyRef,
-  ) {}
+    auth: AuthService,
+  ) {
+    this.canSeeFees = auth.hasScope('fees:read');
+  }
 
   ngOnInit(): void {
     // Subscribe instead of reading the snapshot: navigating /accounts/A -> /accounts/B (e.g. via a
@@ -117,6 +126,15 @@ export class AccountPage implements OnInit {
   }
 
   protected readonly situation = accountSituation;
+  protected readonly doc = formatDocument;
+
+  /** The operator types the document elsewhere (a bank, a court order): copied without punctuation. */
+  copyDocument(document: string): void {
+    navigator.clipboard?.writeText(document).then(
+      () => this.notice.set('Documento copiado.'),
+      () => this.error.set('Não foi possível copiar; selecione o documento e copie.'),
+    );
+  }
 
   typeLabel(type: string): string {
     return transactionLabel(type);

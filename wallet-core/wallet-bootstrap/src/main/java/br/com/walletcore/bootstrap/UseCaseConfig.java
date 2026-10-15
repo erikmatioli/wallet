@@ -15,6 +15,7 @@ import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.AccountStatusEventRepository;
 import br.com.walletcore.application.port.out.BackingAccountRepository;
 import br.com.walletcore.application.port.out.CustomerRepository;
+import br.com.walletcore.application.port.out.FeeDetailRepository;
 import br.com.walletcore.application.port.out.JudicialTransferRepository;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
@@ -84,16 +85,17 @@ class UseCaseConfig {
                                       TransactionJournal journal, OutboxRepository outbox, PixDetailRepository pixDetails,
                                       BackingAccountRepository backing, BackingRouter backingRouter,
                                       AccountBlockRepository blocks, JudicialTransferRepository judicial,
-                                      MetricsRecorder metrics, Clock clock) {
+                                      FeeDetailRepository feeDetails, MetricsRecorder metrics, Clock clock) {
         return new MoveMoneyService(tx, accounts, ledger, journal, outbox, pixDetails, backing, backingRouter, blocks,
-                judicial, metrics, clock);
+                judicial, feeDetails, metrics, clock);
     }
 
     @Bean
     AccountControlUseCase accountControlUseCase(TransactionRunner tx, AccountRepository accounts,
                                                 AccountBlockRepository blocks, AccountStatusEventRepository statusEvents,
-                                                JudicialTransferRepository judicial, Clock clock) {
-        return new AccountControlService(tx, accounts, blocks, statusEvents, judicial, clock);
+                                                JudicialTransferRepository judicial, OutboxRepository outbox,
+                                                Clock clock) {
+        return new AccountControlService(tx, accounts, blocks, statusEvents, judicial, outbox, clock);
     }
 
     @Bean

@@ -1,6 +1,7 @@
 import {
   centsFromTyping,
   amountField,
+  blockedMessage,
   cpfMask,
   dayTitle,
   dateTime,
@@ -8,6 +9,7 @@ import {
   money,
   scheduleStatus,
   tomorrow,
+  type,
   uuid,
 } from './format';
 import { schedule } from '../testing/fake-api';
@@ -72,5 +74,17 @@ describe('format', () => {
     const id = uuid();
     expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(uuid()).not.toBe(id);
+  });
+});
+
+describe('fees', () => {
+  it('names the fee and its refund as the console does', () => {
+    expect(type('FEE')).toBe('Tarifa');
+    expect(type('FEE_REFUND')).toBe('Estorno de tarifa');
+  });
+
+  it('tells a fee block apart from any other block', () => {
+    expect(blockedMessage({ blockedForFees: true })).toContain('tarifas em aberto');
+    expect(blockedMessage({})).toContain('Procure o atendimento');
   });
 });

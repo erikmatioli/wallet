@@ -81,7 +81,8 @@ class AccountController {
             @AuthenticationPrincipal Jwt jwt,
             @Parameter(description = "UUID da conta", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", required = true)
             @PathVariable UUID accountId) {
-        return AccountDetailResponse.from(query.getAccountDetail(CurrentTenant.from(jwt), new AccountId(accountId)));
+        return AccountDetailResponse.from(query.getAccountDetail(CurrentTenant.from(jwt), new AccountId(accountId)),
+                CurrentTenant.seesDocument(jwt));
     }
 
     @GetMapping("/balance")

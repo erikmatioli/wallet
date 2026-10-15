@@ -17,7 +17,7 @@ const OPERATOR_MESSAGES: Record<string, string> = {
   ACCOUNT_NOT_EMPTY: 'A conta ainda tem saldo: devolva o dinheiro ao cliente (Pix ou saque) antes de encerrar.',
   JUDICIAL_BLOCK_ACTIVE: 'Há um bloqueio judicial ativo: cumpra ou libere a ordem antes de encerrar.',
   ACCOUNT_ALREADY_CLOSED: 'A conta já está encerrada.',
-  ACCOUNT_CLOSED: 'Uma conta encerrada não pode ser bloqueada.',
+  ACCOUNT_CLOSED: 'A conta está encerrada: não pode ser bloqueada nem mudar de pacote.',
   BLOCK_ALREADY_RELEASED: 'Este bloqueio já foi liberado.',
   SCOPE_REQUIRED: 'Seu acesso não permite este tipo de bloqueio.',
   COURT_PROCESS_REQUIRED: 'Informe o número do processo.',
@@ -31,6 +31,14 @@ const OPERATOR_MESSAGES: Record<string, string> = {
   DOCUMENT_REQUIRED: 'Informe o comprovante da TED.',
   INSUFFICIENT_FUNDS: 'Saldo insuficiente.',
   COVERAGE_EXCEEDS_UNCOVERED: 'A cobertura é maior que o dinheiro descoberto.',
+  // wallet-fees (its ADR-001)
+  PAST_DATE: 'Uma tabela começa hoje ou depois: o que já foi cobrado não muda de preço.',
+  SCHEDULE_IN_FORCE: 'A tabela desta data já está em vigor; comece a nova amanhã.',
+  INVALID_PRICE: 'Preço inválido: de 0 a 100.000,00, com até duas casas decimais.',
+  INVALID_FREE_QUOTA: 'Franquia inválida: de 0 a 10.000 por mês.',
+  SAME_PACKAGE: 'A conta já está neste pacote.',
+  PACKAGE_OF_ANOTHER_TYPE: 'Este pacote é de outro tipo de cliente (PF ou PJ).',
+  PACKAGE_NOT_FOUND: 'Pacote não encontrado.',
 };
 
 export function extractErrorMessage(err: unknown): string {
@@ -43,6 +51,9 @@ export function extractErrorMessage(err: unknown): string {
       if (message) return message;
     }
     if (err.status === 0) return 'Não foi possível conectar à API. Verifique se o wallet-core está no ar.';
+    if (err.status === 502 || err.status === 503 || err.status === 504) {
+      return 'O serviço não respondeu. Tente de novo em instantes.';
+    }
     return `Erro ${err.status}: ${err.statusText}`;
   }
   return 'Erro inesperado.';
