@@ -41,7 +41,11 @@ Pacotes de tarifas por conta: mensalidade e preço por operação, com franquia 
 - **OpenTelemetry:** traces (requisições, mensagens da fila, chamadas ao core, Postgres) e logs para o collector do
   core, quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definido.
 
-Falta a etapa 5: as telas do console e o extrato no app e no M-Wall.
+- **Console e app (etapa 5):** a tela **Tarifas** do console (pacotes PF e PJ, tabela em vigor, próxima tabela,
+  histórico e nova tabela) e a seção **Pacote e tarifas** da conta (pacote e migração, franquia do mês, últimas
+  tarifas e o motivo de cada pendência); o console chega aqui por `/v1/fees` no proxy e no nginx. No app e no M-Wall,
+  a tarifa e o estorno aparecem no extrato ("Tarifa", "Estorno de tarifa"), e o bloqueio de tarifa tem aviso
+  próprio.
 
 ## API
 

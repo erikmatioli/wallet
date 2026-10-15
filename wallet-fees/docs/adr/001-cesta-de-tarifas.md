@@ -1,6 +1,6 @@
 # ADR-001 — Cesta de tarifas (wallet-fees)
 
-**Status:** aceita; etapas 1 a 4 implementadas (core, base, tarifa por transação, estorno e mensalidade)
+**Status:** aceita; implementada (etapas 1 a 5: core, base, tarifa por transação, estorno e mensalidade, console e app)
 
 ## Contexto
 O tenant quer cobrar dos clientes pelos serviços da conta, com a receita indo para uma conta dele:
@@ -184,6 +184,12 @@ Escopos novos no core: **`fees:read`** e **`fees:admin`** (operador), além do `
 - **OpenTelemetry:** traces de ASP.NET Core, HttpClient (com a propagação para o core), Npgsql e um span por
   mensagem da fila e por execução da mensalidade, e os logs, pelo OTLP/HTTP para o mesmo collector. As recusas do
   domínio (404, 422) não são mais logadas como erro.
+- **O console não libera o bloqueio de tarifa**, mesmo com um token que tenha `fees:write`: quem libera é o
+  wallet-fees, ao cobrar tudo. A seção da conta mostra por que cada tarifa pendente espera (sem saldo, outro
+  bloqueio, core fora do ar) e tem o próprio "Atualizar", porque a tarifa chega alguns segundos depois da transação.
+- **App e M-Wall:** o `GET /app/v1/me` ganhou `blockedForFees`, verdadeiro quando o único bloqueio ativo é o de
+  tarifa. Com ele, o aviso é o do item 9; com outro bloqueio junto, continua o aviso de conta bloqueada (procure o
+  atendimento), porque um crédito não basta para liberar a conta.
 
 ## Fora do escopo
 - Isenções e descontos por cliente, tarifas por faixa de valor, cobrança proporcional na migração de pacote.
