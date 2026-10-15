@@ -140,6 +140,9 @@ curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/accounts/$ACC/audit
 | `POST /v1/judicial-transit/{transferId}/teds` | `accounts:judicial` | Registra a TED enviada pela tesouraria: sai do trânsito, contra a conta de lastro de onde ela saiu |
 | `POST /v1/accounts/{id}/close` | `accounts:close` | Encerra a conta, para sempre. Recusa com saldo (`ACCOUNT_NOT_EMPTY`) ou bloqueio judicial ativo (`JUDICIAL_BLOCK_ACTIVE`) |
 | `GET /v1/accounts/{id}/timeline` | `accounts:read` | Abertura, bloqueios, liberações e encerramento, com quem fez |
+| `POST /v1/accounts/{id}/fees` | `fees:write` | Cobra uma tarifa da cesta de tarifas ([ADR-014](docs/adr/014-eventos-publicados-e-tarifas.md)): debita o cliente e credita a conta de receitas do tenant. Só de conta sem bloqueio, ou com o bloqueio de tarifa (`FEE_PENDING`), e só inteira. `Idempotency-Key` derivada da origem |
+| `POST /v1/fees/{feeTransactionId}/refunds` | `fees:write` | Estorna a tarifa inteira, uma vez; entra mesmo com a conta bloqueada |
+| `GET /v1/treasury/revenue?before=&limit=` | `ledger:audit` | Conta de receitas do tenant: o que as tarifas arrecadaram e os lançamentos |
 | `GET /v1/ccs/account-events?after=&limit=` | `ccs:read` | Feed de aberturas e encerramentos em ordem de `seq`, com o documento completo do titular, para o `wallet-ccs` |
 
 Valores monetários são decimais em BRL com no máximo 2 casas (`"amount": 250.00`); internamente tudo é `long` em centavos.
@@ -171,6 +174,7 @@ Repetir uma requisição com a mesma `Idempotency-Key` e o mesmo corpo devolve a
 10. **Saldo de fechamento sob demanda** (ADR-012): o saldo de um dia é lido do próprio ledger, por busca binária na sequência da conta, sem tabela de snapshot.
 11. **Tesouraria e contas de lastro** (ADR-011): cada meio tem a sua conta de lastro; a tesouraria cobre o que os depósitos criaram e recompõe entre os lugares, com comprovante.
 12. **Bloqueios e encerramento** (ADR-013): bloqueios de fraude, total e judicial convivem e são liberados cada um pelo seu escopo; o resumo deles entra no mesmo `UPDATE` do saldo. A transferência judicial cumpre a ordem acima dos outros bloqueios. Aberturas e encerramentos alimentam o feed do CCS.
+13. **Eventos publicados e tarifas** (ADR-014): o outbox é publicado no SNS (transações num tópico, clientes e contas em outro); as tarifas da cesta de tarifas são partidas dobradas comuns (`FEE`, `FEE_REFUND`) para a conta de receitas do tenant, fora do lastro; o bloqueio de tarifa deixa sair só a tarifa e o MED.
 
 ## 6. Modelo da conta de pagamento
 

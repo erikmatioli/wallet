@@ -45,10 +45,13 @@ public record Tenant(
      * <p>ADR-013: {@code accounts:block} (fraud and administrative blocks), {@code accounts:judicial} (judicial blocks
      * and transfers), {@code accounts:close} and {@code ccs:read} (the feed of wallet-ccs). Whoever moves money is
      * not whoever blocks it.
+     *
+     * <p>ADR-014: {@code fees:read} and {@code fees:admin} for the operator of the fee basket (wallet-fees), and
+     * {@code fees:write}, with which wallet-fees charges and refunds fees and handles the fee block.
      */
     public static final Set<String> DEFAULT_SCOPES = Set.of("customers:write", "accounts:read", "ledger:write",
             "ledger:audit", "pix:send", "pix:receive", "schedules:read", "schedules:write", "otp:use", "treasury:write",
-            "accounts:block", "accounts:judicial", "accounts:close", "ccs:read");
+            "accounts:block", "accounts:judicial", "accounts:close", "ccs:read", "fees:read", "fees:admin", "fees:write");
 
     private static final Pattern CLIENT_ID = Pattern.compile("[a-z0-9][a-z0-9-]{2,62}");
     private static final Pattern ISPB = Pattern.compile("[0-9]{8}");

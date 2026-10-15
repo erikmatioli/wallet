@@ -19,6 +19,7 @@
     <description>White-label multi-tenant digital wallet core: payment accounts, double-entry ledger, secure REST APIs</description>
 
     <properties>
+        <awssdk.version>2.55.11</awssdk.version>
         <java.version>25</java.version>
         <archunit.version>1.4.1</archunit.version>
     </properties>
@@ -34,6 +35,14 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- Same SDK version as wallet-pix: the core publishes its events to SNS (ADR-014). -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${awssdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>br.com.walletcore</groupId>
                 <artifactId>wallet-domain</artifactId>

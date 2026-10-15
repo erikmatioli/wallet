@@ -55,7 +55,10 @@ class SecurityConfig {
                         // the scope of its type (the service checks which), the judicial transfer and its TED the
                         // judicial one, the closing its own; the CCS feed carries full documents, so its own scope too.
                         .requestMatchers(HttpMethod.POST, "/v1/accounts/*/blocks", "/v1/accounts/*/blocks/*/release")
-                        .hasAnyAuthority("SCOPE_accounts:block", "SCOPE_accounts:judicial")
+                        .hasAnyAuthority("SCOPE_accounts:block", "SCOPE_accounts:judicial", "SCOPE_fees:write")
+                        // ADR-014: only the fee basket (wallet-fees) charges and gives back fees.
+                        .requestMatchers(HttpMethod.POST, "/v1/accounts/*/fees", "/v1/fees/*/refunds")
+                        .hasAuthority("SCOPE_fees:write")
                         .requestMatchers(HttpMethod.POST, "/v1/accounts/*/judicial-transfers", "/v1/judicial-transit/*/teds")
                         .hasAuthority("SCOPE_accounts:judicial")
                         .requestMatchers(HttpMethod.GET, "/v1/judicial-transit/**")

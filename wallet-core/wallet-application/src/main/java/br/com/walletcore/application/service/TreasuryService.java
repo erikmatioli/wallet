@@ -279,4 +279,17 @@ public final class TreasuryService implements TreasuryUseCase {
                 .orElseThrow(() -> new IllegalStateException("shard " + shard + " not found"))
                 .version();
     }
+
+    @Override
+    public Revenue revenue(TenantId tenantId, Long before, int limit) {
+        int pageSize = Math.min(Math.max(limit, 1), MAX_PAGE);
+        return tx.readOnly(tenantId, () -> {
+            AccountId revenue = accounts.findTenantRevenue(tenantId)
+                    .orElseThrow(() -> new IllegalStateException("tenant has no revenue account"));
+            Money balance = accounts.findById(tenantId, revenue).orElseThrow().balance();
+            List<LedgerEntry> page = ledger.findPage(tenantId, revenue, before, pageSize, null);
+            Long next = page.size() == pageSize ? page.get(page.size() - 1).sequence() : null;
+            return new Revenue(balance, page, next);
+        });
+    }
 }

@@ -91,4 +91,7 @@ public interface AccountRepository {
 
     /** The tenant's "depósitos judiciais a transferir" (ADR-013). */
     Optional<AccountId> findJudicialTransit(TenantId tenantId);
+
+    /** The tenant's revenue account, where the fees go (ADR-014). */
+    Optional<AccountId> findTenantRevenue(TenantId tenantId);
 }

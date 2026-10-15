@@ -65,6 +65,31 @@ public interface MoveMoneyUseCase {
      */
     TransactionResult judicialTransitOut(JudicialTransitOutCommand command);
 
+    /**
+     * Charges a fee of the fee basket (ADR-014): debits the customer, credits the tenant's revenue account. Only from
+     * an account free of blocks, or under the fee block (FEE_PENDING) made for it; never in part. Idempotent by the
+     * key the caller derives from the fee's origin.
+     */
+    TransactionResult fee(FeeCommand command);
+
+    /**
+     * Gives a fee back, in full, once: the key is derived from the fee, like a reversal's. Comes in under any block.
+     */
+    TransactionResult feeRefund(FeeRefundCommand command);
+
+    /**
+     * @param operation   the fee basket's operation (PIX_OUT, PIX_IN, TRANSFER_OUT, WITHDRAWAL, MONTHLY...)
+     * @param description what the customer reads in the statement ("Tarifa: Pix enviado")
+     * @param source      the transaction that caused the fee; null for a monthly fee
+     * @param reference   the caller's reference, such as the month of a monthly fee
+     */
+    record FeeCommand(TenantId tenantId, AccountId accountId, Money amount, String operation, String description,
+                      TransactionId source, String reference, String idempotencyKey) {
+    }
+
+    record FeeRefundCommand(TenantId tenantId, TransactionId feeTransactionId, String description) {
+    }
+
     /** Where the court sends the money: another customer account of the tenant, or a court deposit elsewhere. */
     sealed interface JudicialDestination {
         record ToAccount(Destination account) implements JudicialDestination {

@@ -8,8 +8,8 @@ import br.com.walletcore.adapter.in.rest.TreasuryModels.PositionsResponse;
 import br.com.walletcore.adapter.in.rest.TreasuryModels.RegisterBackingAccountRequest;
 import br.com.walletcore.adapter.in.rest.TreasuryModels.TreasuryTransferRequest;
 import br.com.walletcore.adapter.in.rest.TreasuryModels.UncoveredDailyResponse;
-import br.com.walletcore.application.port.in.MoveMoneyUseCase;
 import br.com.walletcore.application.port.in.MoveMoneyUseCase.TreasuryTransferCommand;
+import br.com.walletcore.application.port.in.MoveMoneyUseCase;
 import br.com.walletcore.application.port.in.TreasuryUseCase;
 import br.com.walletcore.domain.backing.BackingType;
 import br.com.walletcore.domain.backing.TreasuryReference;
@@ -23,7 +23,10 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -56,6 +59,28 @@ class TreasuryController {
     TreasuryController(TreasuryUseCase treasury, MoveMoneyUseCase moveMoney) {
         this.treasury = treasury;
         this.moveMoney = moveMoney;
+    }
+
+    /** The tenant's revenue account (ADR-014): what the fees took in, and its movements, newest first. */
+    record RevenueResponse(BigDecimal balance, String currency, List<RevenueEntry> entries, Long next) {
+    }
+
+    record RevenueEntry(UUID transactionId, long sequence, String type, String direction, BigDecimal amount,
+                        BigDecimal balanceAfter, String description, Instant occurredAt) {
+    }
+
+    @GetMapping("/revenue")
+    @Operation(summary = "Conta de receitas do tenant",
+            description = "O que as tarifas arrecadaram, já descontados os estornos, e os lançamentos, mais novos primeiro.")
+    RevenueResponse revenue(@AuthenticationPrincipal Jwt jwt,
+                            @RequestParam(required = false) Long before,
+                            @RequestParam(defaultValue = "50") int limit) {
+        var r = treasury.revenue(CurrentTenant.from(jwt), before, limit);
+        return new RevenueResponse(r.balance().toDecimal(), Money.CURRENCY,
+                r.entries().stream().map(e -> new RevenueEntry(e.transactionId().value(), e.sequence(), e.type().name(),
+                        e.direction().name(), e.amount().toDecimal(), e.balanceAfter().toDecimal(), e.description(),
+                        e.occurredAt())).toList(),
+                r.next());
     }
 
     @GetMapping("/backing-accounts")

@@ -7,7 +7,8 @@ import java.util.UUID;
  * Integration-grade domain event, published through the transactional outbox. Payloads carry
  * only identifiers and non-sensitive attributes (no tax ids, no names).
  */
-public sealed interface DomainEvent permits CustomerOnboarded, TransactionPosted {
+public sealed interface DomainEvent permits CustomerOnboarded, TransactionPosted, AccountBlocked,
+        AccountBlockReleased, AccountClosed {
 
     UUID eventId();
 

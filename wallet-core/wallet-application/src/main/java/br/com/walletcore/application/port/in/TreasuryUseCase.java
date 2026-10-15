@@ -75,4 +75,13 @@ public interface TreasuryUseCase {
     }
 
     List<UncoveredDay> uncoveredDaily(TenantId tenantId, LocalDate from, LocalDate to);
+
+    /**
+     * The tenant's revenue account (ADR-014): what the fees took in, net of the refunds, and its movements, newest
+     * first. {@code before} is the sequence cursor of the previous page; {@code next} that of the next one.
+     */
+    record Revenue(Money balance, List<LedgerEntry> entries, Long next) {
+    }
+
+    Revenue revenue(TenantId tenantId, Long before, int limit);
 }

@@ -5,6 +5,7 @@ import br.com.walletcore.application.port.out.AccountRepository;
 import br.com.walletcore.application.port.out.BackingAccountRepository;
 import br.com.walletcore.application.port.out.AccountBlockRepository;
 import br.com.walletcore.application.port.out.BalanceUpdateResult;
+import br.com.walletcore.application.port.out.FeeDetailRepository;
 import br.com.walletcore.application.port.out.JudicialTransferRepository;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
@@ -71,13 +72,15 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
     private final BackingRouter router;
     private final AccountBlockRepository blocks;
     private final JudicialTransferRepository judicial;
+    private final FeeDetailRepository feeDetails;
     private final MetricsRecorder metrics;
     private final Clock clock;
 
     public MoveMoneyService(TransactionRunner tx, AccountRepository accounts, LedgerRepository ledger,
                             TransactionJournal journal, OutboxRepository outbox, PixDetailRepository pixDetails,
                             BackingAccountRepository backing, BackingRouter router, AccountBlockRepository blocks,
-                            JudicialTransferRepository judicial, MetricsRecorder metrics, Clock clock) {
+                            JudicialTransferRepository judicial, FeeDetailRepository feeDetails,
+                            MetricsRecorder metrics, Clock clock) {
         this.tx = tx;
         this.accounts = accounts;
         this.ledger = ledger;
@@ -88,6 +91,7 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
         this.router = router;
         this.blocks = blocks;
         this.judicial = judicial;
+        this.feeDetails = feeDetails;
         this.metrics = metrics;
         this.clock = clock;
     }
@@ -166,7 +170,8 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
                 LedgerTransaction lt = LedgerTransaction.deposit(c.tenantId(), id, debit.accountId(), backingId,
                         debit.amount(), description, clock.instant());
                 // It undoes a debit: it comes in even under an administrative block (ADR-013).
-                return post(lt, key, fp, backingLeg(backingId), null, () -> { }, () -> { }, true);
+                return post(lt, key, fp, backingLeg(backingId), null, () -> { }, () -> { }, true,
+                        c.withdrawalId());
             }
             AccountId backingId = router.pick(c.tenantId(), BackingType.PIX_PI, id);
             pixDetails.lockOriginal(c.tenantId(), c.withdrawalId());
@@ -353,6 +358,73 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
         });
     }
 
+    @Override
+    public TransactionResult fee(FeeCommand c) {
+        String key = validateKey(c.idempotencyKey());
+        requirePositive(c.amount());
+        String operation = code(c.operation(), "INVALID_FEE_OPERATION", "operation");
+        String description = c.description() == null ? "" : c.description().strip();
+        if (description.isEmpty()) {
+            throw new ValidationException("INVALID_DESCRIPTION", "a fee needs the description the customer will read");
+        }
+        String reference = c.reference() == null || c.reference().isBlank() ? null : c.reference().strip();
+        if (reference != null && reference.length() > 40) {
+            throw new ValidationException("INVALID_REFERENCE", "reference must have at most 40 characters");
+        }
+        String fp = fingerprint("FEE", c.accountId(), c.amount().cents(), operation, description,
+                c.source() == null ? null : c.source().value(), reference);
+        return tx.inTransaction(c.tenantId(), () -> {
+            AccountId revenue = accounts.findTenantRevenue(c.tenantId())
+                    .orElseThrow(() -> new IllegalStateException("tenant has no revenue account"));
+            TransactionId id = TransactionId.newId();
+            LedgerTransaction lt = LedgerTransaction.fee(c.tenantId(), id, c.accountId(), revenue, c.amount(),
+                    description, clock.instant());
+            return post(lt, key, fp, Map.of(revenue, Account.Kind.TENANT_REVENUE), null, () -> { },
+                    () -> feeDetails.insert(c.tenantId(), id,
+                            new FeeDetailRepository.Detail(operation, c.source(), reference)),
+                    false, c.source());
+        });
+    }
+
+    @Override
+    public TransactionResult feeRefund(FeeRefundCommand c) {
+        if (c.feeTransactionId() == null) {
+            throw new ValidationException("INVALID_TRANSACTION_ID", "fee transaction id is required");
+        }
+        // Derived from the fee, like a reversal's: a fee is given back at most once, whoever asks.
+        String key = "fee-refund:" + c.feeTransactionId().value();
+        String fp = fingerprint("FEE_REFUND", c.feeTransactionId().value());
+        return tx.inTransaction(c.tenantId(), () -> {
+            LedgerEntry charged = ledger.findByTransaction(c.tenantId(), c.feeTransactionId()).stream()
+                    .filter(e -> e.type() == TransactionType.FEE && e.direction() == EntryDirection.DEBIT)
+                    .findFirst()
+                    .orElseThrow(() -> new NotFoundException("FEE_NOT_FOUND",
+                            "no fee " + c.feeTransactionId().value() + " for this tenant"));
+            AccountId revenue = accounts.findTenantRevenue(c.tenantId())
+                    .orElseThrow(() -> new IllegalStateException("tenant has no revenue account"));
+            String operation = feeDetails.findByTransaction(c.tenantId(), c.feeTransactionId())
+                    .map(FeeDetailRepository.Detail::operation).orElse("UNKNOWN");
+            String description = c.description() == null || c.description().isBlank()
+                    ? "Estorno de tarifa" : c.description().strip();
+            TransactionId id = TransactionId.newId();
+            LedgerTransaction lt = LedgerTransaction.feeRefund(c.tenantId(), id, charged.accountId(), revenue,
+                    charged.amount(), description, clock.instant());
+            return post(lt, key, fp, Map.of(revenue, Account.Kind.TENANT_REVENUE), null, () -> { },
+                    () -> feeDetails.insert(c.tenantId(), id,
+                            new FeeDetailRepository.Detail(operation, c.feeTransactionId(), null)),
+                    true, c.feeTransactionId());
+        });
+    }
+
+    /** An uppercase code of up to 40 letters, digits and underscores: what the fee basket names its operations. */
+    private static String code(String value, String errorCode, String what) {
+        String v = value == null ? "" : value.strip();
+        if (!v.matches("[A-Z][A-Z0-9_]{0,39}")) {
+            throw new ValidationException(errorCode, what + " must be an uppercase code of up to 40 characters");
+        }
+        return v;
+    }
+
     private static String note(String value) {
         if (value == null || value.isBlank()) {
             return null;
@@ -444,6 +516,12 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
         return post(lt, key, fingerprint, internal, pixDetail, rules, onPosted, false);
     }
 
+    private TransactionResult post(LedgerTransaction lt, String key, String fingerprint,
+                                   Map<AccountId, Account.Kind> internal, PixDetail pixDetail, Runnable rules,
+                                   Runnable onPosted, boolean refund) {
+        return post(lt, key, fingerprint, internal, pixDetail, rules, onPosted, refund, null);
+    }
+
     /**
      * @param internal  the legs on internal accounts and their kind (every other leg is a customer account)
      * @param pixDetail stored with the transaction when it is a Pix (null otherwise)
@@ -452,10 +530,12 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
      *                  (a full return, replayed, would otherwise "exceed" the original)
      * @param onPosted  writes what goes with a new transaction (the treasury reference), in the same transaction
      * @param refund    the customer's credit undoes a debit of the same account, so no block keeps it out (ADR-013)
+     * @param related   the transaction this one undoes or charges for, for the event (ADR-014); a Pix's comes from its
+     *                  detail
      */
     private TransactionResult post(LedgerTransaction lt, String key, String fingerprint,
                                    Map<AccountId, Account.Kind> internal, PixDetail pixDetail, Runnable rules,
-                                   Runnable onPosted, boolean refund) {
+                                   Runnable onPosted, boolean refund, TransactionId related) {
         Optional<StoredTransaction> existing = journal.insertIfAbsent(lt, key, fingerprint);
         if (existing.isPresent()) {
             StoredTransaction s = existing.get();
@@ -492,7 +572,11 @@ public final class MoveMoneyService implements MoveMoneyUseCase {
             pixDetails.insert(lt.tenantId(), lt.id(), pixDetail);
         }
         onPosted.run();
-        outbox.enqueue(List.of(TransactionPosted.from(lt, entries)));
+        TransactionId relatedId = related != null ? related : pixDetail == null ? null : pixDetail.relatedTransactionId();
+        boolean reversal = refund || lt.type() == TransactionType.PIX_REFUND || lt.type() == TransactionType.FEE_REFUND;
+        String counterpartyType = pixDetail == null ? null : pixDetail.counterparty().taxIdType();
+        outbox.enqueue(List.of(TransactionPosted.from(lt, entries,
+                new TransactionPosted.Facts(relatedId, reversal, counterpartyType))));
         metrics.transactionPosted(lt.tenantId(), lt.type(), false);
         return new TransactionResult(lt.id(), lt.type(), lt.amount(), lt.occurredAt(), lt.description(), false,
                 pixDetail == null ? null : pixDetail.endToEndId());

@@ -31,6 +31,13 @@ services:
       DB_MIGRATION_USER: wallet_owner
       DB_MIGRATION_PASSWORD: wallet_owner
 
+      # ADR-014: the events go to the bus wallet-pix's LocalStack runs (topics created by its init-bus.sh). Until it
+      # is up, they wait in the outbox.
+      WALLET_EVENTS_PUBLISHER: sns
+      WALLET_EVENTS_ENDPOINT: http://localstack:4566
+      WALLET_EVENTS_ACCESS_KEY: test
+      WALLET_EVENTS_SECRET_KEY: test
+
       JAVA_TOOL_OPTIONS: "-javaagent:/app/opentelemetry-javaagent.jar"
       OTEL_SERVICE_NAME: wallet-core
 

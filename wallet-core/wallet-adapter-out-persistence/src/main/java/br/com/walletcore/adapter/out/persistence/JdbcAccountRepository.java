@@ -283,6 +283,14 @@ class JdbcAccountRepository implements AccountRepository {
     }
 
     @Override
+    public Optional<AccountId> findTenantRevenue(TenantId tenantId) {
+        return jdbc.sql("SELECT id FROM account WHERE tenant_id = :tenant AND kind = 'TENANT_REVENUE'")
+                .param("tenant", tenantId.value())
+                .query((rs, i) -> new AccountId(Sql.uuid(rs, "id")))
+                .optional();
+    }
+
+    @Override
     public Optional<AccountId> findJudicialTransit(TenantId tenantId) {
         return jdbc.sql("SELECT id FROM account WHERE tenant_id = :tenant AND kind = 'JUDICIAL_TRANSIT'")
                 .param("tenant", tenantId.value())

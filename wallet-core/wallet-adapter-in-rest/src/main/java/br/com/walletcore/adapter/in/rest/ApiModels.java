@@ -225,7 +225,7 @@ public final class ApiModels {
             return new PixDetailResponse(d.endToEndId(), d.returnId(),
                     d.relatedTransactionId() == null ? null : d.relatedTransactionId().value(),
                     new PixCounterpartyResponse(c.name(), c.taxIdMasked(), c.ispb(), c.branch(), c.account(),
-                            c.accountType()),
+                            c.accountType(), c.taxIdType()),
                     d.reasonCode(), d.remittanceInfo());
         }
     }
@@ -237,7 +237,9 @@ public final class ApiModels {
             @Schema(description = "ISPB da instituição", example = "99999999") String ispb,
             @Schema(description = "Agência", example = "0001") String branch,
             @Schema(description = "Conta, com dígito", example = "12345678") String account,
-            @Schema(description = "Tipo de conta no SPI", example = "TRAN") String accountType) {
+            @Schema(description = "Tipo de conta no SPI", example = "TRAN") String accountType,
+            @Schema(description = "CPF ou CNPJ: só o tipo do documento (ADR-014); ausente nos Pix antigos", example = "CPF")
+            String taxIdType) {
     }
 
     @Schema(description = "Contraparte informada num lançamento Pix. O CPF/CNPJ é validado e guardado só mascarado.")

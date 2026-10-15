@@ -1,6 +1,6 @@
 # ADR-014 — Eventos publicados, conta de receitas e cobrança de tarifas
 
-**Status:** proposta
+**Status:** aceita e implementada (15/10/2026)
 
 ## Contexto
 A cesta de tarifas (ADR-001 do `wallet-fees`) cobra dos clientes uma mensalidade pelo pacote contratado e tarifas por
@@ -73,6 +73,23 @@ Na combinação com os outros bloqueios vale a regra da ADR-013: um movimento pa
 permitirem. A política de débito ganha o valor `FEE_ONLY`, e `AccountPolicy.gateFor` aceita o `FEE` sob ela. No app
 e no M-Wall, o aviso é próprio: "Sua conta tem tarifas em aberto. Ao receber um crédito, elas são cobradas e a
 conta volta a pagar."
+
+## Ajustes feitos na implementação
+- **O publicador é escolhido por configuração** (`wallet.events.publisher`): `sns` em todo ambiente com barramento;
+  `log`, o padrão, nos testes e num core rodando sozinho. Os tópicos ficam no LocalStack do wallet-pix
+  (`init-bus.sh`), que sobe depois do core: até lá, os eventos esperam no outbox, e o relay avisa da falha uma vez
+  por minuto, não a cada ciclo. Uma fila `wallet-core-events-dev` assina os dois tópicos para inspecionar o que saiu.
+- **Os atributos da mensagem** (`eventId`, `eventType`, `tenantId`) permitem a uma fila filtrar sem ler o corpo.
+- **O evento de liberação de bloqueio diz se a conta continua bloqueada** (`stillBlocked`), para quem espera o
+  desbloqueio não precisar perguntar ao core. O encerramento publica a liberação dos bloqueios que ele solta e
+  depois o `wallet.account.closed.v1`.
+- **A tarifa leva o código da operação e uma referência** (`fee_detail`): o estorno da tarifa herda a operação da
+  tarifa estornada. O código é livre (maiúsculas, até 40), porque o catálogo de operações é do wallet-fees.
+- **O bloqueio de tarifa tem motivo próprio**, `UNPAID_FEES`, e só ele. Na combinação, a fraude prevalece sobre ele
+  (sai só o MED) e o judicial e o administrativo também: com eles ativos, a tarifa espera.
+- **O MED sai também sob o bloqueio de tarifa** (`PIX_RETURN_OUT` passa por `FEE_ONLY`).
+- **Pix antigos ficam sem o tipo de documento** da contraparte: a coluna é nova e o documento completo nunca foi
+  guardado.
 
 ## Fora do escopo
 - As regras da cesta (pacotes, preços, franquias, quando cobrar): ficam no wallet-fees.
