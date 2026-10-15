@@ -78,7 +78,7 @@ Se aparecer:
      (*Networking → Virtual cloud networks → wallet-vcn → Subnets → public subnet-wallet-vcn*) e a sua chave:
 
      ```bash
-     bash oci-criar-vm.sh ocid1.subnet.oc1.sa-saopaulo-1.aaaa... 'ssh-ed25519 AAAA... wallet-dev'
+     bash oci-criar-vm.sh <OCID da sub-rede pública> '<conteúdo de oci_wallet.pub>'
      ```
 
      O script descobre o compartimento, o *availability domain* e a imagem, e tenta até criar. O Cloud Shell fecha
@@ -89,7 +89,8 @@ Se aparecer:
 
         ```powershell
         winget install Oracle.OCI-CLI
-        oci setup config   # OCID do usuário (perfil → My profile), OCID da conta (tenancy), região sa-saopaulo-1;
+        oci setup config   # OCID do usuário (perfil → My profile), OCID da conta (tenancy) e a região
+                           # da conta (o identificador dela, como aparece no topo do painel);
                            # gere a chave de API e deixe a passphrase vazia
         Get-Content $HOME\.oci\oci_api_key_public.pem | Set-Clipboard
         ```
@@ -99,7 +100,7 @@ Se aparecer:
      2. rode o laço numa janela própria, minimizada:
 
         ```powershell
-        Start-Process powershell -WindowStyle Minimized -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-File','scripts\oci-criar-vm.ps1','-Subnet','ocid1.subnet.oc1.sa-saopaulo-1.aaaa...'
+        Start-Process powershell -WindowStyle Minimized -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-File','scripts\oci-criar-vm.ps1','-Subnet','<OCID da sub-rede pública>'
         Get-Content $HOME\oci-criar-vm.log -Tail 5   # o andamento
         ```
 
@@ -175,7 +176,7 @@ sudo apt-get install -y gh
 gh auth login            # GitHub.com → HTTPS → Login with a web browser (abre um código para colar)
 gh repo clone erikmatioli/wallet ~/wallet
 cd ~/wallet
-git config user.name  "Erik Matioli"
+git config user.name  "<seu nome>"
 git config user.email "<seu e-mail do GitHub>"
 ```
 
