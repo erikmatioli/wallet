@@ -11,6 +11,9 @@ import kotlinx.serialization.Serializable
  * @property canPay whether the account may pay now: false under any block of wallet-core's ADR-013 (the app hides
  *   the payment actions and says why)
  * @property canReceive whether it may receive: false only under a total (administrative) block
+ * @property blockedForFees whether the only block is the fee block (wallet-core's ADR-014): a fee was not paid for
+ *   lack of balance, and the next credit pays it and frees the account. The app says that instead of sending the
+ *   customer to the service desk
  */
 @Serializable
 data class Me(
@@ -22,6 +25,7 @@ data class Me(
     val balanceCents: Long,
     val canPay: Boolean = true,
     val canReceive: Boolean = true,
+    val blockedForFees: Boolean = false,
 )
 
 /** `GET /app/v1/statement?before=&limit=`: newest first; [nextBefore] is the cursor of the next page, or null. */

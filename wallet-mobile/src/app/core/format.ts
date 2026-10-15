@@ -1,4 +1,4 @@
-import { Schedule, StatementEntry } from './contract';
+import { Me, Schedule, StatementEntry } from './contract';
 
 // How the app writes money, dates and transaction types - pt-BR, in Brasília, from the contract's raw values.
 // Same words as the desktop and the console.
@@ -76,6 +76,8 @@ const TYPES: Record<string, string> = {
   PIX_RETURN_IN: 'Devolução recebida',
   PIX_RETURN_OUT: 'Devolução enviada',
   JUDICIAL_TRANSFER: 'Transferência por ordem judicial',
+  FEE: 'Tarifa',
+  FEE_REFUND: 'Estorno de tarifa',
 };
 
 /** Same names as the console's statement. */
@@ -187,4 +189,11 @@ export function uuid(): string {
   b[8] = (b[8] & 0x3f) | 0x80;
   const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/** Why the account cannot pay: the fee block frees itself with a credit (wallet-core's ADR-014), the others do not. */
+export function blockedMessage(me: Pick<Me, 'blockedForFees'>): string {
+  return me.blockedForFees
+    ? 'Sua conta tem tarifas em aberto. Ao receber um crédito, elas são cobradas e a conta volta a pagar.'
+    : 'Sua conta está bloqueada para pagamentos. Procure o atendimento.';
 }

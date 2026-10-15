@@ -9,7 +9,7 @@ import {
 import { Router, RouterLink } from '@angular/router';
 import { AppApi } from '../../core/api';
 import { StatementEntry } from '../../core/contract';
-import { account, money } from '../../core/format';
+import { account, blockedMessage, money } from '../../core/format';
 import { SessionStore } from '../../core/session';
 import { HomeFlow } from '../../flows/account.flow';
 import { EntryDetail } from '../../ui/entry-detail';
@@ -63,7 +63,7 @@ import { Logo } from '../../ui/logo';
           @if (me.status === 'CLOSED') {
             <p class="status">Conta encerrada</p>
           } @else if (me.canPay === false) {
-            <p class="status">Bloqueada para pagamentos</p>
+            <p class="status">{{ me.blockedForFees ? 'Tarifas em aberto' : 'Bloqueada para pagamentos' }}</p>
           }
         } @else if (flow.loading()) {
           <div class="skeleton bar-lg" aria-hidden="true"></div>
@@ -98,7 +98,7 @@ import { Logo } from '../../ui/logo';
       @if (blocked()) {
         <div class="alert alert-error" role="status">
           <mw-icon name="alert" [size]="20" />
-          <span class="grow">Sua conta está bloqueada para pagamentos. Procure o atendimento.</span>
+          <span class="grow">{{ blockedMessage(flow.me()!) }}</span>
         </div>
       }
 
@@ -268,6 +268,7 @@ export class Home implements OnInit {
     () => this.session.customerName().split(' ')[0] || 'cliente',
   );
   protected readonly money = money;
+  protected readonly blockedMessage = blockedMessage;
   protected readonly account = account;
   protected readonly actions = [
     { path: '/pagar/pix', label: 'Pix', icon: 'pix' },
