@@ -162,3 +162,89 @@ public sealed class ProcessedMessages(DbSession db) : IProcessedMessages
             "INSERT INTO processed_message (message_id) VALUES (@messageId) ON CONFLICT DO NOTHING",
             new { messageId }, db.Transaction, cancellationToken: ct)) == 1;
 }
+
+public sealed class UsageRepository(DbSession db) : IUsageRepository
+{
+    public Task LockAccountAsync(Guid accountId, CancellationToken ct = default) =>
+        db.Connection.ExecuteAsync(new CommandDefinition(
+            "SELECT pg_advisory_xact_lock(hashtextextended('wallet-fees:account:' || @accountId::text, 0))",
+            new { accountId }, db.Transaction, cancellationToken: ct));
+
+    public async Task<bool> RecordAsync(Guid tenantId, Guid accountId, string month, Operation operation,
+        Guid sourceTransactionId, DateTimeOffset occurredAt, CancellationToken ct = default) =>
+        await db.Connection.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO fee_usage (tenant_id, account_id, month, operation, source_transaction_id, occurred_at)
+            VALUES (@tenantId, @accountId, @month, @operation, @sourceTransactionId, @occurredAt)
+            ON CONFLICT DO NOTHING
+            """, new { tenantId, accountId, month, operation = operation.ToString(), sourceTransactionId, occurredAt },
+            db.Transaction, cancellationToken: ct)) == 1;
+
+    public Task<int> CountAsync(Guid accountId, string month, Operation operation, CancellationToken ct = default) =>
+        db.Connection.ExecuteScalarAsync<int>(new CommandDefinition("""
+            SELECT count(*)::int FROM fee_usage
+             WHERE account_id = @accountId AND month = @month AND operation = @operation AND NOT reversed
+            """, new { accountId, month, operation = operation.ToString() }, db.Transaction, cancellationToken: ct));
+}
+
+public sealed class ChargeRepository(DbSession db) : IChargeRepository
+{
+    private const string Columns = """
+        id, tenant_id, account_id, operation, source_transaction_id, reference, amount_cents, description,
+        idempotency_key, status, core_transaction_id, attempts, last_error, created_at, updated_at
+        """;
+
+    public Task InsertAsync(FeeCharge c, CancellationToken ct = default) =>
+        db.Connection.ExecuteAsync(new CommandDefinition($"""
+            INSERT INTO fee_charge ({Columns})
+            VALUES (@Id, @TenantId, @AccountId, @Operation, @SourceTransactionId, @Reference, @AmountCents, @Description,
+                    @IdempotencyKey, @Status, @CoreTransactionId, @Attempts, @LastError, @CreatedAt, @UpdatedAt)
+            ON CONFLICT (idempotency_key) DO NOTHING
+            """, Params(c), db.Transaction, cancellationToken: ct));
+
+    public Task UpdateAsync(FeeCharge c, CancellationToken ct = default) =>
+        db.Connection.ExecuteAsync(new CommandDefinition("""
+            UPDATE fee_charge SET status = @Status, core_transaction_id = @CoreTransactionId, attempts = @Attempts,
+                   last_error = @LastError, updated_at = @UpdatedAt
+             WHERE tenant_id = @TenantId AND id = @Id
+            """, Params(c), db.Transaction, cancellationToken: ct));
+
+    public async Task<IReadOnlyList<FeeCharge>> PendingAsync(Guid tenantId, Guid accountId,
+        CancellationToken ct = default) =>
+        (await db.Connection.QueryAsync<ChargeRow>(new CommandDefinition($"""
+            SELECT {Columns} FROM fee_charge
+             WHERE tenant_id = @tenantId AND account_id = @accountId AND status = 'PENDING'
+             ORDER BY created_at, id
+            """, new { tenantId, accountId }, db.Transaction, cancellationToken: ct))).Select(r => r.ToDomain()).ToList();
+
+    public async Task<IReadOnlyList<FeeCharge>> ListAsync(Guid tenantId, Guid accountId, int limit,
+        CancellationToken ct = default) =>
+        (await db.Connection.QueryAsync<ChargeRow>(new CommandDefinition($"""
+            SELECT {Columns} FROM fee_charge
+             WHERE tenant_id = @tenantId AND account_id = @accountId
+             ORDER BY created_at DESC, id DESC LIMIT @limit
+            """, new { tenantId, accountId, limit }, db.Transaction, cancellationToken: ct)))
+        .Select(r => r.ToDomain()).ToList();
+
+    public async Task<IReadOnlyList<(Guid TenantId, Guid AccountId)>> AccountsWithPendingAsync(
+        CancellationToken ct = default) =>
+        (await db.Connection.QueryAsync<(Guid, Guid)>(new CommandDefinition(
+            "SELECT DISTINCT tenant_id, account_id FROM fee_charge WHERE status = 'PENDING'",
+            null, db.Transaction, cancellationToken: ct))).ToList();
+
+    private static object Params(FeeCharge c) => new
+    {
+        c.Id, c.TenantId, c.AccountId, c.Operation, c.SourceTransactionId, c.Reference, c.AmountCents, c.Description,
+        c.IdempotencyKey, Status = c.Status.ToString(), c.CoreTransactionId, c.Attempts, c.LastError, c.CreatedAt,
+        c.UpdatedAt,
+    };
+
+    private sealed record ChargeRow(Guid id, Guid tenant_id, Guid account_id, string operation,
+        Guid? source_transaction_id, string? reference, long amount_cents, string description, string idempotency_key,
+        string status, Guid? core_transaction_id, int attempts, string? last_error, DateTime created_at,
+        DateTime updated_at)
+    {
+        public FeeCharge ToDomain() => new(id, tenant_id, account_id, operation, source_transaction_id, reference,
+            amount_cents, description, idempotency_key, Enum.Parse<ChargeStatus>(status), core_transaction_id, attempts,
+            last_error, PackageRepository.Utc(created_at), PackageRepository.Utc(updated_at));
+    }
+}

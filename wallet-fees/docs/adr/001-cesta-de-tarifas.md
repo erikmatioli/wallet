@@ -1,6 +1,6 @@
 # ADR-001 — Cesta de tarifas (wallet-fees)
 
-**Status:** aceita; etapas 1 (core, ADR-014) e 2 (base do wallet-fees) implementadas
+**Status:** aceita; etapas 1 (core, ADR-014), 2 (base do wallet-fees) e 3 (tarifa por transação) implementadas
 
 ## Contexto
 O tenant quer cobrar dos clientes pelos serviços da conta, com a receita indo para uma conta dele:
@@ -156,7 +156,21 @@ Escopos novos no core: **`fees:read`** e **`fees:admin`** (operador), além do `
   com um lock por tenant: duas primeiras requisições ao mesmo tempo os criam uma vez.
 - **Testes** com xUnit: domínio, casos de uso com fakes em memória e Postgres de verdade pelo Testcontainers. Sem o
   SDK instalado, o build roda no container `mcr.microsoft.com/dotnet/sdk:10.0`; o Codespace já traz o .NET 10.
-- **OpenTelemetry** ainda não: entra com a cobrança (etapa 3), quando há o que rastrear de ponta a ponta.
+- **A franquia é uma linha por transação** (`fee_usage`, única por transação e operação), contada sob um lock da
+  conta (`pg_advisory_xact_lock`), em vez do contador com `UPDATE ... RETURNING` do item 4: o estorno (etapa 4)
+  devolve a vaga marcando a linha, sem precisar saber de que mês ela era, e o mesmo evento lido duas vezes não conta
+  duas.
+- **A cobrança é um passo à parte** (item 4): primeiro, numa transação, o uso e a tarifa `PENDING`; depois, noutra,
+  com o mesmo lock da conta, a cobrança das pendentes no core. Um evento entregue de novo repete só a cobrança, que é
+  idempotente; uma falha entre os dois passos fica para o próximo crédito ou para a varredura.
+- **Conta que o wallet-fees ainda não viu** (o `TransactionPosted` chegou antes do `CustomerOnboarded`, que vem por
+  outro tópico): é consultada no core (`GET /v1/accounts/{id}`) e entra no básico do seu tipo. As contas internas do
+  core (sem titular) ficam guardadas em memória, para não serem consultadas a cada Pix.
+- **Core fora do ar ou 5xx:** a tarifa fica `PENDING` com `UNAVAILABLE`, sem bloqueio de tarifa.
+- **A liberação de um bloqueio `FEE_PENDING` não dispara cobrança**: é o próprio wallet-fees que libera, depois de
+  cobrar tudo.
+- **Uma tarifa só é criada para conta ativa** na visão do wallet-fees; o uso da franquia é registrado mesmo assim.
+- **OpenTelemetry** ainda não: fica para a etapa 4.
 
 ## Fora do escopo
 - Isenções e descontos por cliente, tarifas por faixa de valor, cobrança proporcional na migração de pacote.

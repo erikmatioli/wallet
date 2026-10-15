@@ -2,6 +2,7 @@ using System.Text.Json;
 using Amazon.SQS;
 using Amazon.SQS.Model;
 using Fees.Application;
+using Fees.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -65,6 +66,7 @@ public sealed class CoreEventsConsumer(IAmazonSQS sqs, IServiceScopeFactory scop
             var eventId = Attribute(message, "eventId") is { } id ? Guid.Parse(id) : e.GetProperty("eventId").GetGuid();
             await using var scope = scopes.CreateAsyncScope();
             var accounts = scope.ServiceProvider.GetRequiredService<AccountService>();
+            var charges = scope.ServiceProvider.GetRequiredService<ChargeService>();
             switch (type)
             {
                 case "wallet.customer.onboarded.v1":
@@ -75,9 +77,18 @@ public sealed class CoreEventsConsumer(IAmazonSQS sqs, IServiceScopeFactory scop
                 case "wallet.account.closed.v1":
                     await accounts.OnClosedAsync(eventId, e.GetProperty("tenantId").GetGuid(),
                         e.GetProperty("accountId").GetGuid(), ct);
+                    await charges.CancelPendingAsync(e.GetProperty("tenantId").GetGuid(),
+                        e.GetProperty("accountId").GetGuid(), "ACCOUNT_CLOSED", ct);
+                    break;
+                case "wallet.transaction.posted.v1":
+                    await charges.OnTransactionPostedAsync(Posted(eventId, e), ct);
+                    break;
+                case "wallet.account.block-released.v1":
+                    await charges.OnBlockReleasedAsync(e.GetProperty("tenantId").GetGuid(),
+                        e.GetProperty("accountId").GetGuid(), e.GetProperty("blockType").GetString() ?? "", ct);
                     break;
                 default:
-                    // Transactions and blocks are for the charging step (ADR-001, decision 10); nothing to do yet.
+                    // The other events (a block put, a customer updated) change nothing in the fees.
                     break;
             }
             return true;
@@ -88,6 +99,20 @@ public sealed class CoreEventsConsumer(IAmazonSQS sqs, IServiceScopeFactory scop
             return false;
         }
     }
+
+    // The fields of wallet.transaction.posted.v1 the fee basket reads (ADR-014 of the core).
+    internal static PostedTransaction Posted(Guid eventId, JsonElement e) => new(eventId,
+        e.GetProperty("tenantId").GetGuid(), e.GetProperty("transactionId").GetGuid(), e.GetProperty("type").GetString()!,
+        e.GetProperty("entries").EnumerateArray().Select(x => new PostedEntry(x.GetProperty("accountId").GetGuid(),
+            x.GetProperty("direction").GetString()!, x.GetProperty("amountCents").GetInt64())).ToList(),
+        e.GetProperty("occurredAt").GetDateTimeOffset(),
+        e.TryGetProperty("relatedTransactionId", out var related) && related.ValueKind == JsonValueKind.String
+            ? related.GetGuid()
+            : null,
+        e.TryGetProperty("reversal", out var reversal) && reversal.ValueKind == JsonValueKind.True,
+        e.TryGetProperty("counterpartyDocumentType", out var doc) && doc.ValueKind == JsonValueKind.String
+            ? doc.GetString()
+            : null);
 
     private static string? Attribute(Message message, string name) =>
         message.MessageAttributes is not null && message.MessageAttributes.TryGetValue(name, out var value)
@@ -128,6 +153,53 @@ public sealed class AccountSync(ICoreAccounts core, IServiceScopeFactory scopes,
                         attempt, e.Message);
                     await Task.Delay(TimeSpan.FromSeconds(Math.Min(60, 5 * attempt)), stoppingToken);
                 }
+            }
+        }
+    }
+}
+
+// Charges, every hour, the accounts with a pending fee: a credit or a release whose event was missed, or a core that
+// did not answer (ADR-001, decision 5).
+public sealed class PendingFeesSweep(IServiceScopeFactory scopes, ILogger<PendingFeesSweep> log) : BackgroundService
+{
+    public static readonly TimeSpan Every = TimeSpan.FromHours(1);
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(Every);
+        while (await timer.WaitForNextTickAsync(stoppingToken))
+        {
+            try
+            {
+                IReadOnlyList<(Guid TenantId, Guid AccountId)> pending;
+                await using (var scope = scopes.CreateAsyncScope())
+                {
+                    pending = await scope.ServiceProvider.GetRequiredService<ChargeService>()
+                        .AccountsWithPendingAsync(stoppingToken);
+                }
+                foreach (var (tenantId, accountId) in pending)
+                {
+                    // One scope per account: a failure leaves the others untouched.
+                    await using var scope = scopes.CreateAsyncScope();
+                    try
+                    {
+                        var waiting = await scope.ServiceProvider.GetRequiredService<ChargeService>()
+                            .ChargePendingAsync(tenantId, accountId, stoppingToken);
+                        if (waiting is not null)
+                        {
+                            log.LogInformation("fees of account {Account} still wait: {Reason}", accountId, waiting);
+                        }
+                    }
+                    catch (Exception e) when (e is not OperationCanceledException)
+                    {
+                        log.LogWarning("charging the pending fees of account {Account} failed: {Error}", accountId,
+                            e.Message);
+                    }
+                }
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                log.LogWarning("the sweep of pending fees failed: {Error}", e.Message);
             }
         }
     }

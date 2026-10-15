@@ -26,12 +26,21 @@ builder.Services.AddScoped<IPackageRepository, PackageRepository>();
 builder.Services.AddScoped<IScheduleRepository, ScheduleRepository>();
 builder.Services.AddScoped<IAccountRepository, AccountRepository>();
 builder.Services.AddScoped<IProcessedMessages, ProcessedMessages>();
+builder.Services.AddScoped<IUsageRepository, UsageRepository>();
+builder.Services.AddScoped<IChargeRepository, ChargeRepository>();
 builder.Services.AddScoped<PackageService>();
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<ChargeService>();
 
-// The core: its accounts (start-up sync) and its events (SQS).
-builder.Services.AddHttpClient<ICoreAccounts, CoreClient>((sp, http) =>
-    http.BaseAddress = new Uri(sp.GetRequiredService<IOptions<FeesOptions>>().Value.Core.BaseUrl));
+// The core: its accounts (start-up sync), the charging of fees and its events (SQS).
+builder.Services.AddSingleton<CoreCache>();
+builder.Services.AddHttpClient<CoreClient>((sp, http) =>
+{
+    http.BaseAddress = new Uri(sp.GetRequiredService<IOptions<FeesOptions>>().Value.Core.BaseUrl);
+    http.Timeout = TimeSpan.FromSeconds(15);
+});
+builder.Services.AddTransient<ICoreAccounts>(sp => sp.GetRequiredService<CoreClient>());
+builder.Services.AddTransient<ICoreFees>(sp => sp.GetRequiredService<CoreClient>());
 builder.Services.AddSingleton<IAmazonSQS>(sp =>
 {
     var bus = sp.GetRequiredService<IOptions<FeesOptions>>().Value.Bus;
@@ -46,6 +55,7 @@ builder.Services.AddSingleton<IAmazonSQS>(sp =>
 });
 builder.Services.AddHostedService<CoreEventsConsumer>();
 builder.Services.AddHostedService<AccountSync>();
+builder.Services.AddHostedService<PendingFeesSweep>();
 
 builder.Services.AddCoreJwt();
 builder.Services.AddProblemDetails();

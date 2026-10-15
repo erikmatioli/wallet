@@ -10,9 +10,10 @@ Pacotes de tarifas por conta: mensalidade e preço por operação, com franquia 
 | Banco | `fees`, no Postgres do wallet-core (papéis `fees_owner` para as migrations e `fees_app` em tempo de execução) |
 | Porta | 8088 |
 | Entra por | JWT do wallet-core (`fees:read`, `fees:admin`), validado pelo JWKS do core |
+| Chama | o core, com as credenciais de cada tenant (`accounts:read fees:write`): cobrança, bloqueio de tarifa, contas |
 | Ouve | a fila `wallet-fees-core-events`, nos tópicos do core (`wallet-core-transaction-events`, `wallet-core-account-events`) |
 
-## O que já faz (etapa 2 da ADR-001)
+## O que já faz (etapas 2 e 3 da ADR-001)
 
 - **Pacotes:** cada tenant começa com seis (`PF_BASIC`, `PF_STANDARD`, `PF_VIP`, `PJ_BASIC`, `PJ_STANDARD`,
   `PJ_VIP`), todos com a tabela do exemplo da ADR (sem mensalidade; saque R$ 1,00; duas transferências grátis e
@@ -23,7 +24,15 @@ Pacotes de tarifas por conta: mensalidade e preço por operação, com franquia 
   existiam são trazidas do core na subida. O operador migra a conta para outro pacote do mesmo tipo, e cada
   migração fica registrada. Contas encerradas (`wallet.account.closed.v1`) são marcadas.
 
-Ainda não cobra: a tarifa por transação, as pendências, o estorno e a mensalidade são as etapas 3 e 4.
+- **Tarifa por transação:** cada `wallet.transaction.posted.v1` tarifável (Pix enviado e recebido, transferência,
+  saque) conta na franquia do mês (Brasília) da conta; passada a franquia, vira uma tarifa pelo preço da tabela em
+  vigor no dia da transação, cobrada no core (`POST /v1/accounts/{id}/fees`, idempotente por `fee:{transação}:{op}`).
+- **Pendências:** sem saldo, a tarifa fica pendente e a conta recebe o bloqueio de tarifa (`FEE_PENDING`); com outro
+  bloqueio, só espera. As pendentes são cobradas da mais antiga para a mais nova, inteiras, a cada crédito, a cada
+  bloqueio liberado e numa varredura de hora em hora; sem nenhuma pendente, o bloqueio de tarifa é liberado. Conta
+  encerrada cancela as pendentes.
+
+Ainda não: o estorno da tarifa e a mensalidade (etapa 4).
 
 ## API
 
@@ -32,7 +41,7 @@ Ainda não cobra: a tarifa por transação, as pendências, o estorno e a mensal
 | `GET /v1/fees/packages` | `fees:read` | Os pacotes, com a tabela em vigor e a próxima |
 | `GET /v1/fees/packages/{id}/schedules` | `fees:read` | Todas as tabelas do pacote |
 | `POST /v1/fees/packages/{id}/schedules` | `fees:admin` | Uma tabela nova a partir de `validFrom` |
-| `GET /v1/fees/accounts/{id}` | `fees:read` | O pacote da conta e o histórico de migrações |
+| `GET /v1/fees/accounts/{id}` | `fees:read` | O pacote da conta, as migrações e, em `fees`, a franquia usada no mês, o total pendente e as últimas tarifas |
 | `PUT /v1/fees/accounts/{id}/package` | `fees:admin` | Migra a conta para outro pacote do mesmo tipo |
 | `GET /health` | — | |
 
@@ -88,8 +97,8 @@ docker run --rm -v "$PWD:/src" -w /src -v /var/run/docker.sock:/var/run/docker.s
 | Projeto | Papel |
 |---|---|
 | `src/Fees.Domain` | Pacotes, tabelas de preço, contas e as regras, sem framework |
-| `src/Fees.Application` | Casos de uso (`PackageService`, `AccountService`) e as portas |
-| `src/Fees.Infrastructure` | Postgres (repositórios com Dapper, migrations em `Migrations/*.sql` com DbUp), o consumidor da fila e o cliente do core |
+| `src/Fees.Application` | Casos de uso (`PackageService`, `AccountService`, `ChargeService`) e as portas |
+| `src/Fees.Infrastructure` | Postgres (repositórios com Dapper, migrations em `Migrations/*.sql` com DbUp), o consumidor da fila, a varredura das pendentes e o cliente do core |
 | `src/Fees.Api` | ASP.NET Core: a API, a validação do JWT e o tratamento de erros |
 | `tests/Fees.Tests` | Domínio, casos de uso com fakes em memória e Postgres de verdade (Testcontainers) |
 

@@ -27,14 +27,22 @@ public static class Endpoints
             }).RequireAuthorization(Scopes.Admin);
 
         fees.MapGet("/accounts/{accountId:guid}",
-            async (Guid accountId, HttpContext http, AccountService accounts, CancellationToken ct) =>
-                AccountResponse.From(await accounts.GetAsync(Scopes.TenantOf(http.User), accountId, ct)));
+            async (Guid accountId, HttpContext http, AccountService accounts, ChargeService charges,
+                CancellationToken ct) =>
+            {
+                var tenantId = Scopes.TenantOf(http.User);
+                return AccountResponse.From(await accounts.GetAsync(tenantId, accountId, ct),
+                    await charges.ViewAsync(tenantId, accountId, ct));
+            });
 
         fees.MapPut("/accounts/{accountId:guid}/package",
             async (Guid accountId, ChangePackageRequest request, HttpContext http, AccountService accounts,
-                CancellationToken ct) =>
-                AccountResponse.From(await accounts.ChangePackageAsync(Scopes.TenantOf(http.User), accountId,
-                    request.PackageId, request.Operator, Scopes.ClientOf(http.User), ct)))
+                ChargeService charges, CancellationToken ct) =>
+            {
+                var tenantId = Scopes.TenantOf(http.User);
+                return AccountResponse.From(await accounts.ChangePackageAsync(tenantId, accountId, request.PackageId,
+                    request.Operator, Scopes.ClientOf(http.User), ct), await charges.ViewAsync(tenantId, accountId, ct));
+            })
             .RequireAuthorization(Scopes.Admin);
     }
 
@@ -86,10 +94,28 @@ public sealed record PackageChangeResponse(Guid? FromPackageId, Guid ToPackageId
     DateTimeOffset ChangedAt);
 
 public sealed record AccountResponse(Guid AccountId, CustomerType CustomerType, AccountStatus Status, Guid PackageId,
-    string PackageCode, string PackageName, DateTimeOffset Since, IReadOnlyList<PackageChangeResponse> Changes)
+    string PackageCode, string PackageName, DateTimeOffset Since, IReadOnlyList<PackageChangeResponse> Changes,
+    FeesResponse Fees)
 {
-    public static AccountResponse From(AccountView v) => new(v.Account.AccountId, v.Account.CustomerType,
-        v.Account.Status, v.Package.Id, v.Package.Code, v.Package.Name, v.Account.Since,
+    public static AccountResponse From(AccountView v, ChargesView fees) => new(v.Account.AccountId,
+        v.Account.CustomerType, v.Account.Status, v.Package.Id, v.Package.Code, v.Package.Name, v.Account.Since,
         v.Changes.Select(c => new PackageChangeResponse(c.FromPackageId, c.ToPackageId, c.Operator, c.ClientId,
-            c.ChangedAt)).ToList());
+            c.ChangedAt)).ToList(), FeesResponse.From(fees));
 }
+
+// The quota used this month, the latest fees and the total still pending.
+public sealed record FeesResponse(string Month, IReadOnlyList<UsageResponse> Usage, decimal Pending,
+    IReadOnlyList<ChargeResponse> Charges)
+{
+    public static FeesResponse From(ChargesView v) => new(v.Month,
+        v.Usage.Select(u => new UsageResponse(u.Operation, u.Used, u.Free)).ToList(), Endpoints.Reais(v.PendingCents),
+        v.Charges.Select(c => new ChargeResponse(c.Id, c.Operation, Endpoints.Reais(c.AmountCents), c.Description,
+            c.Status, c.SourceTransactionId, c.Reference, c.CoreTransactionId, c.LastError, c.CreatedAt,
+            c.UpdatedAt)).ToList());
+}
+
+public sealed record UsageResponse(Operation Operation, int Used, int Free);
+
+public sealed record ChargeResponse(Guid Id, string Operation, decimal Amount, string Description, ChargeStatus Status,
+    Guid? SourceTransactionId, string? Reference, Guid? FeeTransactionId, string? LastError, DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);

@@ -70,3 +70,62 @@ public interface ICoreAccounts
     Task<(IReadOnlyList<CoreAccount> Items, string? Next)> AccountsAsync(string clientId, string? cursor,
         CancellationToken ct = default);
 }
+
+// The use of the free quota (ADR-001, decision 4).
+public interface IUsageRepository
+{
+    // Serializes everything about one account (its quota, its charges) until the transaction ends.
+    Task LockAccountAsync(Guid accountId, CancellationToken ct = default);
+
+    // False when this transaction was already counted.
+    Task<bool> RecordAsync(Guid tenantId, Guid accountId, string month, Operation operation, Guid sourceTransactionId,
+        DateTimeOffset occurredAt, CancellationToken ct = default);
+
+    // How many transactions of the operation count against the account's quota of that month.
+    Task<int> CountAsync(Guid accountId, string month, Operation operation, CancellationToken ct = default);
+}
+
+public interface IChargeRepository
+{
+    Task InsertAsync(FeeCharge charge, CancellationToken ct = default);
+
+    Task UpdateAsync(FeeCharge charge, CancellationToken ct = default);
+
+    // The account's pending fees, the oldest first: they are charged in that order.
+    Task<IReadOnlyList<FeeCharge>> PendingAsync(Guid tenantId, Guid accountId, CancellationToken ct = default);
+
+    // The account's fees, the newest first.
+    Task<IReadOnlyList<FeeCharge>> ListAsync(Guid tenantId, Guid accountId, int limit, CancellationToken ct = default);
+
+    // Every account with a pending fee, for the sweep.
+    Task<IReadOnlyList<(Guid TenantId, Guid AccountId)>> AccountsWithPendingAsync(CancellationToken ct = default);
+}
+
+// What the core answered to a fee: charged (with its transaction), or refused with its code. No code when it did
+// not answer: the fee waits for the next try.
+public sealed record CoreFeeResult(Guid? TransactionId, string? Code)
+{
+    public bool Charged => TransactionId is not null;
+
+    public static CoreFeeResult Ok(Guid transactionId) => new(transactionId, null);
+
+    public static CoreFeeResult Refused(string code) => new(null, code);
+
+    public static readonly CoreFeeResult Unavailable = new(null, null);
+}
+
+// Charging in the core (ADR-014 of the core), with the tenant's own credentials.
+public interface ICoreFees
+{
+    Task<CoreFeeResult> ChargeAsync(FeeCharge charge, CancellationToken ct = default);
+
+    // Puts the fee block (FEE_PENDING) on the account, unless it already has one.
+    Task EnsureFeeBlockAsync(Guid tenantId, Guid accountId, CancellationToken ct = default);
+
+    // Releases the account's fee blocks, if any.
+    Task ReleaseFeeBlocksAsync(Guid tenantId, Guid accountId, CancellationToken ct = default);
+
+    // An account the basket has not seen, as the core lists it; null when it is not a customer account (the core's
+    // internal accounts also appear in the transactions).
+    Task<CoreAccount?> AccountAsync(Guid tenantId, Guid accountId, CancellationToken ct = default);
+}
