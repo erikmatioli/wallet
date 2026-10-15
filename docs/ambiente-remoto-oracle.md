@@ -83,6 +83,30 @@ Se aparecer:
 
      O script descobre o compartimento, o *availability domain* e a imagem, e tenta até criar. O Cloud Shell fecha
      depois de uns 20 minutos sem interação: mexa nele de vez em quando, ou rode de novo.
+  4. **Ou deixe o seu Windows tentando o dia todo**, sem o limite do Cloud Shell:
+     1. instale e configure o OCI CLI (PowerShell normal, não como administrador; abra um PowerShell novo depois
+        da instalação, para o PATH valer):
+
+        ```powershell
+        winget install Oracle.OCI-CLI
+        oci setup config   # OCID do usuário (perfil → My profile), OCID da conta (tenancy), região sa-saopaulo-1;
+                           # gere a chave de API e deixe a passphrase vazia
+        Get-Content $HOME\.oci\oci_api_key_public.pem | Set-Clipboard
+        ```
+
+        e cole a chave em *My profile → API keys → Add API key → Paste a public key*. Teste com
+        `oci iam region list --output table`;
+     2. rode o laço numa janela própria, minimizada:
+
+        ```powershell
+        Start-Process powershell -WindowStyle Minimized -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-File','scripts\oci-criar-vm.ps1','-Subnet','ocid1.subnet.oc1.sa-saopaulo-1.aaaa...'
+        Get-Content $HOME\oci-criar-vm.log -Tail 5   # o andamento
+        ```
+
+     A cada minuto, `scripts/oci-criar-vm.ps1` tenta 2 OCPUs / 12 GB e, sem vaga, 1 OCPU / 6 GB (o que vier primeiro;
+     depois *Edit → Shape* aumenta). Enquanto roda, o Windows não suspende (mas fechar a tampa do notebook
+     interrompe); ao criar, abre um aviso. Fechar a janela minimizada para o laço; um erro que não seja de capacidade
+     para sozinho e vai inteiro para o log. A chave SSH usada é `$HOME\.ssh\oci_wallet.pub` (`-PublicKey` muda).
 
 Anote o **Public IP address** da VM.
 
