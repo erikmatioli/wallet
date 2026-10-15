@@ -1,6 +1,6 @@
 # ADR-001 — Cesta de tarifas (wallet-fees)
 
-**Status:** proposta
+**Status:** aceita; etapas 1 (core, ADR-014) e 2 (base do wallet-fees) implementadas
 
 ## Contexto
 O tenant quer cobrar dos clientes pelos serviços da conta, com a receita indo para uma conta dele:
@@ -143,6 +143,20 @@ Escopos novos no core: **`fees:read`** e **`fees:admin`** (operador), além do `
 3. **Tarifa por transação:** consumidor da fila, franquia e cobrança, com pendências e o bloqueio de tarifa.
 4. **Estorno e mensalidade.**
 5. **Console e app.**
+
+## Ajustes feitos na implementação
+- **As contas que já existiam vêm da API do core.** O `CustomerOnboarded` só chega para contas novas; na subida, o
+  wallet-fees lê `GET /v1/accounts` de cada tenant e põe no básico do tipo certo as que ainda não conhece. Para
+  isso, a lista e o detalhe da conta no core passaram a trazer `documentType` (CPF ou CNPJ, só o tipo).
+- **Isolamento por `tenant_id` em toda consulta**, sem Row Level Security: o banco `fees` é só deste serviço, e o
+  tenant vem sempre do token.
+- **Uma tabela que ainda não entrou em vigor pode ser trocada** por outra da mesma data; a de hoje, não
+  (`SCHEDULE_IN_FORCE`). Uma tabela não começa no passado (`PAST_DATE`).
+- **Os pacotes iniciais nascem na primeira vez que o tenant aparece** (uma consulta, um evento, a sincronização),
+  com um lock por tenant: duas primeiras requisições ao mesmo tempo os criam uma vez.
+- **Testes** com xUnit: domínio, casos de uso com fakes em memória e Postgres de verdade pelo Testcontainers. Sem o
+  SDK instalado, o build roda no container `mcr.microsoft.com/dotnet/sdk:10.0`; o Codespace já traz o .NET 10.
+- **OpenTelemetry** ainda não: entra com a cobrança (etapa 3), quando há o que rastrear de ponta a ponta.
 
 ## Fora do escopo
 - Isenções e descontos por cliente, tarifas por faixa de valor, cobrança proporcional na migração de pacote.

@@ -17,6 +17,9 @@
     },
     "ghcr.io/devcontainers/features/node:1": {
       "version": "22"
+    },
+    "ghcr.io/devcontainers/features/dotnet:2": {
+      "version": "10.0"
     }
   },
   "postCreateCommand": "cd wallet-console && npm ci",
@@ -27,7 +30,7 @@
     "stack": "bash .devcontainer/start.sh",
     "console": "bash .devcontainer/start.sh console"
   },
-  "forwardPorts": [4200, 8086, 8087, 8025, 8080, 8081, 8082, 8083, 8084, 8085, 3000, 16686],
+  "forwardPorts": [4200, 8086, 8087, 8025, 8080, 8081, 8082, 8083, 8084, 8085, 8088, 3000, 16686],
   "portsAttributes": {
     "4200": { "label": "Console", "onAutoForward": "notify" },
     "8086": { "label": "M-Wall demo-tenant", "onAutoForward": "silent" },
@@ -39,6 +42,7 @@
     "8083": { "label": "app-api demo-tenant", "onAutoForward": "silent" },
     "8084": { "label": "app-api segundo-tenant", "onAutoForward": "silent" },
     "8085": { "label": "wallet-otp", "onAutoForward": "silent" },
+    "8088": { "label": "wallet-fees", "onAutoForward": "silent" },
     "3000": { "label": "Grafana", "onAutoForward": "silent" },
     "16686": { "label": "Jaeger", "onAutoForward": "silent" }
   },
@@ -48,7 +52,8 @@
         "vscjava.vscode-java-pack",
         "angular.ng-template",
         "fwcd.kotlin",
-        "ms-azuretools.vscode-docker"
+        "ms-azuretools.vscode-docker",
+        "ms-dotnettools.csdevkit"
       ]
     }
   }

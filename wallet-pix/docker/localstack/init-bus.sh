@@ -41,5 +41,9 @@ CORE_ACCOUNTS=$(topic wallet-core-account-events)
 CORE_DEV=$(queue wallet-core-events-dev)
 subscribe "$CORE_TX"       "$CORE_DEV"
 subscribe "$CORE_ACCOUNTS" "$CORE_DEV"
+# wallet-fees (its ADR-001): the fee basket reacts to the core's transactions, openings, blocks and closings.
+FEES=$(queue wallet-fees-core-events wallet-fees-core-events-dlq)
+subscribe "$CORE_TX"       "$FEES"
+subscribe "$CORE_ACCOUNTS" "$FEES"
 
 echo "Bus ready: topics spi-to-psp, psp-to-spi, pix-payment-events, wallet-core-transaction-events, wallet-core-account-events"

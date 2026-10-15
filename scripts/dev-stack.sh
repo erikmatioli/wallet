@@ -17,6 +17,7 @@ STACK=(
   "wallet-pix|8081|/actuator/health"
   "wallet-scheduler|8082|/actuator/health"
   "wallet-otp|8085|/actuator/health"
+  "wallet-fees|8088|/health"
   "wallet-app|8083 8084|/actuator/health"
   "wallet-mobile|8086 8087|/"
 )

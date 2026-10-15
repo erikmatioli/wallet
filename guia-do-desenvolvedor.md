@@ -36,7 +36,7 @@ Leia de cima para baixo na primeira vez. Depois, use o índice para voltar a uma
 **tenant**) contrata a plataforma e oferece contas de pagamento aos seus clientes. Vários tenants
 usam a mesma instalação, e um nunca enxerga os dados do outro.
 
-O repositório é um **monorepo** com sete produtos. Cada um tem build, deploy, banco e release
+O repositório é um **monorepo** com oito produtos. Cada um tem build, deploy, banco e release
 próprios:
 
 | Produto | O que faz | Linguagem | Porta local |
@@ -48,6 +48,7 @@ próprios:
 | `wallet-app` | App desktop **do cliente final** e seu backend (`app-api`) | Kotlin: Compose Desktop + Spring Boot 4 (Gradle) | 8083 / 8084 |
 | `wallet-mobile` | **M-Wall**: o app do cliente final para celular (PWA), sobre o mesmo `app-api` | TypeScript: Angular 21 + service worker | 8086 / 8087 |
 | `wallet-otp` | Códigos de uso único por e-mail: cadastro e login do app, aprovações no futuro | Kotlin + Spring Boot 4 (Maven) | 8085 (+ Mailpit 8025) |
+| `wallet-fees` | **Cesta de tarifas**: pacotes PF e PJ com mensalidade e preço por operação; ouve os eventos do core e cobra pela API dele ([README](wallet-fees/README.md), [ADR-001](wallet-fees/docs/adr/001-cesta-de-tarifas.md)) | C# + .NET 10 (ASP.NET Core) | 8088 |
 
 ```
                  OPERADOR DA FINTECH                       CLIENTE FINAL

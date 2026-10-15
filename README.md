@@ -4,7 +4,7 @@ Carteira digital **white label**: uma fintech (o **tenant**) contrata a platafor
 pagamento aos seus clientes. Vários tenants usam a mesma instalação, e um nunca enxerga os dados do
 outro.
 
-Este repositório é um **monorepo** com sete produtos. Cada um tem build, banco, CI e documentação
+Este repositório é um **monorepo** com oito produtos. Cada um tem build, banco, CI e documentação
 próprios, e eles só conversam pelas APIs públicas e pelo barramento.
 
 | Produto | O que faz | Stack | Porta local |
@@ -13,6 +13,7 @@ próprios, e eles só conversam pelas APIs públicas e pelo barramento.
 | [`wallet-pix`](wallet-pix/) | Recebe e envia Pix conversando com o SPI (o sistema do Banco Central) por filas; inclui um simulador do SPI | Java 25, Spring Boot 4, Maven | 8081 (simulador 8090) |
 | [`wallet-scheduler`](wallet-scheduler/) | Agenda transferências e Pix para uma data e executa no dia, com retentativa | Kotlin, Spring Boot 4, Maven | 8082 |
 | [`wallet-otp`](wallet-otp/) | Códigos de uso único por e-mail: cadastro e login do app, aprovações no futuro | Kotlin, Spring Boot 4, Maven | 8085 (Mailpit 8025) |
+| [`wallet-fees`](wallet-fees/) | **Cesta de tarifas**: pacotes PF e PJ, mensalidade e preço por operação com franquia, cobrados para a conta de receitas do tenant | C#, .NET 10, ASP.NET Core | 8088 |
 | [`wallet-console`](wallet-console/) | Tela web **do operador** da fintech | TypeScript, Angular 21 | 4200 |
 | [`wallet-app`](wallet-app/) | App desktop **do cliente final** e o seu backend (`app-api`) | Kotlin, Compose Desktop, Spring Boot 4, Gradle | 8083 / 8084 |
 | [`wallet-mobile`](wallet-mobile/) | **M-Wall**, o app do cliente final para celular (PWA), sobre o mesmo `app-api` | TypeScript, Angular 21, PWA | 8086 / 8087 |
@@ -24,12 +25,14 @@ Quem chama quem:
   e `wallet-otp`
 - `wallet-pix` → `wallet-core` (débitos e créditos), e conversa com o SPI por filas (SNS/SQS)
 - `wallet-scheduler` → `wallet-core` e `wallet-pix` no dia do pagamento, e ouve os eventos do Pix
-- `wallet-pix`, `wallet-scheduler` e `wallet-otp` aceitam os JWTs do `wallet-core`, o único provedor de
+- `wallet-fees` ouve os eventos do `wallet-core` (transações e contas, publicados no SNS) e cobra as tarifas
+  pela API dele
+- `wallet-pix`, `wallet-scheduler`, `wallet-otp` e `wallet-fees` aceitam os JWTs do `wallet-core`, o único provedor de
   identidade dos tenants; o `app-api` emite um token próprio para o cliente final
 
 ## Subir na sua máquina
 
-Pré-requisitos: Docker Desktop, JDK 25, Maven 3.9+ e Node 22+ (console e M-Wall). O Gradle do `wallet-app` vem
+Pré-requisitos: Docker Desktop, JDK 25, Maven 3.9+, Node 22+ (console e M-Wall) e, para o `wallet-fees` fora do Docker, o SDK do .NET 10. O Gradle do `wallet-app` vem
 pelo wrapper.
 
 Todos os composes entram na rede do `wallet-core` e usam o PostgreSQL dele, então **o core sobe
@@ -40,6 +43,7 @@ cd wallet-core       && docker compose up -d           # Postgres, wallet-core e
 cd ../wallet-pix     && docker compose up -d --build   # Pix: LocalStack, pix-service, simulador do SPI
 cd ../wallet-scheduler && docker compose up -d --build # agendamentos
 cd ../wallet-otp     && docker compose up -d --build   # códigos por e-mail e o Mailpit
+cd ../wallet-fees    && docker compose up -d --build   # cesta de tarifas (8088)
 cd ../wallet-app     && docker compose up -d --build   # app-api do demo-tenant (8083) e do segundo-tenant (8084)
 cd ../wallet-mobile  && docker compose up -d --build   # M-Wall do demo-tenant (8086) e do segundo-tenant (8087)
 cd ../wallet-console && npm ci && npm start            # console em http://localhost:4200

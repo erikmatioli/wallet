@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The rules of the fee basket, without any framework (ADR-001, decision 1). -->
+</Project>

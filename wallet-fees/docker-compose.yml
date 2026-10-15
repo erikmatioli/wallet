@@ -1,0 +1,47 @@
+# Fee basket (ADR-001). Runs NEXT TO wallet-core's compose and wallet-pix's (whose LocalStack holds the bus): it
+# joins wallet-core's network to reach postgres, wallet-core:8080 and localstack:4566, where its queue on the core's
+# topics lives (see wallet-pix/docker/localstack/init-bus.sh).
+#
+#   (cd ../wallet-core && docker compose up -d)
+#   (cd ../wallet-pix && docker compose up -d)
+#   docker compose up -d --build
+services:
+  fees-db-init:
+    # Creates the "fees" database and roles on wallet-core's Postgres, then exits.
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: wallet_owner          # wallet-core's superuser, only to create the fees database/roles
+      PGPASSWORD: wallet_owner
+      PGDATABASE: wallet
+    volumes:
+      - ./docker/postgres/init-fees-db.sh:/init-fees-db.sh:ro
+    command: ["sh", "/init-fees-db.sh"]
+    restart: "no"
+
+  wallet-fees:
+    build: .
+    depends_on:
+      fees-db-init:
+        condition: service_completed_successfully
+    environment:
+      Fees__Db__Connection: "Host=postgres;Port=5432;Database=fees;Username=fees_app;Password=fees_app"
+      Fees__Db__OwnerConnection: "Host=postgres;Port=5432;Database=fees;Username=fees_owner;Password=fees_owner"
+      Fees__Core__BaseUrl: http://wallet-core:8080
+      Fees__Jwt__JwksUrl: http://wallet-core:8080/.well-known/jwks.json
+      Fees__Bus__QueueUrl: http://localstack:4566/000000000000/wallet-fees-core-events
+      Fees__Bus__Endpoint: http://localstack:4566
+      Fees__Bus__AccessKey: test
+      Fees__Bus__SecretKey: test
+      # The two tenants wallet-core's "dev" profile seeds (also the defaults in appsettings.json).
+      Fees__Core__Tenants__0__ClientId: demo-tenant
+      Fees__Core__Tenants__0__ClientSecret: demo-secret-change-me-please
+      Fees__Core__Tenants__1__ClientId: segundo-tenant
+      Fees__Core__Tenants__1__ClientSecret: segundo-tenant-secret-please
+    ports:
+      - "8088:8088"
+
+networks:
+  default:
+    name: wallet-core_default
+    external: true
