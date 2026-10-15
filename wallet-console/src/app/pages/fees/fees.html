@@ -1,0 +1,160 @@
+<ng-template #table let-s>
+  <p class="monthly">
+    Mensalidade: <strong class="num">{{ s.monthlyFee > 0 ? 'R$ ' + (s.monthlyFee | number: '1.2-2') : 'nenhuma' }}</strong>
+  </p>
+  <table class="prices">
+    <thead>
+      <tr>
+        <th>Operação</th>
+        <th class="num">Grátis/mês</th>
+        <th class="num">Depois</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (l of lines(s); track l.operation) {
+        <tr>
+          <td>{{ operation(l.operation) }}</td>
+          <td class="num">{{ l.freePerMonth }}</td>
+          <td class="num">
+            @if (l.price === 0 && !l.priceFromCompany) {
+              grátis
+            } @else if (l.priceFromCompany !== null && l.priceFromCompany !== l.price) {
+              <span class="split" title="Pagador pessoa física / pagador pessoa jurídica">PF {{ l.price | number: '1.2-2' }}<br />PJ {{ l.priceFromCompany | number: '1.2-2' }}</span>
+            } @else {
+              {{ l.price | number: '1.2-2' }}
+            }
+          </td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</ng-template>
+
+<section class="page wide">
+  <div class="page-header">
+    <div>
+      <a routerLink="/home" class="back">← Contas</a>
+      <h1>Tarifas</h1>
+    </div>
+    <button type="button" class="secondary" (click)="reload()" [disabled]="loading()">Atualizar</button>
+  </div>
+
+  <p class="hint intro">
+    Toda conta nasce no pacote básico do seu tipo; a migração é feita na tela da conta. A tarifa de uma transação usa a
+    tabela em vigor no dia dela (Brasília), e a mensalidade, a do dia 1. Uma tarifa só é cobrada com saldo e sem
+    bloqueio; sem saldo, fica em aberto e a conta só paga tarifas até o próximo crédito.
+  </p>
+
+  <app-problem-banner [message]="error()" />
+  @if (success()) {
+    <div class="done" role="status">{{ success() }}</div>
+  }
+
+  @for (g of groups(); track g.type) {
+    <h2 class="section-title">{{ g.label }}</h2>
+    <div class="package-grid">
+      @for (p of g.packages; track p.id) {
+        <div class="card package" [class.selected]="editing()?.id === p.id">
+          <div class="package-head">
+            <span class="name">{{ p.name }}</span>
+            @if (p.isDefault) {
+              <span class="badge" title="Toda conta nova deste tipo começa aqui">padrão</span>
+            }
+          </div>
+          @if (p.current; as c) {
+            <div class="kicker">Em vigor desde {{ c.validFrom + 'T12:00:00' | date: 'dd/MM/yyyy' }}</div>
+            <ng-container *ngTemplateOutlet="table; context: { $implicit: c }" />
+          } @else {
+            <p class="hint">Sem tabela em vigor: nada é cobrado.</p>
+          }
+          @if (p.next; as n) {
+            <div class="next">
+              <div class="kicker">A partir de {{ n.validFrom + 'T12:00:00' | date: 'dd/MM/yyyy' }}</div>
+              <ng-container *ngTemplateOutlet="table; context: { $implicit: n }" />
+            </div>
+          }
+          <div class="package-actions">
+            <button type="button" class="link" (click)="toggleHistory(p)">
+              {{ historyOf() === p.id ? 'Fechar histórico' : 'Histórico' }}
+            </button>
+            @if (canAdmin()) {
+              <button type="button" class="link" (click)="startSchedule(p)">Nova tabela</button>
+            }
+          </div>
+          @if (historyOf() === p.id) {
+            <ul class="history">
+              @for (h of history(); track h.id) {
+                <li>
+                  <span class="num">{{ h.validFrom + 'T12:00:00' | date: 'dd/MM/yyyy' }}</span>
+                  · mensalidade {{ h.monthlyFee | number: '1.2-2' }}
+                  <span class="hint">· por {{ h.createdBy }}</span>
+                </li>
+              } @empty {
+                <li class="hint">Carregando…</li>
+              }
+            </ul>
+          }
+        </div>
+      }
+    </div>
+  }
+
+  @if (editing(); as p) {
+    @if (draft; as d) {
+      <h2 class="section-title">Nova tabela: {{ p.name }}</h2>
+      <form class="card" (ngSubmit)="submit()">
+        <div class="inline-form">
+          <label>
+            Vale a partir de
+            <input type="date" name="validFrom" [min]="today" [(ngModel)]="d.validFrom" required />
+          </label>
+          <label>
+            Mensalidade (R$)
+            <input type="number" step="0.01" min="0" name="monthlyFee" [(ngModel)]="d.monthlyFee" required />
+          </label>
+          <label>
+            Operador
+            <input name="operator" [(ngModel)]="operator" maxlength="80" required />
+          </label>
+        </div>
+        <table class="prices edit">
+          <thead>
+            <tr>
+              <th>Operação</th>
+              <th>Grátis por mês</th>
+              <th>Preço depois (R$)</th>
+              <th>Pagador PJ (R$)</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (l of d.lines; track l.operation; let i = $index) {
+              <tr>
+                <td>{{ operation(l.operation) }}</td>
+                <td><input type="number" step="1" min="0" max="10000" [name]="'free' + i" [(ngModel)]="l.freePerMonth" required
+                  [attr.aria-label]="'Grátis por mês: ' + operation(l.operation)" /></td>
+                <td><input type="number" step="0.01" min="0" [name]="'price' + i" [(ngModel)]="l.price" required
+                  [attr.aria-label]="'Preço depois: ' + operation(l.operation)" /></td>
+                <td>
+                  @if (l.operation === 'PIX_IN') {
+                    <input type="number" step="0.01" min="0" [name]="'company' + i" [(ngModel)]="l.priceFromCompany" required
+                      [attr.aria-label]="'Pagador PJ: ' + operation(l.operation)" />
+                  } @else {
+                    <span class="hint">—</span>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+        <p class="hint">
+          No Pix recebido, o preço depende de quem pagou: "Preço depois" para pessoa física, "Pagador PJ" para empresa.
+          Uma tabela ainda não em vigor com a mesma data é substituída; a de hoje, já em vigor, não muda.
+        </p>
+        <div class="form-actions">
+          <button type="submit" [disabled]="busy()">Salvar tabela</button>
+          <button type="button" class="secondary" (click)="closeForm()">Fechar</button>
+        </div>
+      </form>
+    }
+  }
+</section>

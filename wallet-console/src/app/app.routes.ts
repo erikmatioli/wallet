@@ -23,6 +23,11 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./pages/treasury/treasury').then((m) => m.TreasuryPage),
   },
+  {
+    path: 'tarifas',
+    canActivate: [authGuard],
+    loadComponent: () => import('./pages/fees/fees').then((m) => m.FeesPage),
+  },
   { path: '', pathMatch: 'full', redirectTo: 'home' },
   { path: '**', redirectTo: 'home' },
 ];

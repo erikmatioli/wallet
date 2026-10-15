@@ -5,6 +5,9 @@
       @if (canSeeTreasury) {
         <a routerLink="/tesouraria"><button type="button" class="secondary">Tesouraria</button></a>
       }
+      @if (canSeeFees) {
+        <a routerLink="/tarifas"><button type="button" class="secondary">Tarifas</button></a>
+      }
       <a routerLink="/onboard"><button type="button">+ Nova conta</button></a>
     </div>
   </div>
@@ -65,7 +68,7 @@
         @for (i of items(); track i.accountId) {
           <tr class="clickable" (click)="openAccount(i.accountId)">
             <td>{{ i.customerName }}</td>
-            <td>{{ i.documentMasked }}</td>
+            <td class="nowrap">{{ doc(i.document, i.documentMasked) }}</td>
             <td>{{ i.accountFormatted }}</td>
             <td><span class="badge" [class.ok]="situation(i) === 'Ativa'" [class.bad]="situation(i) !== 'Ativa'">{{ situation(i) }}</span></td>
             <td>{{ i.balance | number: '1.2-2' }} {{ i.currency }}</td>
