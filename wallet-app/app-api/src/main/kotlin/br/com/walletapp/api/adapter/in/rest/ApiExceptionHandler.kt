@@ -44,8 +44,7 @@ class ApiExceptionHandler {
 
     @ExceptionHandler(DependencyUnavailableException::class)
     fun unavailable(e: DependencyUnavailableException): ResponseEntity<AppError> {
-        log.warn("dependency unavailable: {}", e.message)
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-            .body(AppError("TEMPORARILY_UNAVAILABLE", "Serviço indisponível no momento. Tente de novo."))
+        log.warn("dependency unavailable ({}): {}", e.code, e.message)
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(AppError(e.code, e.userMessage))
     }
 }

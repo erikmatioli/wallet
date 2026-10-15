@@ -160,7 +160,8 @@ import { Icon } from '../../ui/icon';
             (click)="flow.confirm()"
           >
             @if (flow.busy()) {
-              <span class="spinner" aria-hidden="true"></span><span>Enviando…</span>
+              <span class="spinner" aria-hidden="true"></span>
+              <span>{{ flow.confirming() ? 'Confirmando o seu pagamento…' : 'Enviando…' }}</span>
             } @else {
               Confirmar Pix
             }

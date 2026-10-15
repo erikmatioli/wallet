@@ -1,6 +1,7 @@
 package br.com.walletapp.api.adapter.out.otp
 
 import br.com.walletapp.api.adapter.out.core.CoreTokens
+import br.com.walletapp.api.adapter.out.lostAnswer
 import br.com.walletapp.api.application.port.DependencyUnavailableException
 import br.com.walletapp.api.application.port.OtpCheck
 import br.com.walletapp.api.application.port.OtpGateway
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.ResourceAccessException
+import org.springframework.web.client.RestClientException
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.body
 
@@ -73,6 +75,10 @@ class OtpClient(builder: RestClient.Builder, props: AppProperties, private val t
     } catch (e: HttpServerErrorException) {
         throw DependencyUnavailableException("wallet-otp $operation failed (${e.statusCode.value()})", e)
     } catch (e: ResourceAccessException) {
+        throw DependencyUnavailableException("wallet-otp $operation failed: ${e.message}", e)
+    } catch (e: RestClientException) {
+        // A timeout while reading the answer, which the RestClient does not report as ResourceAccessException.
+        if (!lostAnswer(e)) throw e
         throw DependencyUnavailableException("wallet-otp $operation failed: ${e.message}", e)
     }
 

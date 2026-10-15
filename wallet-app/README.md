@@ -3,7 +3,8 @@
 App **desktop** do cliente final, em Kotlin com Compose, e seu backend (`app-api`). O cliente abre a
 própria conta e movimenta só ela: saldo, extrato, transferência, Pix e agendamentos. As decisões
 estão na [ADR-001](docs/adr/001-app-do-cliente.md) e, para o login, na
-[ADR-002](docs/adr/002-login-por-otp.md).
+[ADR-002](docs/adr/002-login-por-otp.md). Um pagamento sem resposta é confirmado de novo pelo próprio app,
+com a mesma chave ([ADR-004](docs/adr/004-pagamento-sem-confirmacao.md)).
 
 ## Módulos (um build Gradle)
 

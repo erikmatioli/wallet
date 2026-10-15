@@ -7,7 +7,10 @@ import com.sun.net.httpserver.HttpServer
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import br.com.walletapp.api.domain.BusinessRuleException
+import br.com.walletapp.api.application.port.DependencyUnavailableException
+import br.com.walletapp.api.application.port.PaymentNotConfirmedException
 import br.com.walletapp.contract.DayBalance
+import br.com.walletapp.contract.TransferDestination
 import java.time.LocalDate
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -15,6 +18,7 @@ import org.springframework.web.client.RestClient
 import java.net.InetSocketAddress
 import java.net.URI
 import java.time.Clock
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -35,12 +39,12 @@ class WalletCoreClientTest {
         ex.responseBody.use { it.write(body) }
     }
 
-    private fun client(): WalletCoreClient {
+    private fun client(readTimeout: Duration = Duration.ofSeconds(5)): WalletCoreClient {
         server.start()
         val base = URI.create("http://localhost:${server.address.port}")
         val props = AppProperties(
             AppProperties.Session("test-secret-0123456789abcdef0123456789"),
-            AppProperties.WalletCore(base, "demo-tenant", "secret"),
+            AppProperties.WalletCore(base, "demo-tenant", "secret", readTimeout = readTimeout),
             AppProperties.Pix(base), AppProperties.Scheduler(base), AppProperties.Otp(base),
         )
         return WalletCoreClient(RestClient.builder(), props, CoreTokens(RestClient.builder(), props, Clock.systemUTC()))
@@ -128,5 +132,47 @@ class WalletCoreClientTest {
         assertThatThrownBy { client().dailyBalances(AccountId(account), LocalDate.parse("2026-10-09"), LocalDate.parse("2026-10-09")) }
             .isInstanceOf(BusinessRuleException::class.java)
             .hasMessageContaining("meia-noite")
+    }
+
+    /** Answers after [delayMillis]: before the headers, or (with [bodyLate]) between the headers and the body. */
+    private fun slow(path: String, json: String, delayMillis: Long, bodyLate: Boolean) = server.createContext(path) { ex ->
+        val body = json.toByteArray()
+        ex.responseHeaders.add("Content-Type", "application/json")
+        if (bodyLate) {
+            ex.sendResponseHeaders(200, 0)
+            ex.responseBody.flush()
+            Thread.sleep(delayMillis)
+        } else {
+            Thread.sleep(delayMillis)
+            ex.sendResponseHeaders(200, 0)
+        }
+        runCatching { ex.responseBody.use { it.write(body) } }
+    }
+
+    @Test
+    fun `a transfer whose answer is lost is not confirmed, never a 500 - before the headers or in the body`() {
+        val transaction = """{"id":"${UUID.randomUUID()}","occurredAt":"2026-10-15T20:00:00Z"}"""
+        respond("/v1/auth/token", """{"access_token":"t","token_type":"Bearer","expires_in":600}""")
+        slow("/v1/transfers", transaction, 1_500, bodyLate = true)
+        val client = client(readTimeout = Duration.ofMillis(400))
+
+        assertThatThrownBy {
+            client.transfer(AccountId(UUID.randomUUID()), TransferDestination("Joao Souza", "0001", "00100002", "9"), 1_000, null, "k-1")
+        }.isInstanceOfSatisfying(PaymentNotConfirmedException::class.java) {
+            assertThat(it.code).isEqualTo("PAYMENT_NOT_CONFIRMED")
+        }
+    }
+
+    @Test
+    fun `a slow read that moves no money is only unavailable`() {
+        val account = UUID.randomUUID()
+        respond("/v1/auth/token", """{"access_token":"t","token_type":"Bearer","expires_in":600}""")
+        slow("/v1/accounts/$account", """{"branch":"0001"}""", 1_500, bodyLate = false)
+
+        assertThatThrownBy { client(readTimeout = Duration.ofMillis(400)).me(AccountId(account)) }
+            .isInstanceOfSatisfying(DependencyUnavailableException::class.java) {
+                assertThat(it).isNotInstanceOf(PaymentNotConfirmedException::class.java)
+                assertThat(it.code).isEqualTo("TEMPORARILY_UNAVAILABLE")
+            }
     }
 }
