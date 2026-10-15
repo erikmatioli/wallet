@@ -50,8 +50,11 @@ de `GET /app/v1/balance-history?from=&to=`, que o `app-api` lê do wallet-core s
 
 **Conta bloqueada ou encerrada** ([ADR-013 do wallet-core](../wallet-core/docs/adr/013-bloqueios-e-encerramento-da-conta.md)).
 `GET /app/v1/me` traz `canPay` e `canReceive`. Com a conta bloqueada, o cliente entra, vê o saldo e o extrato
-e um aviso, e as ações de pagar somem. Com a conta encerrada, o login é recusado depois do código
-(`ACCOUNT_CLOSED`), como as outras recusas do login: quem não é dono do CPF não fica sabendo de nada.
+e um aviso, e as ações de pagar somem. Quando o único bloqueio é o de tarifa ([ADR-001 do
+wallet-fees](../wallet-fees/docs/adr/001-cesta-de-tarifas.md)), o `blockedForFees` vem verdadeiro e o aviso
+diz que o próximo crédito paga as tarifas e libera a conta, em vez de mandar procurar o atendimento. Com a
+conta encerrada, o login é recusado depois do código (`ACCOUNT_CLOSED`), como as outras recusas do login:
+quem não é dono do CPF não fica sabendo de nada.
 
 ## Rodar localmente
 
@@ -67,9 +70,12 @@ cd ../wallet-app && docker compose up -d --build # app-api na porta 8083
 O desktop procura o `app-api` em `http://localhost:8083/`; para outro endereço, use
 `-Dwallet.api.url=...` ou a variável `WALLET_APP_API_URL`.
 
+O app desktop não é um container: ele só abre quando você roda o `:app-desktop:run`.
+
 **Um app por tenant.** Cada `app-api` atende **um** tenant (`APP_TENANT_CLIENT_ID` /
 `APP_TENANT_CLIENT_SECRET`), com banco de logins e chave de sessão (`APP_SESSION_SECRET`, sem valor
-padrão) próprios. O compose sobe os dois tenants do perfil `dev` do wallet-core:
+padrão) próprios. O compose sobe o `demo-tenant`; o `segundo-tenant`, para testar o isolamento entre
+tenants, só sobe com o perfil: `docker compose --profile segundo-tenant up -d --build`.
 
 | Tenant | `app-api` | Banco | Desktop |
 |---|---|---|---|

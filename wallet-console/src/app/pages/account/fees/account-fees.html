@@ -1,0 +1,141 @@
+<div class="section-head">
+  <h2 class="section-title">Pacote e tarifas</h2>
+  <button type="button" class="link" (click)="load()">Atualizar</button>
+</div>
+<div class="card">
+  <app-problem-banner [message]="error()" />
+  @if (notice()) {
+    <div class="notice">{{ notice() }}</div>
+  }
+
+  @if (notInBasket()) {
+    <p class="hint">Esta conta não está na cesta de tarifas (conta interna, ou aberta há instantes).</p>
+  }
+
+  @if (fees(); as f) {
+    <div class="package-line">
+      <div>
+        <span class="package-name">{{ f.packageName }}</span>
+        <span class="hint">{{ typeLabels[f.customerType] }} · desde {{ f.since | date: 'dd/MM/yyyy' }}</span>
+      </div>
+      @if (f.fees.pending > 0) {
+        <span class="pending">Em aberto: R$ {{ f.fees.pending | number: '1.2-2' }}</span>
+      }
+    </div>
+
+    <h3 class="sub">Franquia de {{ month(f.fees.month) }}</h3>
+    <table class="usage">
+      <thead>
+        <tr>
+          <th>Operação</th>
+          <th class="num">Usadas</th>
+          <th class="num">Grátis no mês</th>
+          <th class="num">Depois, cada uma</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (u of f.fees.usage; track u.operation) {
+          <tr>
+            <td>{{ operation(u.operation) }}</td>
+            <td class="num" [class.over]="u.used > u.free">{{ u.used }}</td>
+            <td class="num">{{ u.free }}</td>
+            <td class="num">
+              @if (priceOf(u); as p) {
+                @if (p.price === 0 && !p.priceFromCompany) {
+                  grátis
+                } @else {
+                  {{ p.price | number: '1.2-2' }}
+                  @if (p.priceFromCompany !== null && p.priceFromCompany !== p.price) {
+                    <span class="hint">(de PJ: {{ p.priceFromCompany | number: '1.2-2' }})</span>
+                  }
+                }
+              } @else {
+                —
+              }
+            </td>
+          </tr>
+        } @empty {
+          <tr><td colspan="4" class="hint">Nenhuma operação tarifada neste pacote.</td></tr>
+        }
+      </tbody>
+    </table>
+    @if (currentPackage()?.current; as s) {
+      <p class="hint table-hint">
+        Mensalidade: {{ s.monthlyFee > 0 ? 'R$ ' + (s.monthlyFee | number: '1.2-2') + ', cobrada no dia 1' : 'nenhuma' }}.
+        Um estorno devolve a tarifa e a vaga da franquia; uma devolução de Pix não.
+      </p>
+    }
+
+    <h3 class="sub">Últimas tarifas</h3>
+    <table class="charges">
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th>Tarifa</th>
+          <th class="num">Valor</th>
+          <th>Situação</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (c of f.fees.charges; track c.id) {
+          <tr>
+            <td class="nowrap">{{ c.createdAt | date: 'dd/MM/yy HH:mm' }}</td>
+            <td class="ellipsis" [title]="c.description">{{ c.description }}</td>
+            <td class="num">{{ c.amount | number: '1.2-2' }}</td>
+            <td>
+              <span class="status" [class.ok]="tone(c.status) === 'ok'" [class.bad]="tone(c.status) === 'bad'">{{ statusLabels[c.status] }}</span>
+              @if (reason(c); as r) {
+                <span class="hint reason">{{ r }}</span>
+              }
+            </td>
+          </tr>
+        } @empty {
+          <tr><td colspan="4" class="hint">Nenhuma tarifa ainda.</td></tr>
+        }
+      </tbody>
+    </table>
+
+    @if (f.changes.length > 0) {
+      <h3 class="sub">Mudanças de pacote</h3>
+      <ul class="changes">
+        @for (ch of f.changes; track ch.changedAt) {
+          <li>
+            <span class="nowrap">{{ ch.changedAt | date: 'dd/MM/yyyy HH:mm' }}</span>
+            {{ changeText(ch) }} <span class="hint">por {{ ch.operator }}</span>
+          </li>
+        }
+      </ul>
+    }
+
+    @if (canAdmin && f.status === 'ACTIVE' && options().length > 0) {
+      @if (!changing()) {
+        <button type="button" class="secondary" (click)="startChange()">Migrar de pacote</button>
+      } @else {
+        <form class="panel" (ngSubmit)="submitChange()">
+          <div class="inline-form">
+            <label>
+              Novo pacote
+              <select name="targetPackageId" [(ngModel)]="targetPackageId" required>
+                @for (p of options(); track p.id) {
+                  <option [value]="p.id">{{ p.name }}</option>
+                }
+              </select>
+            </label>
+            <label>
+              Operador
+              <input name="operator" [(ngModel)]="operator" maxlength="80" required />
+            </label>
+          </div>
+          <p class="hint">
+            Vale a partir de agora: as próximas transações usam os preços do novo pacote, e o que já foi usado da
+            franquia neste mês continua contando. A mensalidade do novo pacote começa no próximo dia 1.
+          </p>
+          <div class="form-actions">
+            <button type="submit" [disabled]="busy()">Migrar</button>
+            <button type="button" class="secondary" (click)="changing.set(false)">Fechar</button>
+          </div>
+        </form>
+      }
+    }
+  }
+</div>

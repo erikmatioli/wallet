@@ -28,7 +28,7 @@
         <div class="position">
           <div class="kicker">Posição do tenant</div>
           <div class="num">R$ {{ total() | number: '1.2-2' }}</div>
-          <p class="explain">Soma das contas de lastro = soma dos saldos dos clientes.</p>
+          <p class="explain">Soma das contas de lastro = clientes + receitas do tenant + depósitos judiciais a transferir.</p>
         </div>
       }
     </div>
@@ -191,6 +191,8 @@
       }
     </div>
   }
+
+  <app-revenue [positions]="positions()" (changed)="revenueWithdrawn($event)" />
 
   <app-judicial-transit [positions]="positions()" (changed)="judicialTedRecorded($event)" />
 

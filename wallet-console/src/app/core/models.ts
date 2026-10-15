@@ -36,6 +36,8 @@ export interface AccountResponse {
 export interface AccountDetailResponse extends AccountResponse {
   customerName: string;
   documentMasked: string;
+  /** The full CPF/CNPJ, unformatted: only with the customers:document scope (null or absent without it). */
+  document?: string | null;
   customerId: string;
   /** Where the customer's app sends login codes (wallet-app ADR-003); absent when none was registered. */
   customerEmail?: string | null;
@@ -50,13 +52,15 @@ export interface AccountDetailResponse extends AccountResponse {
 
 // ---------------------------------------------------------------- blocks and closing (ADR-013 of the core)
 
-export type BlockType = 'FRAUD' | 'ADMINISTRATIVE' | 'JUDICIAL';
+/** FEE_PENDING is wallet-fees' (ADR-014 of the core): created and released by it, never by the console. */
+export type BlockType = 'FRAUD' | 'ADMINISTRATIVE' | 'JUDICIAL' | 'FEE_PENDING';
 export type BlockReason =
   | 'FRAUD_SUSPICION'
   | 'CUSTOMER_REQUEST'
   | 'REGISTRATION_PENDING'
   | 'INSTITUTION_DECISION'
   | 'COURT_ORDER'
+  | 'UNPAID_FEES'
   | 'OTHER';
 export type CloseReason = 'CUSTOMER_REQUEST' | 'INSTITUTION_DECISION' | 'DEATH' | 'OTHER';
 
@@ -177,7 +181,10 @@ export type TransactionType =
   | 'TREASURY_TRANSFER'
   | 'RECLASSIFICATION'
   | 'JUDICIAL_TRANSFER'
-  | 'JUDICIAL_TRANSIT_OUT';
+  | 'JUDICIAL_TRANSIT_OUT'
+  | 'FEE'
+  | 'FEE_REFUND'
+  | 'REVENUE_WITHDRAWAL';
 
 export interface TransactionResponse {
   id: string;
@@ -265,6 +272,8 @@ export interface AccountListItem {
   accountId: string;
   customerName: string;
   documentMasked: string;
+  /** The full CPF/CNPJ, unformatted: only with the customers:document scope (null or absent without it). */
+  document?: string | null;
   accountFormatted: string;
   accountType: string;
   status: string;
@@ -421,4 +430,148 @@ export interface RegisterBackingAccountRequest {
   type: BackingType;
   name: string;
   externalRef?: string;
+}
+
+// ---------------------------------------------------------------- fee basket (wallet-fees' ADR-001)
+
+export type CustomerType = 'PF' | 'PJ';
+/** What a schedule prices per transaction. A monthly fee is a charge of operation MONTHLY. */
+export type FeeOperation = 'PIX_OUT' | 'PIX_IN' | 'TRANSFER_OUT' | 'WITHDRAWAL';
+export type ChargeStatus = 'PENDING' | 'CHARGED' | 'CANCELLED' | 'REFUNDED';
+
+/** One operation of a schedule: free per month, then the price. Only PIX_IN has a price for a payer company. */
+export interface OperationPrice {
+  operation: FeeOperation;
+  freePerMonth: number;
+  price: number;
+  priceFromCompany: number | null;
+}
+
+/** A package's prices from a date on (yyyy-MM-dd, in Brasília). */
+export interface FeeSchedule {
+  id: string;
+  validFrom: string;
+  monthlyFee: number;
+  operations: OperationPrice[];
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface FeePackage {
+  id: string;
+  code: string;
+  name: string;
+  customerType: CustomerType;
+  /** The package every new account of its type starts in. */
+  isDefault: boolean;
+  /** In force today; null only for a package with no schedule yet. */
+  current: FeeSchedule | null;
+  /** Already registered to start on a later day. */
+  next: FeeSchedule | null;
+}
+
+export interface CreateFeeScheduleRequest {
+  validFrom: string;
+  monthlyFee: number;
+  operations: OperationPrice[];
+  operator: string;
+}
+
+export interface FeeUsage {
+  operation: FeeOperation;
+  used: number;
+  free: number;
+}
+
+export interface FeeCharge {
+  id: string;
+  /** A FeeOperation, or MONTHLY. */
+  operation: string;
+  amount: number;
+  description: string;
+  status: ChargeStatus;
+  sourceTransactionId: string | null;
+  /** The month (yyyy-MM) of a monthly fee. */
+  reference: string | null;
+  feeTransactionId: string | null;
+  refundTransactionId: string | null;
+  /** Why it is still pending, or why it was cancelled: a code. */
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PackageChange {
+  fromPackageId: string | null;
+  toPackageId: string;
+  operator: string;
+  clientId: string;
+  changedAt: string;
+}
+
+/** `GET /v1/fees/accounts/{id}`: the account's package, this month's quota and its latest fees. */
+export interface FeeAccount {
+  accountId: string;
+  customerType: CustomerType;
+  status: 'ACTIVE' | 'CLOSED';
+  packageId: string;
+  packageCode: string;
+  packageName: string;
+  since: string;
+  changes: PackageChange[];
+  fees: {
+    month: string;
+    usage: FeeUsage[];
+    /** The total not charged yet. */
+    pending: number;
+    charges: FeeCharge[];
+  };
+}
+
+// ---------------------------------------------------------------- tenant revenue (ADR-014 and ADR-015 of the core)
+
+export interface RevenueDestination {
+  bank: string;
+  branch: string;
+  account: string;
+}
+
+/** Where a withdrawal of the revenue left from and went to. */
+export interface RevenueWithdrawalInfo {
+  backingAccountId: string;
+  backingAccountName: string;
+  destination: RevenueDestination;
+  document: string;
+  note: string | null;
+  operator: string;
+}
+
+export interface RevenueEntry {
+  transactionId: string;
+  sequence: number;
+  type: TransactionType;
+  direction: 'CREDIT' | 'DEBIT';
+  amount: number;
+  balanceAfter: number;
+  description: string;
+  occurredAt: string;
+  withdrawal: RevenueWithdrawalInfo | null;
+}
+
+/** `GET /v1/treasury/revenue`. `month` is absent in the first minute of a month. */
+export interface RevenueResponse {
+  balance: number;
+  currency: string;
+  month: { month: string; earned: number; withdrawn: number } | null;
+  entries: RevenueEntry[];
+  next: number | null;
+}
+
+export interface RevenueWithdrawalRequest {
+  backingAccountId: string;
+  amount: number;
+  destination: RevenueDestination;
+  document: string;
+  note?: string;
+  operator: string;
 }

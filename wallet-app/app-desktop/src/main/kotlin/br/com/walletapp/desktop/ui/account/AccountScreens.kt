@@ -75,8 +75,7 @@ fun HomeScreen(viewModel: HomeViewModel, onStatement: () -> Unit, onTransfer: ()
             s.history?.takeIf { it.days.size > 1 }?.let { BalanceChart(it.days) }
             // wallet-core's ADR-013: a blocked account still shows its money, but cannot pay.
             if (!s.me.canPay) {
-                Text("Sua conta está bloqueada para pagamentos. Procure o atendimento.",
-                    color = MaterialTheme.colorScheme.error)
+                Text(Format.blocked(s.me.blockedForFees), color = MaterialTheme.colorScheme.error)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (s.me.canPay) {

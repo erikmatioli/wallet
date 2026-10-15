@@ -1,10 +1,11 @@
 import { AccountBlock, AccountDetailResponse, BlockReason, BlockType, CloseReason, TimelineItem } from './models';
 
-/** The three blocks of ADR-013, as the operator reads them. */
+/** The three blocks of ADR-013 and the fee block of ADR-014, as the operator reads them. */
 export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
   FRAUD: 'Suspeita de fraude',
   ADMINISTRATIVE: 'Bloqueio total',
   JUDICIAL: 'Ordem judicial',
+  FEE_PENDING: 'Tarifas em aberto',
 };
 
 /** What each block still lets through, in one line. */
@@ -12,6 +13,7 @@ export const BLOCK_EFFECTS: Record<BlockType, string> = {
   FRAUD: 'Recebe; só sai a devolução de Pix (MED).',
   ADMINISTRATIVE: 'Não recebe nem paga; só entram estornos.',
   JUDICIAL: 'Recebe; só sai a transferência por ordem judicial.',
+  FEE_PENDING: 'Recebe; só saem a tarifa e a devolução de Pix (MED). Liberado sozinho quando as tarifas são pagas.',
 };
 
 export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
@@ -20,6 +22,7 @@ export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
   REGISTRATION_PENDING: 'Pendência cadastral',
   INSTITUTION_DECISION: 'Decisão da instituição',
   COURT_ORDER: 'Ordem judicial',
+  UNPAID_FEES: 'Tarifas não pagas',
   OTHER: 'Outro motivo',
 };
 
@@ -33,8 +36,12 @@ export const CLOSE_REASON_LABELS: Record<CloseReason, string> = {
   OTHER: 'Outro motivo',
 };
 
-/** The scope that creates and releases a block of this type (ADR-013, item 6). */
+/**
+ * The scope that creates and releases a block of this type (ADR-013, item 6). The fee block's is wallet-fees' own:
+ * the console never releases it, paying the fees does.
+ */
 export function blockScope(type: BlockType): string {
+  if (type === 'FEE_PENDING') return 'fees:write';
   return type === 'JUDICIAL' ? 'accounts:judicial' : 'accounts:block';
 }
 

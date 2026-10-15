@@ -33,15 +33,26 @@ public record AccountBlock(
         /** Receives nothing but refunds; nothing leaves. Created and released with accounts:block. */
         ADMINISTRATIVE,
         /** Receives; the only way out is the judicial transfer. Created and released with accounts:judicial. */
-        JUDICIAL;
+        JUDICIAL,
+        /**
+         * A fee could not be charged for lack of balance (ADR-014): receives; only the fee and the MED go out. Created
+         * and released by wallet-fees, with fees:write.
+         */
+        FEE_PENDING;
 
         /** The scope that creates and releases a block of this type. */
         public String scope() {
-            return this == JUDICIAL ? "accounts:judicial" : "accounts:block";
+            return switch (this) {
+                case JUDICIAL -> "accounts:judicial";
+                case FEE_PENDING -> "fees:write";
+                case FRAUD, ADMINISTRATIVE -> "accounts:block";
+            };
         }
     }
 
-    public enum Reason { FRAUD_SUSPICION, CUSTOMER_REQUEST, REGISTRATION_PENDING, INSTITUTION_DECISION, COURT_ORDER, OTHER }
+    public enum Reason {
+        FRAUD_SUSPICION, CUSTOMER_REQUEST, REGISTRATION_PENDING, INSTITUTION_DECISION, COURT_ORDER, UNPAID_FEES, OTHER
+    }
 
     /** The court's order: the process number (required) and the order's protocol (the SISBAJUD one, say). */
     public record CourtOrder(String process, String protocol) {
@@ -82,6 +93,9 @@ public record AccountBlock(
         note = trim(note, MAX_NOTE, "INVALID_NOTE", "note");
         if ((type == Type.JUDICIAL) != (reason == Reason.COURT_ORDER)) {
             throw new ValidationException("INVALID_BLOCK_REASON", "a judicial block is a court order, and only it is");
+        }
+        if ((type == Type.FEE_PENDING) != (reason == Reason.UNPAID_FEES)) {
+            throw new ValidationException("INVALID_BLOCK_REASON", "a fee block is for unpaid fees, and only it is");
         }
         if (type == Type.JUDICIAL && court == null) {
             throw new ValidationException("COURT_PROCESS_REQUIRED", "a judicial block needs the court process number");

@@ -2,14 +2,20 @@
 # has its own app-api, with its own tenant credentials, logins database and session key. Here, the two
 # tenants wallet-core's "dev" profile seeds:
 #
-#   demo-tenant    -> app-api          :8083   database "app"
-#   segundo-tenant -> app-api-segundo  :8084   database "app_segundo"
+#   demo-tenant    -> app-api          :8083   database "app"           always
+#   segundo-tenant -> app-api-segundo  :8084   database "app_segundo"   only with the "segundo-tenant" profile
+#
+# The second tenant is for testing the isolation between tenants; it is not up by default, to spare the
+# machine's memory.
 #
 # Runs NEXT TO wallet-core's compose (start that one first): it joins wallet-core's network to reach
 # postgres, otel-collector, wallet-core, pix-service and wallet-scheduler.
 #
 #   (cd ../wallet-core && docker compose up -d)
-#   docker compose up -d --build
+#   docker compose up -d --build                                         # demo-tenant
+#   docker compose --profile segundo-tenant up -d --build                # and segundo-tenant
+#
+# The desktop app is not a container: it runs only when asked for.
 #   ./gradlew :app-desktop:run                                           # demo-tenant's app
 #   WALLET_APP_API_URL=http://localhost:8084/ ./gradlew :app-desktop:run # segundo-tenant's app
 
@@ -80,12 +86,14 @@ services:
   # ---------------------------------------------------------------- segundo-tenant's app
   app-db-init-segundo:
     <<: *db-init
+    profiles: ["segundo-tenant"]
     environment:
       <<: *db-init-env
       APP_DB: app_segundo
 
   app-api-segundo:
     <<: *app-api
+    profiles: ["segundo-tenant"]
     pull_policy: never            # the image is the one app-api builds, never pulled from a registry
     depends_on:
       app-db-init-segundo:

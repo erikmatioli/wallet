@@ -28,8 +28,23 @@ public interface AccountRepository {
     /** Same lookup as {@link #findByNumber}, joined with the owning customer. */
     Optional<AccountHolder> findHolderByNumber(TenantId tenantId, String branch, String number, String checkDigit);
 
-    /** Read-model row for the accounts directory: an Account joined with its customer's display name. */
-    record AccountDirectoryItem(Account account, String customerName, String documentMasked, String customerEmail) {
+    /**
+     * Read-model row for the accounts directory: an Account joined with its customer's display name.
+     *
+     * @param documentType CPF or CNPJ: the type only, never the document (wallet-fees prices by it, ADR-014)
+     * @param document     the holder's full CPF/CNPJ; the API shows it only to a token with customers:document
+     */
+    record AccountDirectoryItem(Account account, String customerName, String documentMasked, String customerEmail,
+                                String documentType, String document) {
+
+        public AccountDirectoryItem(Account account, String customerName, String documentMasked, String customerEmail,
+                                    String documentType) {
+            this(account, customerName, documentMasked, customerEmail, documentType, null);
+        }
+
+        public AccountDirectoryItem(Account account, String customerName, String documentMasked, String customerEmail) {
+            this(account, customerName, documentMasked, customerEmail, null);
+        }
 
         public AccountDirectoryItem(Account account, String customerName, String documentMasked) {
             this(account, customerName, documentMasked, null);
@@ -91,4 +106,7 @@ public interface AccountRepository {
 
     /** The tenant's "depósitos judiciais a transferir" (ADR-013). */
     Optional<AccountId> findJudicialTransit(TenantId tenantId);
+
+    /** The tenant's revenue account, where the fees go (ADR-014). */
+    Optional<AccountId> findTenantRevenue(TenantId tenantId);
 }

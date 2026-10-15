@@ -26,7 +26,13 @@ public enum TransactionType {
     /** Money a court ordered out of a blocked account (ADR-013): to another customer or to the judicial transit. */
     JUDICIAL_TRANSFER,
     /** The treasury sent the TED of a judicial transfer: out of the judicial transit, from a backing account. */
-    JUDICIAL_TRANSIT_OUT;
+    JUDICIAL_TRANSIT_OUT,
+    /** A fee of the fee basket (ADR-014): out of the customer, into the tenant's revenue account. */
+    FEE,
+    /** A fee given back, in full, when the transaction that caused it is reversed (ADR-014). */
+    FEE_REFUND,
+    /** The treasury took the tenant's revenue out of the platform, from a backing account (ADR-015). */
+    REVENUE_WITHDRAWAL;
 
     public boolean isPix() {
         return name().startsWith("PIX_");
@@ -38,7 +44,7 @@ public enum TransactionType {
             case PIX_IN, PIX_REFUND, PIX_RETURN_IN -> true;
             case PIX_OUT, PIX_RETURN_OUT -> false;
             case DEPOSIT, WITHDRAWAL, TRANSFER, TREASURY_TRANSFER, RECLASSIFICATION, JUDICIAL_TRANSFER,
-                 JUDICIAL_TRANSIT_OUT ->
+                 JUDICIAL_TRANSIT_OUT, FEE, FEE_REFUND, REVENUE_WITHDRAWAL ->
                     throw new IllegalStateException(this + " has no fixed customer direction");
         };
     }

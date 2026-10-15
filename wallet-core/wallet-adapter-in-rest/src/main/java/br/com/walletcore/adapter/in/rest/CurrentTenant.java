@@ -19,6 +19,14 @@ final class CurrentTenant {
         return jwt.getSubject();
     }
 
+    /**
+     * Whether the token may see the holder's full CPF/CNPJ: the operator's console, not the services that only move
+     * money (they ask for a token without this scope).
+     */
+    static boolean seesDocument(Jwt jwt) {
+        return scopes(jwt).contains("customers:document");
+    }
+
     /** The scopes the token carries ("scope", space separated). */
     static Set<String> scopes(Jwt jwt) {
         String scope = jwt.getClaimAsString("scope");

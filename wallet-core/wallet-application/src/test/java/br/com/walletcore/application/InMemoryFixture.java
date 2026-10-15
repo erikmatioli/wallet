@@ -8,6 +8,7 @@ import br.com.walletcore.application.port.out.AccountRepository.AccountDirectory
 import br.com.walletcore.application.port.out.AccountRepository.AccountHolder;
 import br.com.walletcore.application.port.out.BackingAccountRepository;
 import br.com.walletcore.application.port.out.BalanceUpdateResult;
+import br.com.walletcore.application.port.out.FeeDetailRepository;
 import br.com.walletcore.application.port.out.LedgerRepository;
 import br.com.walletcore.application.port.out.MetricsRecorder;
 import br.com.walletcore.application.port.out.OutboxRepository;
@@ -32,6 +33,7 @@ import br.com.walletcore.domain.account.AccountType;
 import br.com.walletcore.domain.account.PaymentAccountNumber;
 import br.com.walletcore.domain.backing.BackingAccount;
 import br.com.walletcore.domain.backing.BackingType;
+import br.com.walletcore.domain.backing.RevenueWithdrawal;
 import br.com.walletcore.domain.backing.TreasuryReference;
 import br.com.walletcore.domain.customer.Customer;
 import br.com.walletcore.domain.customer.TaxId;
@@ -232,6 +234,12 @@ final class InMemoryFixture {
         }
 
         @Override
+        public Optional<AccountId> findTenantRevenue(TenantId tenantId) {
+            return accounts.values().stream().filter(a -> a.kind() == Account.Kind.TENANT_REVENUE).map(Account::id)
+                    .findFirst();
+        }
+
+        @Override
         public Optional<AccountId> findJudicialTransit(TenantId tenantId) {
             return accounts.values().stream().filter(a -> a.kind() == Account.Kind.JUDICIAL_TRANSIT).map(Account::id)
                     .findFirst();
@@ -390,6 +398,7 @@ final class InMemoryFixture {
     final Map<BackingAccountId, BackingAccount> backingAccounts = new java.util.LinkedHashMap<>();
     final Map<AccountId, BackingAccountId> shardOwners = new java.util.LinkedHashMap<>();
     final Map<TransactionId, TreasuryReference> treasuryReferences = new HashMap<>();
+    final Map<TransactionId, RevenueWithdrawal> revenueWithdrawals = new HashMap<>();
 
     final BackingAccountRepository backingRepository = new BackingAccountRepository() {
         @Override
@@ -440,6 +449,28 @@ final class InMemoryFixture {
         }
 
         @Override
+        public void insertRevenueWithdrawal(TenantId tenantId, RevenueWithdrawal withdrawal) {
+            revenueWithdrawals.put(withdrawal.transactionId(), withdrawal);
+            treasuryReferences.put(withdrawal.transactionId(),
+                    new TreasuryReference(withdrawal.document(), withdrawal.note()));
+        }
+
+        @Override
+        public Map<TransactionId, RevenueWithdrawal> findRevenueWithdrawals(TenantId tenantId,
+                                                                             Collection<TransactionId> ids) {
+            Map<TransactionId, RevenueWithdrawal> found = new HashMap<>();
+            ids.stream().filter(revenueWithdrawals::containsKey).forEach(id -> found.put(id, revenueWithdrawals.get(id)));
+            return found;
+        }
+
+        @Override
+        public Money sumRevenueWithdrawnSince(TenantId tenantId, Instant since) {
+            return Money.ofCents(journal.values().stream()
+                    .filter(t -> revenueWithdrawals.containsKey(t.id()) && !t.occurredAt().isBefore(since))
+                    .mapToLong(t -> t.amount().cents()).sum());
+        }
+
+        @Override
         public Map<TransactionId, TreasuryReference> findTreasuryReferences(TenantId tenantId,
                                                                             Collection<TransactionId> ids) {
             Map<TransactionId, TreasuryReference> found = new HashMap<>();
@@ -468,6 +499,22 @@ final class InMemoryFixture {
     };
 
     final OutboxRepository outbox = newEvents -> events.addAll(newEvents);
+
+    final Map<TransactionId, FeeDetailRepository.Detail> feeDetails =
+            new LinkedHashMap<>();
+
+    final FeeDetailRepository feeDetailRepository =
+            new FeeDetailRepository() {
+                @Override
+                public void insert(TenantId tenantId, TransactionId transactionId, Detail detail) {
+                    feeDetails.put(transactionId, detail);
+                }
+
+                @Override
+                public Optional<Detail> findByTransaction(TenantId tenantId, TransactionId transactionId) {
+                    return Optional.ofNullable(feeDetails.get(transactionId));
+                }
+            };
 
     final PixDetailRepository pixDetailRepository = new PixDetailRepository() {
         @Override
@@ -534,11 +581,11 @@ final class InMemoryFixture {
 
     final MoveMoneyService moveMoney = new MoveMoneyService(runner, accountRepository, ledgerRepository,
             transactionJournal, outbox, pixDetailRepository, backingRepository, router, blockRepository,
-            judicialRepository, metrics, clock);
+            judicialRepository, feeDetailRepository, metrics, clock);
     final QueryAccountService query = new QueryAccountService(runner, accountRepository, ledgerRepository,
             pixDetailRepository, blockRepository);
     final AccountControlService control = new AccountControlService(runner, accountRepository, blockRepository,
-            statusEventRepository, judicialRepository, clock);
+            statusEventRepository, judicialRepository, outbox, clock);
     final AuditLedgerService audit = new AuditLedgerService(runner, accountRepository, ledgerRepository, metrics);
     final ClosingBalances closings = new ClosingBalances(ledgerRepository, clock, java.time.Duration.ofMinutes(1));
     final BalanceHistoryService balanceHistory = new BalanceHistoryService(runner, accountRepository, closings);
@@ -557,19 +604,21 @@ final class InMemoryFixture {
             }
         }
         accountRepository.insert(Account.openJudicialTransit(tenant, clock.instant()));
+        accountRepository.insert(Account.openTenantRevenue(tenant, clock.instant()));
     }
 
     /** Who the tests say did it: the operator "maria" with the tenant's token. */
     final Actor operator = new Actor("maria", "demo-tenant");
 
     /** Every ADR-013 scope, as the default tenant has them. */
-    static final Set<String> ALL_SCOPES = Set.of("accounts:block", "accounts:judicial", "accounts:close");
+    static final Set<String> ALL_SCOPES = Set.of("accounts:block", "accounts:judicial", "accounts:close", "fees:write");
 
     AccountBlock block(Account account, AccountBlock.Type type) {
         AccountBlock.Reason reason = switch (type) {
             case FRAUD -> AccountBlock.Reason.FRAUD_SUSPICION;
             case ADMINISTRATIVE -> AccountBlock.Reason.INSTITUTION_DECISION;
             case JUDICIAL -> AccountBlock.Reason.COURT_ORDER;
+            case FEE_PENDING -> AccountBlock.Reason.UNPAID_FEES;
         };
         AccountBlock.CourtOrder court = type == AccountBlock.Type.JUDICIAL
                 ? new AccountBlock.CourtOrder("0001234-56.2026.8.26.0100", "SISBAJUD 20261011000123") : null;
@@ -579,6 +628,10 @@ final class InMemoryFixture {
 
     AccountId judicialTransit() {
         return accountRepository.findJudicialTransit(tenant).orElseThrow();
+    }
+
+    AccountId tenantRevenue() {
+        return accountRepository.findTenantRevenue(tenant).orElseThrow();
     }
 
     BackingAccountId backing(BackingType type) {

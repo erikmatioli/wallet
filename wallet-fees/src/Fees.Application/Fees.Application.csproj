@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Use cases and ports (ADR-001, decision 1): depends on the domain only. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Fees.Domain\Fees.Domain.csproj" />
+  </ItemGroup>
+</Project>

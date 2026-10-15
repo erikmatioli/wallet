@@ -81,6 +81,15 @@ wallet:
   outbox:
     poll-interval-ms: 500
     batch-size: 100
+  # ADR-014: where the outbox goes. "log" (the default) only logs; "sns" publishes, to these topics.
+  events:
+    publisher: ${WALLET_EVENTS_PUBLISHER:log}
+    region: ${WALLET_EVENTS_REGION:us-east-1}
+    endpoint: ${WALLET_EVENTS_ENDPOINT:}
+    access-key: ${WALLET_EVENTS_ACCESS_KEY:}
+    secret-key: ${WALLET_EVENTS_SECRET_KEY:}
+    transaction-topic-arn: ${WALLET_EVENTS_TRANSACTION_TOPIC_ARN:arn:aws:sns:us-east-1:000000000000:wallet-core-transaction-events}
+    account-topic-arn: ${WALLET_EVENTS_ACCOUNT_TOPIC_ARN:arn:aws:sns:us-east-1:000000000000:wallet-core-account-events}
   observability:
     audit-sweep:
       enabled: ${AUDIT_SWEEP_ENABLED:true}

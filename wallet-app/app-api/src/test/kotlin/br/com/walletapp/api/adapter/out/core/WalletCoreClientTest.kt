@@ -175,4 +175,23 @@ class WalletCoreClientTest {
                 assertThat(it.code).isEqualTo("TEMPORARILY_UNAVAILABLE")
             }
     }
+
+    @Test
+    fun `an account blocked only for fees is told apart from any other block`() {
+        val feesOnly = UUID.randomUUID()
+        val feesAndFraud = UUID.randomUUID()
+        respond("/v1/auth/token", """{"access_token":"t","token_type":"Bearer","expires_in":600}""")
+        respond("/v1/accounts/$feesOnly", account("""[{"id":"${UUID.randomUUID()}","type":"FEE_PENDING","active":true}]"""))
+        respond("/v1/accounts/$feesAndFraud", account("""[{"id":"${UUID.randomUUID()}","type":"FEE_PENDING","active":true},
+            {"id":"${UUID.randomUUID()}","type":"FRAUD","active":true}]"""))
+        val client = client()
+
+        assertThat(client.me(AccountId(feesOnly)).blockedForFees).isTrue()
+        assertThat(client.me(AccountId(feesAndFraud)).blockedForFees).isFalse()
+    }
+
+    private fun account(blocks: String) = """
+        {"branch":"0001","number":"00100001","checkDigit":"7","status":"ACTIVE","balance":0.00,
+         "customerName":"Ana Lima","canPay":false,"canReceive":true,"blocks":$blocks}
+    """.trimIndent()
 }

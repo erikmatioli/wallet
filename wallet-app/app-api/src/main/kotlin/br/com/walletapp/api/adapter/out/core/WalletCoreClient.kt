@@ -54,7 +54,8 @@ class WalletCoreClient(builder: RestClient.Builder, props: AppProperties, privat
     private data class AccountRef(val id: UUID)
     private data class AccountDetail(val branch: String, val number: String, val checkDigit: String, val status: String,
                                      val balance: BigDecimal, val customerName: String?, val canPay: Boolean = true,
-                                     val canReceive: Boolean = true)
+                                     val canReceive: Boolean = true, val blocks: List<CoreBlock> = emptyList())
+    private data class CoreBlock(val type: String, val active: Boolean = true)
     private data class CoreStatement(val entries: List<CoreEntry>, val nextBefore: Long?)
     private data class CoreEntry(val transactionId: UUID, val sequence: Long, val type: String, val direction: String,
                                  val amount: BigDecimal, val balanceAfter: BigDecimal, val description: String?,
@@ -108,7 +109,11 @@ class WalletCoreClient(builder: RestClient.Builder, props: AppProperties, privat
         val a = http.get().uri("/v1/accounts/{id}", accountId.value)
             .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
             .retrieve().body<AccountDetail>()!!
-        Me(a.customerName.orEmpty(), a.branch, a.number, a.checkDigit, a.status, cents(a.balance), a.canPay, a.canReceive)
+        // Only the fee block: the customer is told a credit frees the account, not to call the service desk.
+        val active = a.blocks.filter { it.active }
+        val blockedForFees = active.isNotEmpty() && active.all { it.type == "FEE_PENDING" }
+        Me(a.customerName.orEmpty(), a.branch, a.number, a.checkDigit, a.status, cents(a.balance), a.canPay, a.canReceive,
+            blockedForFees)
     }
 
     override fun statement(accountId: AccountId, before: Long?, limit: Int): StatementPage = call("statement") { token ->

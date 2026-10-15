@@ -16,6 +16,8 @@ export interface Me {
   canPay?: boolean;
   /** False only under a total block. */
   canReceive?: boolean;
+  /** wallet-core's ADR-014: the only block is the fee block, which the next credit frees. Absent: false. */
+  blockedForFees?: boolean;
 }
 
 /** `GET /app/v1/statement?before=&limit=`: newest first; `nextBefore` is the next page's cursor, or null. */

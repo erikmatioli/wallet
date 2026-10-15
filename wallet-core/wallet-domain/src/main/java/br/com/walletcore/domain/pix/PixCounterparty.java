@@ -12,9 +12,16 @@ import java.util.regex.Pattern;
  *
  * @param branch      null when the counterparty's account has no branch
  * @param accountType the SPI account type (e.g. TRAN, CACC), null when unknown
+ * @param taxIdType   CPF or CNPJ, taken from the full document when it was in hand (ADR-014: a fee for a Pix received
+ *                    may depend on who paid it); null for a Pix posted before it was kept
  */
 public record PixCounterparty(String name, String taxIdMasked, String ispb, String branch, String account,
-                              String accountType) {
+                              String accountType, String taxIdType) {
+
+    public PixCounterparty(String name, String taxIdMasked, String ispb, String branch, String account,
+                           String accountType) {
+        this(name, taxIdMasked, ispb, branch, account, accountType, null);
+    }
 
     private static final Pattern ISPB = Pattern.compile("\\d{8}");
     private static final Pattern BRANCH = Pattern.compile("\\d{4}");
@@ -57,7 +64,8 @@ public record PixCounterparty(String name, String taxIdMasked, String ispb, Stri
         if (!TAX_ID_SHAPE.matcher(doc).matches()) {
             throw invalid("counterparty tax id must be a CPF (11 digits) or CNPJ (14 characters)");
         }
-        return new PixCounterparty(name, "***" + doc.substring(doc.length() - 4), ispb, branch, account, accountType);
+        return new PixCounterparty(name, "***" + doc.substring(doc.length() - 4), ispb, branch, account, accountType,
+                doc.length() == 11 ? "CPF" : "CNPJ");
     }
 
     private static ValidationException invalid(String message) {

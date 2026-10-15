@@ -46,8 +46,16 @@ object Format {
         "PIX_RETURN_IN" -> "Devolução recebida"
         "PIX_RETURN_OUT" -> "Devolução enviada"
         "JUDICIAL_TRANSFER" -> "Transferência por ordem judicial"
+        "FEE" -> "Tarifa"
+        "FEE_REFUND" -> "Estorno de tarifa"
         else -> type
     }
+
+    /** Why the account cannot pay: the fee block frees itself with a credit (wallet-core's ADR-014), the others do not. */
+    fun blocked(blockedForFees: Boolean): String =
+        if (blockedForFees) "Sua conta tem tarifas em aberto. Ao receber um crédito, elas são cobradas e a conta volta a pagar."
+        else "Sua conta está bloqueada para pagamentos. Procure o atendimento."
+
 
     /**
      * What the customer typed as an amount, in cents: "1.234,56", "10,5" or "10". Null when it is not a

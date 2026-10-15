@@ -44,7 +44,7 @@ Aba **PORTS** do VS Code: cada serviço tem uma linha com o endereço (`https://
 | Porta | O quê |
 |---|---|
 | 4200 | Console (`demo-tenant` / `demo-secret-change-me-please`) |
-| 8086 / 8087 | M-Wall do demo-tenant / segundo-tenant |
+| 8086 / 8087 | M-Wall do demo-tenant / segundo-tenant (este só com `scripts/dev-stack.sh up --segundo-tenant`) |
 | 8025 | Mailpit: os códigos de login do app |
 | 8080 | wallet-core (`/swagger-ui.html`) |
 | 3000 / 16686 | Grafana / Jaeger |
