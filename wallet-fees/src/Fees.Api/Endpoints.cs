@@ -110,12 +110,12 @@ public sealed record FeesResponse(string Month, IReadOnlyList<UsageResponse> Usa
     public static FeesResponse From(ChargesView v) => new(v.Month,
         v.Usage.Select(u => new UsageResponse(u.Operation, u.Used, u.Free)).ToList(), Endpoints.Reais(v.PendingCents),
         v.Charges.Select(c => new ChargeResponse(c.Id, c.Operation, Endpoints.Reais(c.AmountCents), c.Description,
-            c.Status, c.SourceTransactionId, c.Reference, c.CoreTransactionId, c.LastError, c.CreatedAt,
-            c.UpdatedAt)).ToList());
+            c.Status, c.SourceTransactionId, c.Reference, c.CoreTransactionId, c.RefundTransactionId, c.LastError,
+            c.CreatedAt, c.UpdatedAt)).ToList());
 }
 
 public sealed record UsageResponse(Operation Operation, int Used, int Free);
 
 public sealed record ChargeResponse(Guid Id, string Operation, decimal Amount, string Description, ChargeStatus Status,
-    Guid? SourceTransactionId, string? Reference, Guid? FeeTransactionId, string? LastError, DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    Guid? SourceTransactionId, string? Reference, Guid? FeeTransactionId, Guid? RefundTransactionId, string? LastError,
+    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);

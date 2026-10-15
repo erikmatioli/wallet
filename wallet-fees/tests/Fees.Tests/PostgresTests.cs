@@ -117,6 +117,76 @@ public sealed class PostgresTests : IAsyncLifetime
         Assert.Equal(100, view.PendingCents);
     }
 
+    [Fact]
+    public async Task AFailedRefundRollsTheReversalBackAndItIsReadAgain()
+    {
+        var tenant = Guid.CreateVersion7();
+        var alice = Guid.CreateVersion7();
+        var pi = Guid.CreateVersion7();
+        var core = new SyncedCore();
+        core.Balances[alice] = 1_000;
+        await InChargeScopeAsync(core, (_, accounts) =>
+            accounts.OnOpenedAsync(Guid.CreateVersion7(), tenant, alice, "CPF", clock.GetUtcNow()).ContinueWith(_ => true));
+        var pix = new PostedTransaction(Guid.CreateVersion7(), tenant, Guid.CreateVersion7(), "PIX_OUT",
+            [new PostedEntry(alice, "DEBIT", 100), new PostedEntry(pi, "CREDIT", 100)], clock.GetUtcNow(), null, false,
+            null);
+        await InChargeScopeAsync(core, (charges, _) => charges.OnTransactionPostedAsync(pix).ContinueWith(_ => true));
+        var reversal = new PostedTransaction(Guid.CreateVersion7(), tenant, Guid.CreateVersion7(), "PIX_REFUND",
+            [new PostedEntry(pi, "DEBIT", 100), new PostedEntry(alice, "CREDIT", 100)], clock.GetUtcNow(),
+            pix.TransactionId, true, null);
+
+        core.Down = true;
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            InChargeScopeAsync(core, async (charges, _) =>
+            {
+                await charges.OnTransactionPostedAsync(reversal);
+                return true;
+            }));
+        core.Down = false;
+        await InChargeScopeAsync(core, (charges, _) => charges.OnTransactionPostedAsync(reversal).ContinueWith(_ => true));
+
+        var view = await InChargeScopeAsync(core, (charges, _) => charges.ViewAsync(tenant, alice));
+        var fee = Assert.Single(view.Charges);
+        Assert.Equal(ChargeStatus.REFUNDED, fee.Status);
+        Assert.NotNull(fee.RefundTransactionId);
+        Assert.Equal(0, view.Usage.Single(u => u.Operation == Operation.PIX_OUT).Used);
+        Assert.Equal(1_000, core.Balances[alice]);
+    }
+
+    [Fact]
+    public async Task TheMonthlyFeesOfAMonthAreCreatedOnceByInstancesAtOnce()
+    {
+        var tenant = Guid.CreateVersion7();
+        var alice = Guid.CreateVersion7();
+        var core = new SyncedCore();
+        await InScopeAsync(async (packages, accounts) =>
+        {
+            await accounts.OnOpenedAsync(Guid.CreateVersion7(), tenant, alice, "CPF", clock.GetUtcNow());
+            var standard = (await packages.ListAsync(tenant)).Single(p => p.Package.Code == "PF_STANDARD").Package;
+            await packages.AddScheduleAsync(tenant, standard.Id,
+                new ScheduleCommand(new DateOnly(2026, 11, 1), 990, [], "maria"));
+            await accounts.ChangePackageAsync(tenant, alice, standard.Id, "maria", "console");
+            return true;
+        });
+        await InMonthlyScopeAsync(monthly => monthly.RunAsync(tenant, "2026-10"));
+
+        clock.Now = new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.Zero);
+        var runs = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => InMonthlyScopeAsync(m => m.RunAsync())));
+
+        Assert.Equal(1, runs.Sum(r => r.Count(a => a.AccountId == alice)));
+        var view = await InChargeScopeAsync(core, (charges, _) => charges.ViewAsync(tenant, alice));
+        var fee = Assert.Single(view.Charges);
+        Assert.Equal(("MONTHLY", "2026-11", 990L), (fee.Operation, fee.Reference, fee.AmountCents));
+    }
+
+    private async Task<T> InMonthlyScopeAsync<T>(Func<MonthlyFeeService, Task<T>> work)
+    {
+        await using var session = new DbSession(dataSource);
+        var tx = new TransactionRunner(session);
+        return await work(new MonthlyFeeService(tx, new PackageRepository(session), new ScheduleRepository(session),
+            new AccountRepository(session), new ChargeRepository(session), new MonthlyRuns(session), clock));
+    }
+
     // FakeCore is for one thread; the concurrency test calls it from several.
     private sealed class SyncedCore : ICoreFees
     {
@@ -124,6 +194,11 @@ public sealed class PostgresTests : IAsyncLifetime
         private readonly Lock gate = new();
 
         public Dictionary<Guid, long> Balances => inner.Balances;
+
+        public bool Down
+        {
+            set => inner.Down = value;
+        }
         public HashSet<Guid> FeeBlocks => inner.FeeBlocks;
 
         public Task<CoreFeeResult> ChargeAsync(FeeCharge charge, CancellationToken ct = default)
@@ -141,6 +216,11 @@ public sealed class PostgresTests : IAsyncLifetime
             lock (gate) { return inner.ReleaseFeeBlocksAsync(tenantId, accountId, ct); }
         }
 
+        public Task<Guid> RefundAsync(FeeCharge charge, CancellationToken ct = default)
+        {
+            lock (gate) { return inner.RefundAsync(charge, ct); }
+        }
+
         public Task<CoreAccount?> AccountAsync(Guid tenantId, Guid accountId, CancellationToken ct = default) =>
             Task.FromResult<CoreAccount?>(null);
     }
@@ -150,7 +230,7 @@ public sealed class PostgresTests : IAsyncLifetime
     {
         Migrator.Migrate(postgres.GetConnectionString());
         await using var cmd = dataSource.CreateCommand("SELECT count(*) FROM schemaversions");
-        Assert.Equal(2L, (long)(await cmd.ExecuteScalarAsync())!);
+        Assert.Equal(3L, (long)(await cmd.ExecuteScalarAsync())!);
     }
 
     [Fact]

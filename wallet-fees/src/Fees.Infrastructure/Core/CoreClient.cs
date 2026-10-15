@@ -79,6 +79,18 @@ public sealed class CoreClient(HttpClient http, IOptions<FeesOptions> options, T
         }
     }
 
+    public async Task<Guid> RefundAsync(FeeCharge charge, CancellationToken ct = default)
+    {
+        var feeTransactionId = charge.CoreTransactionId
+                               ?? throw new InvalidOperationException($"fee {charge.Id} was not charged");
+        using var response = await SendAsync(charge.TenantId, HttpMethod.Post, $"/v1/fees/{feeTransactionId}/refunds",
+            new { description = charge.RefundDescription }, ct);
+        response.EnsureSuccessStatusCode();
+        var tx = await response.Content.ReadFromJsonAsync<TransactionItem>(ct)
+                 ?? throw new InvalidOperationException("empty answer from the core");
+        return tx.Id;
+    }
+
     public async Task EnsureFeeBlockAsync(Guid tenantId, Guid accountId, CancellationToken ct = default)
     {
         if ((await FeeBlocksAsync(tenantId, accountId, ct)).Count > 0)

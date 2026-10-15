@@ -38,6 +38,11 @@ services:
       Fees__Core__Tenants__0__ClientSecret: demo-secret-change-me-please
       Fees__Core__Tenants__1__ClientId: segundo-tenant
       Fees__Core__Tenants__1__ClientSecret: segundo-tenant-secret-please
+      # Traces and logs to wallet-core's collector, like the other products.
+      OTEL_SERVICE_NAME: wallet-fees
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=dev"
     ports:
       - "8088:8088"
 

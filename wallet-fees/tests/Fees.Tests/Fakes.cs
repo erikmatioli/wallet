@@ -15,11 +15,14 @@ internal sealed class Fixture
     public readonly HashSet<Guid> Processed = [];
     public readonly List<(Guid AccountId, string Month, Operation Operation, Guid Source)> Usage = [];
     public readonly List<FeeCharge> Charges = [];
+    public readonly HashSet<Guid> Reversed = [];
+    public readonly HashSet<string> Runs = [];
     public readonly FakeCore Core = new();
 
     public readonly PackageService PackageService;
     public readonly AccountService AccountService;
     public readonly ChargeService ChargeService;
+    public readonly MonthlyFeeService MonthlyFeeService;
 
     public Fixture()
     {
@@ -30,8 +33,10 @@ internal sealed class Fixture
         var schedules = new FakeSchedules(this);
         var processed = new FakeProcessed(this);
         AccountService = new AccountService(tx, accounts, packages, processed, PackageService, Clock);
-        ChargeService = new ChargeService(tx, accounts, schedules, new FakeUsage(this), new FakeCharges(this),
-            processed, Core, AccountService, Clock);
+        var charges = new FakeCharges(this);
+        ChargeService = new ChargeService(tx, accounts, schedules, new FakeUsage(this), charges, processed, Core,
+            AccountService, Clock);
+        MonthlyFeeService = new MonthlyFeeService(tx, packages, schedules, accounts, charges, new FakeRuns(this), Clock);
     }
 
     public Package PackageOf(string code) => Packages.Single(p => p.TenantId == Tenant && p.Code == code);
@@ -55,6 +60,9 @@ internal sealed class Fixture
 
         public Task<Package?> FindDefaultAsync(Guid tenantId, CustomerType type, CancellationToken ct = default) =>
             Task.FromResult(f.Packages.FirstOrDefault(p => p.TenantId == tenantId && p.CustomerType == type && p.IsDefault));
+
+        public Task<IReadOnlyList<Guid>> TenantsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Guid>>(f.Packages.Select(p => p.TenantId).Distinct().ToList());
 
         public Task InsertAsync(Package package, CancellationToken ct = default)
         {
@@ -100,6 +108,12 @@ internal sealed class Fixture
             return Task.CompletedTask;
         }
 
+        public Task<IReadOnlyList<Guid>> ActiveInPackageAsync(Guid tenantId, Guid packageId,
+            CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Guid>>(f.Accounts.Values
+                .Where(a => a.TenantId == tenantId && a.PackageId == packageId && a.Status == AccountStatus.ACTIVE)
+                .Select(a => a.AccountId).ToList());
+
         public Task InsertChangeAsync(PackageChange change, CancellationToken ct = default)
         {
             f.Changes.Add(change);
@@ -111,6 +125,15 @@ internal sealed class Fixture
             Task.FromResult<IReadOnlyList<PackageChange>>(f.Changes
                 .Where(c => c.TenantId == tenantId && c.AccountId == accountId)
                 .OrderByDescending(c => c.ChangedAt).ToList());
+    }
+
+    private sealed class FakeRuns(Fixture f) : IMonthlyRuns
+    {
+        public Task<string?> LastAsync(Guid tenantId, CancellationToken ct = default) =>
+            Task.FromResult(f.Runs.Where(r => r.StartsWith(tenantId + ":")).Select(r => r.Split(':')[1]).Max());
+
+        public Task<bool> MarkAsync(Guid tenantId, string month, DateTimeOffset at, CancellationToken ct = default) =>
+            Task.FromResult(f.Runs.Add($"{tenantId}:{month}"));
     }
 
     private sealed class FakeProcessed(Fixture f) : IProcessedMessages
@@ -136,7 +159,17 @@ internal sealed class FakeUsage(Fixture f) : IUsageRepository
     }
 
     public Task<int> CountAsync(Guid accountId, string month, Operation operation, CancellationToken ct = default) =>
-        Task.FromResult(f.Usage.Count(u => u.AccountId == accountId && u.Month == month && u.Operation == operation));
+        Task.FromResult(f.Usage.Count(u => u.AccountId == accountId && u.Month == month && u.Operation == operation
+                                           && !f.Reversed.Contains(u.Source)));
+
+    public Task MarkReversedAsync(Guid tenantId, Guid transactionId, DateTimeOffset at, CancellationToken ct = default)
+    {
+        f.Reversed.Add(transactionId);
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> IsReversedAsync(Guid transactionId, CancellationToken ct = default) =>
+        Task.FromResult(f.Reversed.Contains(transactionId));
 }
 
 internal sealed class FakeCharges(Fixture f) : IChargeRepository
@@ -166,6 +199,11 @@ internal sealed class FakeCharges(Fixture f) : IChargeRepository
         Task.FromResult<IReadOnlyList<FeeCharge>>(f.Charges
             .Where(c => c.TenantId == tenantId && c.AccountId == accountId).Reverse().Take(limit).ToList());
 
+    public Task<IReadOnlyList<FeeCharge>> OfSourceAsync(Guid tenantId, Guid sourceTransactionId,
+        CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<FeeCharge>>(f.Charges
+            .Where(c => c.TenantId == tenantId && c.SourceTransactionId == sourceTransactionId).ToList());
+
     public Task<IReadOnlyList<(Guid TenantId, Guid AccountId)>> AccountsWithPendingAsync(
         CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<(Guid, Guid)>>(f.Charges.Where(c => c.Status == ChargeStatus.PENDING)
@@ -181,6 +219,8 @@ internal sealed class FakeCore : ICoreFees
     public readonly HashSet<Guid> Closed = [];
     public readonly Dictionary<Guid, CoreAccount> Accounts = [];
     public readonly Dictionary<string, Guid> Charged = [];
+    public readonly Dictionary<Guid, Guid> Refunds = [];
+    public readonly Dictionary<Guid, long> AmountOf = [];
     public int BlocksPut;
     public bool Down;
 
@@ -210,7 +250,24 @@ internal sealed class FakeCore : ICoreFees
         Balances[charge.AccountId] = balance - charge.AmountCents;
         var id = Guid.CreateVersion7();
         Charged[charge.IdempotencyKey] = id;
+        AmountOf[id] = charge.AmountCents;
         return Task.FromResult(CoreFeeResult.Ok(id));
+    }
+
+    public Task<Guid> RefundAsync(FeeCharge charge, CancellationToken ct = default)
+    {
+        if (Down)
+        {
+            throw new HttpRequestException("the core is down");
+        }
+        var fee = charge.CoreTransactionId!.Value;
+        if (!Refunds.TryGetValue(fee, out var refund))
+        {
+            refund = Guid.CreateVersion7();
+            Refunds[fee] = refund;
+            Balances[charge.AccountId] = Balances.GetValueOrDefault(charge.AccountId) + AmountOf[fee];
+        }
+        return Task.FromResult(refund);
     }
 
     public Task EnsureFeeBlockAsync(Guid tenantId, Guid accountId, CancellationToken ct = default)

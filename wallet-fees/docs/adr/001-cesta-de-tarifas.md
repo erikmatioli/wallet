@@ -1,6 +1,6 @@
 # ADR-001 — Cesta de tarifas (wallet-fees)
 
-**Status:** aceita; etapas 1 (core, ADR-014), 2 (base do wallet-fees) e 3 (tarifa por transação) implementadas
+**Status:** aceita; etapas 1 a 4 implementadas (core, base, tarifa por transação, estorno e mensalidade)
 
 ## Contexto
 O tenant quer cobrar dos clientes pelos serviços da conta, com a receita indo para uma conta dele:
@@ -170,7 +170,20 @@ Escopos novos no core: **`fees:read`** e **`fees:admin`** (operador), além do `
 - **A liberação de um bloqueio `FEE_PENDING` não dispara cobrança**: é o próprio wallet-fees que libera, depois de
   cobrar tudo.
 - **Uma tarifa só é criada para conta ativa** na visão do wallet-fees; o uso da franquia é registrado mesmo assim.
-- **OpenTelemetry** ainda não: fica para a etapa 4.
+- **Estorno lido antes da transação** (a fila não garante a ordem): o estorno deixa a marca da transação
+  (`reversed_transaction`), e ela, quando chega, não entra na franquia nem gera tarifa. O estorno e a tarifação
+  travam a mesma conta, então os dois ao mesmo tempo não se perdem.
+- **A devolução da tarifa acontece dentro da leitura do estorno:** se o core falha, a transação do banco volta
+  inteira (inclusive a marca de mensagem processada) e a fila entrega o estorno de novo; o core devolve a mesma
+  `FEE_REFUND` numa repetição. Uma tarifa pendente cancelada pelo estorno libera o bloqueio de tarifa se não sobrar
+  outra.
+- **Mensalidade:** um job verifica a cada 15 minutos; cada mês roda uma vez por tenant (`monthly_run`, com o lock do
+  tenant), a partir das 00:05 de Brasília do dia 1. Os meses perdidos são cobrados na volta, pelo pacote que a conta
+  tem na hora; na primeira subida do serviço, só o mês corrente. Descrição no extrato: "Tarifa: mensalidade
+  {pacote} MM/AAAA".
+- **OpenTelemetry:** traces de ASP.NET Core, HttpClient (com a propagação para o core), Npgsql e um span por
+  mensagem da fila e por execução da mensalidade, e os logs, pelo OTLP/HTTP para o mesmo collector. As recusas do
+  domínio (404, 422) não são mais logadas como erro.
 
 ## Fora do escopo
 - Isenções e descontos por cliente, tarifas por faixa de valor, cobrança proporcional na migração de pacote.

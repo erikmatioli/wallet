@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Amazon.SQS;
 using Amazon.SQS.Model;
@@ -59,6 +60,11 @@ public sealed class CoreEventsConsumer(IAmazonSQS sqs, IServiceScopeFactory scop
     private async Task<bool> HandleAsync(Message message, CancellationToken ct)
     {
         var type = Attribute(message, "eventType");
+        using var activity = Telemetry.Source.StartActivity($"consume {type ?? "unknown"}", ActivityKind.Consumer);
+        activity?.SetTag("messaging.system", "aws_sqs");
+        activity?.SetTag("messaging.message.id", message.MessageId);
+        activity?.SetTag("wallet.event_type", type);
+        activity?.SetTag("tenant_id", Attribute(message, "tenantId"));
         try
         {
             using var body = JsonDocument.Parse(message.Body);
@@ -95,6 +101,7 @@ public sealed class CoreEventsConsumer(IAmazonSQS sqs, IServiceScopeFactory scop
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             log.LogError(ex, "core event {Type} {MessageId} failed; it will be retried", type, message.MessageId);
             return false;
         }
@@ -200,6 +207,69 @@ public sealed class PendingFeesSweep(IServiceScopeFactory scopes, ILogger<Pendin
             catch (Exception e) when (e is not OperationCanceledException)
             {
                 log.LogWarning("the sweep of pending fees failed: {Error}", e.Message);
+            }
+        }
+    }
+}
+
+// Creates the monthly fees once the month starts, and charges them (ADR-001, decision 7). Checks every quarter of an
+// hour: the month is run once per tenant, so the checks in between do nothing.
+public sealed class MonthlyFeeJob(IServiceScopeFactory scopes, ILogger<MonthlyFeeJob> log) : BackgroundService
+{
+    public static readonly TimeSpan Every = TimeSpan.FromMinutes(15);
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        do
+        {
+            try
+            {
+                await RunOnceAsync(stoppingToken);
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                log.LogWarning("the monthly fees failed, retrying later: {Error}", e.Message);
+            }
+        } while (await Delay(stoppingToken));
+    }
+
+    private static async Task<bool> Delay(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(Every, ct);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    private async Task RunOnceAsync(CancellationToken ct)
+    {
+        IReadOnlyList<(Guid TenantId, Guid AccountId)> created;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            using var activity = Telemetry.Source.StartActivity("monthly fees");
+            created = await scope.ServiceProvider.GetRequiredService<MonthlyFeeService>().RunAsync(ct);
+        }
+        if (created.Count == 0)
+        {
+            return;
+        }
+        log.LogInformation("monthly fees created for {Count} accounts", created.Count);
+        foreach (var (tenantId, accountId) in created)
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            try
+            {
+                await scope.ServiceProvider.GetRequiredService<ChargeService>().ChargePendingAsync(tenantId, accountId, ct);
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                // Left pending: the sweep tries again.
+                log.LogWarning("charging the monthly fee of account {Account} failed: {Error}", accountId, e.Message);
             }
         }
     }

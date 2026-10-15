@@ -13,7 +13,7 @@ Pacotes de tarifas por conta: mensalidade e preço por operação, com franquia 
 | Chama | o core, com as credenciais de cada tenant (`accounts:read fees:write`): cobrança, bloqueio de tarifa, contas |
 | Ouve | a fila `wallet-fees-core-events`, nos tópicos do core (`wallet-core-transaction-events`, `wallet-core-account-events`) |
 
-## O que já faz (etapas 2 e 3 da ADR-001)
+## O que já faz (etapas 2 a 4 da ADR-001)
 
 - **Pacotes:** cada tenant começa com seis (`PF_BASIC`, `PF_STANDARD`, `PF_VIP`, `PJ_BASIC`, `PJ_STANDARD`,
   `PJ_VIP`), todos com a tabela do exemplo da ADR (sem mensalidade; saque R$ 1,00; duas transferências grátis e
@@ -32,7 +32,16 @@ Pacotes de tarifas por conta: mensalidade e preço por operação, com franquia 
   bloqueio liberado e numa varredura de hora em hora; sem nenhuma pendente, o bloqueio de tarifa é liberado. Conta
   encerrada cancela as pendentes.
 
-Ainda não: o estorno da tarifa e a mensalidade (etapa 4).
+- **Estorno:** o estorno de uma transação (`reversal = true`: estorno de saque, `PIX_REFUND`) devolve a tarifa
+  dela (`FEE_REFUND` no core) se foi cobrada, ou a cancela se estava pendente, e a vaga da franquia volta. Um estorno
+  lido antes da própria transação a deixa sem tarifa. A devolução de Pix não mexe na tarifa.
+- **Mensalidade:** a partir das 00:05 do dia 1 (Brasília), cada conta ativa paga a mensalidade do seu pacote pela
+  tabela em vigor no dia 1 (`fee:monthly:{conta}:{AAAA-MM}`), cobrada como as outras tarifas. Cada mês roda uma vez
+  por tenant; os meses perdidos com o serviço fora são cobrados na volta. Na primeira subida, só o mês corrente.
+- **OpenTelemetry:** traces (requisições, mensagens da fila, chamadas ao core, Postgres) e logs para o collector do
+  core, quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definido.
+
+Falta a etapa 5: as telas do console e o extrato no app e no M-Wall.
 
 ## API
 
@@ -97,8 +106,8 @@ docker run --rm -v "$PWD:/src" -w /src -v /var/run/docker.sock:/var/run/docker.s
 | Projeto | Papel |
 |---|---|
 | `src/Fees.Domain` | Pacotes, tabelas de preço, contas e as regras, sem framework |
-| `src/Fees.Application` | Casos de uso (`PackageService`, `AccountService`, `ChargeService`) e as portas |
-| `src/Fees.Infrastructure` | Postgres (repositórios com Dapper, migrations em `Migrations/*.sql` com DbUp), o consumidor da fila, a varredura das pendentes e o cliente do core |
+| `src/Fees.Application` | Casos de uso (`PackageService`, `AccountService`, `ChargeService`, `MonthlyFeeService`) e as portas |
+| `src/Fees.Infrastructure` | Postgres (repositórios com Dapper, migrations em `Migrations/*.sql` com DbUp), o consumidor da fila, os jobs (varredura das pendentes, mensalidade) e o cliente do core |
 | `src/Fees.Api` | ASP.NET Core: a API, a validação do JWT e o tratamento de erros |
 | `tests/Fees.Tests` | Domínio, casos de uso com fakes em memória e Postgres de verdade (Testcontainers) |
 

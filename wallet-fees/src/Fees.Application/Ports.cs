@@ -19,6 +19,9 @@ public interface IPackageRepository
 
     Task<Package?> FindDefaultAsync(Guid tenantId, CustomerType type, CancellationToken ct = default);
 
+    // Every tenant the basket knows: the ones with packages.
+    Task<IReadOnlyList<Guid>> TenantsAsync(CancellationToken ct = default);
+
     Task InsertAsync(Package package, CancellationToken ct = default);
 }
 
@@ -41,6 +44,9 @@ public interface IAccountRepository
     Task<bool> InsertIfAbsentAsync(FeeAccount account, CancellationToken ct = default);
 
     Task UpdateAsync(FeeAccount account, CancellationToken ct = default);
+
+    // The active accounts of a package, for the monthly fee.
+    Task<IReadOnlyList<Guid>> ActiveInPackageAsync(Guid tenantId, Guid packageId, CancellationToken ct = default);
 
     Task InsertChangeAsync(PackageChange change, CancellationToken ct = default);
 
@@ -83,6 +89,12 @@ public interface IUsageRepository
 
     // How many transactions of the operation count against the account's quota of that month.
     Task<int> CountAsync(Guid accountId, string month, Operation operation, CancellationToken ct = default);
+
+    // The core reversed the transaction: it gives its place in the quota back, and if it was not read yet, it will
+    // take none (ADR-001, decision 6).
+    Task MarkReversedAsync(Guid tenantId, Guid transactionId, DateTimeOffset at, CancellationToken ct = default);
+
+    Task<bool> IsReversedAsync(Guid transactionId, CancellationToken ct = default);
 }
 
 public interface IChargeRepository
@@ -96,6 +108,9 @@ public interface IChargeRepository
 
     // The account's fees, the newest first.
     Task<IReadOnlyList<FeeCharge>> ListAsync(Guid tenantId, Guid accountId, int limit, CancellationToken ct = default);
+
+    // The fees of a transaction.
+    Task<IReadOnlyList<FeeCharge>> OfSourceAsync(Guid tenantId, Guid sourceTransactionId, CancellationToken ct = default);
 
     // Every account with a pending fee, for the sweep.
     Task<IReadOnlyList<(Guid TenantId, Guid AccountId)>> AccountsWithPendingAsync(CancellationToken ct = default);
@@ -114,10 +129,23 @@ public sealed record CoreFeeResult(Guid? TransactionId, string? Code)
     public static readonly CoreFeeResult Unavailable = new(null, null);
 }
 
+// The months whose monthly fees were created, per tenant.
+public interface IMonthlyRuns
+{
+    Task<string?> LastAsync(Guid tenantId, CancellationToken ct = default);
+
+    // False when the month was already run.
+    Task<bool> MarkAsync(Guid tenantId, string month, DateTimeOffset at, CancellationToken ct = default);
+}
+
 // Charging in the core (ADR-014 of the core), with the tenant's own credentials.
 public interface ICoreFees
 {
     Task<CoreFeeResult> ChargeAsync(FeeCharge charge, CancellationToken ct = default);
+
+    // Gives a charged fee back (FEE_REFUND), once whoever asks; answers the refund's transaction. Throws when the core
+    // does not do it: the reversal is read again.
+    Task<Guid> RefundAsync(FeeCharge charge, CancellationToken ct = default);
 
     // Puts the fee block (FEE_PENDING) on the account, unless it already has one.
     Task EnsureFeeBlockAsync(Guid tenantId, Guid accountId, CancellationToken ct = default);

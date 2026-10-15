@@ -18,10 +18,14 @@ public class ChargeTests
     }
 
     private PostedTransaction Tx(string type, Guid debit, Guid credit, long cents = 10_000,
-        string? counterparty = null, bool reversal = false) =>
+        string? counterparty = null, bool reversal = false, Guid? related = null) =>
         new(Guid.CreateVersion7(), f.Tenant, Guid.CreateVersion7(), type,
-            [new PostedEntry(debit, "DEBIT", cents), new PostedEntry(credit, "CREDIT", cents)], f.Clock.Now, null,
+            [new PostedEntry(debit, "DEBIT", cents), new PostedEntry(credit, "CREDIT", cents)], f.Clock.Now, related,
             reversal, counterparty);
+
+    // The reversal of a transaction, as the core posts it: the money back to the account, pointing at it.
+    private PostedTransaction Reversal(PostedTransaction of, Guid account) =>
+        Tx(of.Type == "PIX_OUT" ? "PIX_REFUND" : "DEPOSIT", pi, account, reversal: true, related: of.TransactionId);
 
     private Task PostAsync(PostedTransaction t) => f.ChargeService.OnTransactionPostedAsync(t);
 
@@ -242,5 +246,74 @@ public class ChargeTests
         Assert.Equal((1, 2), (transfers.Used, transfers.Free));
         Assert.Equal(150, view.PendingCents);
         Assert.Single(view.Charges);
+    }
+
+    [Fact]
+    public async Task AReversalGivesTheChargedFeeBackAndItsPlaceInTheQuota()
+    {
+        var alice = await OpenAsync(balanceCents: 1_000);
+        var bob = await OpenAsync();
+        var withdrawal = Tx("WITHDRAWAL", alice, pi);
+        await PostAsync(withdrawal);
+        Assert.Equal(900, f.Core.Balances[alice]);
+
+        await PostAsync(Reversal(withdrawal, alice));
+        await PostAsync(Reversal(withdrawal, alice) with { EventId = Guid.CreateVersion7() }); // read twice
+
+        var fee = ChargesOf(alice).Single();
+        Assert.Equal(ChargeStatus.REFUNDED, fee.Status);
+        Assert.Equal(f.Core.Refunds[fee.CoreTransactionId!.Value], fee.RefundTransactionId);
+        Assert.Equal(1_000, f.Core.Balances[alice]); // given back once
+        Assert.Equal("Estorno de tarifa: saque", fee.RefundDescription);
+
+        // Two free transfers, one reversed: its place returns, so the next one is still free.
+        var first = Tx("TRANSFER", alice, bob);
+        await PostAsync(first);
+        await PostAsync(Tx("TRANSFER", alice, bob));
+        await PostAsync(Reversal(first, alice));
+        await PostAsync(Tx("TRANSFER", alice, bob));
+        Assert.DoesNotContain(ChargesOf(alice), c => c.Operation == "TRANSFER_OUT");
+        await PostAsync(Tx("TRANSFER", alice, bob));
+        Assert.Single(ChargesOf(alice), c => c.Operation == "TRANSFER_OUT");
+    }
+
+    [Fact]
+    public async Task AReversalCancelsAPendingFeeAndReleasesTheFeeBlockWhenNothingIsLeft()
+    {
+        var alice = await OpenAsync();
+        var pix = Tx("PIX_OUT", alice, pi);
+        await PostAsync(pix);
+        Assert.Contains(alice, f.Core.FeeBlocks);
+
+        await PostAsync(Reversal(pix, alice));
+
+        Assert.Equal(ChargeStatus.CANCELLED, ChargesOf(alice).Single().Status);
+        Assert.Equal("REVERSED", ChargesOf(alice).Single().LastError);
+        Assert.DoesNotContain(alice, f.Core.FeeBlocks);
+    }
+
+    [Fact]
+    public async Task AReversalReadBeforeItsTransactionLeavesItWithoutFee()
+    {
+        var alice = await OpenAsync(balanceCents: 1_000);
+        var pix = Tx("PIX_OUT", alice, pi);
+
+        await PostAsync(Reversal(pix, alice));
+        await PostAsync(pix);
+
+        Assert.Empty(ChargesOf(alice));
+        Assert.Equal(1_000, f.Core.Balances[alice]);
+    }
+
+    [Fact]
+    public async Task APixReturnDoesNotTouchTheFee()
+    {
+        var alice = await OpenAsync(balanceCents: 1_000);
+        var pix = Tx("PIX_OUT", alice, pi);
+        await PostAsync(pix);
+
+        await PostAsync(Tx("PIX_RETURN_IN", pi, alice, related: pix.TransactionId));
+
+        Assert.Equal(ChargeStatus.CHARGED, ChargesOf(alice).Single().Status);
     }
 }

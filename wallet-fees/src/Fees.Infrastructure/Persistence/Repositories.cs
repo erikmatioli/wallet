@@ -28,6 +28,11 @@ public sealed class PackageRepository(DbSession db) : IPackageRepository
             $"SELECT {Columns} FROM package WHERE tenant_id = @tenantId AND customer_type = @type AND is_default",
             new { tenantId, type = type.ToString() }, db.Transaction, cancellationToken: ct)))?.ToDomain();
 
+    public async Task<IReadOnlyList<Guid>> TenantsAsync(CancellationToken ct = default) =>
+        (await db.Connection.QueryAsync<Guid>(new CommandDefinition(
+            "SELECT DISTINCT tenant_id FROM package ORDER BY tenant_id", null, db.Transaction,
+            cancellationToken: ct))).ToList();
+
     public Task InsertAsync(Package p, CancellationToken ct = default) =>
         db.Connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO package (id, tenant_id, code, name, customer_type, is_default, created_at)
@@ -122,6 +127,14 @@ public sealed class AccountRepository(DbSession db) : IAccountRepository
              WHERE tenant_id = @TenantId AND account_id = @AccountId
             """, Params(a), db.Transaction, cancellationToken: ct));
 
+    public async Task<IReadOnlyList<Guid>> ActiveInPackageAsync(Guid tenantId, Guid packageId,
+        CancellationToken ct = default) =>
+        (await db.Connection.QueryAsync<Guid>(new CommandDefinition("""
+            SELECT account_id FROM fee_account
+             WHERE tenant_id = @tenantId AND package_id = @packageId AND status = 'ACTIVE'
+             ORDER BY account_id
+            """, new { tenantId, packageId }, db.Transaction, cancellationToken: ct))).ToList();
+
     public Task InsertChangeAsync(PackageChange c, CancellationToken ct = default) =>
         db.Connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO package_change (tenant_id, account_id, from_package_id, to_package_id, operator, client_id, changed_at)
@@ -184,27 +197,46 @@ public sealed class UsageRepository(DbSession db) : IUsageRepository
             SELECT count(*)::int FROM fee_usage
              WHERE account_id = @accountId AND month = @month AND operation = @operation AND NOT reversed
             """, new { accountId, month, operation = operation.ToString() }, db.Transaction, cancellationToken: ct));
+
+    public async Task MarkReversedAsync(Guid tenantId, Guid transactionId, DateTimeOffset at,
+        CancellationToken ct = default)
+    {
+        await db.Connection.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO reversed_transaction (transaction_id, tenant_id, reversed_at)
+            VALUES (@transactionId, @tenantId, @at) ON CONFLICT DO NOTHING
+            """, new { transactionId, tenantId, at }, db.Transaction, cancellationToken: ct));
+        await db.Connection.ExecuteAsync(new CommandDefinition(
+            "UPDATE fee_usage SET reversed = true WHERE tenant_id = @tenantId AND source_transaction_id = @transactionId",
+            new { tenantId, transactionId }, db.Transaction, cancellationToken: ct));
+    }
+
+    public Task<bool> IsReversedAsync(Guid transactionId, CancellationToken ct = default) =>
+        db.Connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+            "SELECT EXISTS (SELECT 1 FROM reversed_transaction WHERE transaction_id = @transactionId)",
+            new { transactionId }, db.Transaction, cancellationToken: ct));
 }
 
 public sealed class ChargeRepository(DbSession db) : IChargeRepository
 {
     private const string Columns = """
         id, tenant_id, account_id, operation, source_transaction_id, reference, amount_cents, description,
-        idempotency_key, status, core_transaction_id, attempts, last_error, created_at, updated_at
+        idempotency_key, status, core_transaction_id, attempts, last_error, created_at, updated_at,
+        refund_transaction_id
         """;
 
     public Task InsertAsync(FeeCharge c, CancellationToken ct = default) =>
         db.Connection.ExecuteAsync(new CommandDefinition($"""
             INSERT INTO fee_charge ({Columns})
             VALUES (@Id, @TenantId, @AccountId, @Operation, @SourceTransactionId, @Reference, @AmountCents, @Description,
-                    @IdempotencyKey, @Status, @CoreTransactionId, @Attempts, @LastError, @CreatedAt, @UpdatedAt)
+                    @IdempotencyKey, @Status, @CoreTransactionId, @Attempts, @LastError, @CreatedAt, @UpdatedAt,
+                    @RefundTransactionId)
             ON CONFLICT (idempotency_key) DO NOTHING
             """, Params(c), db.Transaction, cancellationToken: ct));
 
     public Task UpdateAsync(FeeCharge c, CancellationToken ct = default) =>
         db.Connection.ExecuteAsync(new CommandDefinition("""
             UPDATE fee_charge SET status = @Status, core_transaction_id = @CoreTransactionId, attempts = @Attempts,
-                   last_error = @LastError, updated_at = @UpdatedAt
+                   last_error = @LastError, updated_at = @UpdatedAt, refund_transaction_id = @RefundTransactionId
              WHERE tenant_id = @TenantId AND id = @Id
             """, Params(c), db.Transaction, cancellationToken: ct));
 
@@ -225,6 +257,15 @@ public sealed class ChargeRepository(DbSession db) : IChargeRepository
             """, new { tenantId, accountId, limit }, db.Transaction, cancellationToken: ct)))
         .Select(r => r.ToDomain()).ToList();
 
+    public async Task<IReadOnlyList<FeeCharge>> OfSourceAsync(Guid tenantId, Guid sourceTransactionId,
+        CancellationToken ct = default) =>
+        (await db.Connection.QueryAsync<ChargeRow>(new CommandDefinition($"""
+            SELECT {Columns} FROM fee_charge
+             WHERE tenant_id = @tenantId AND source_transaction_id = @sourceTransactionId
+             ORDER BY created_at, id
+            """, new { tenantId, sourceTransactionId }, db.Transaction, cancellationToken: ct)))
+        .Select(r => r.ToDomain()).ToList();
+
     public async Task<IReadOnlyList<(Guid TenantId, Guid AccountId)>> AccountsWithPendingAsync(
         CancellationToken ct = default) =>
         (await db.Connection.QueryAsync<(Guid, Guid)>(new CommandDefinition(
@@ -235,16 +276,29 @@ public sealed class ChargeRepository(DbSession db) : IChargeRepository
     {
         c.Id, c.TenantId, c.AccountId, c.Operation, c.SourceTransactionId, c.Reference, c.AmountCents, c.Description,
         c.IdempotencyKey, Status = c.Status.ToString(), c.CoreTransactionId, c.Attempts, c.LastError, c.CreatedAt,
-        c.UpdatedAt,
+        c.UpdatedAt, c.RefundTransactionId,
     };
 
     private sealed record ChargeRow(Guid id, Guid tenant_id, Guid account_id, string operation,
         Guid? source_transaction_id, string? reference, long amount_cents, string description, string idempotency_key,
         string status, Guid? core_transaction_id, int attempts, string? last_error, DateTime created_at,
-        DateTime updated_at)
+        DateTime updated_at, Guid? refund_transaction_id)
     {
         public FeeCharge ToDomain() => new(id, tenant_id, account_id, operation, source_transaction_id, reference,
             amount_cents, description, idempotency_key, Enum.Parse<ChargeStatus>(status), core_transaction_id, attempts,
-            last_error, PackageRepository.Utc(created_at), PackageRepository.Utc(updated_at));
+            last_error, PackageRepository.Utc(created_at), PackageRepository.Utc(updated_at), refund_transaction_id);
     }
+}
+
+public sealed class MonthlyRuns(DbSession db) : IMonthlyRuns
+{
+    public Task<string?> LastAsync(Guid tenantId, CancellationToken ct = default) =>
+        db.Connection.ExecuteScalarAsync<string?>(new CommandDefinition(
+            "SELECT max(month) FROM monthly_run WHERE tenant_id = @tenantId", new { tenantId }, db.Transaction,
+            cancellationToken: ct));
+
+    public async Task<bool> MarkAsync(Guid tenantId, string month, DateTimeOffset at, CancellationToken ct = default) =>
+        await db.Connection.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO monthly_run (tenant_id, month, ran_at) VALUES (@tenantId, @month, @at) ON CONFLICT DO NOTHING
+            """, new { tenantId, month, at }, db.Transaction, cancellationToken: ct)) == 1;
 }

@@ -1,4 +1,5 @@
 using Fees.Domain;
+
 namespace Fees.Application;
 
 // The use of the free quota of one operation in a month.
@@ -8,7 +9,8 @@ public sealed record UsageView(Operation Operation, int Used, int Free);
 public sealed record ChargesView(string Month, IReadOnlyList<UsageView> Usage, IReadOnlyList<FeeCharge> Charges,
     long PendingCents);
 
-// From a transaction to a fee, and from a fee to the core (ADR-001, decisions 4 and 5).
+// From a transaction to a fee, from a fee to the core, and back when the transaction is reversed (ADR-001,
+// decisions 4 to 6).
 public sealed class ChargeService(ITransactionRunner tx, IAccountRepository accounts, IScheduleRepository schedules,
     IUsageRepository usage, IChargeRepository charges, IProcessedMessages processed, ICoreFees core,
     AccountService accountService, TimeProvider clock)
@@ -17,25 +19,33 @@ public sealed class ChargeService(ITransactionRunner tx, IAccountRepository acco
 
     // A transaction the core posted (wallet.transaction.posted.v1): counts it against the quota, creates its fee when
     // the quota is used up, then charges the pending fees of the account that pays and of every account it credited.
-    // Charging runs again on a repeated delivery: it is idempotent, and it is how a fee left pending by a failure
-    // after the first commit is not forgotten.
+    // A reversal gives the fee of the transaction it undoes back instead. Charging runs again on a repeated delivery:
+    // it is idempotent, and it is how a fee left pending by a failure after the first commit is not forgotten.
     public async Task OnTransactionPostedAsync(PostedTransaction t, CancellationToken ct = default)
     {
-        var (payer, credited) = await tx.InTransactionAsync(async () =>
+        var (payer, credited, settled) = await tx.InTransactionAsync(async () =>
         {
             var customers = await CustomersAsync(t, ct);
             bool IsCustomer(Guid id) => customers.ContainsKey(id);
             var chargeable = Classification.Of(t, IsCustomer);
             var credited = Classification.Credited(t, IsCustomer).ToList();
-            if (await processed.TryMarkAsync(t.EventId, ct) && chargeable is not null)
+            IReadOnlyList<Guid> settled = [];
+            if (await processed.TryMarkAsync(t.EventId, ct))
             {
-                await PriceAsync(t, chargeable, customers[chargeable.AccountId], ct);
+                if (t is { Reversal: true, RelatedTransactionId: { } undone })
+                {
+                    settled = await ReverseAsync(t.TenantId, undone, customers.Keys, ct);
+                }
+                else if (chargeable is not null)
+                {
+                    await PriceAsync(t, chargeable, customers[chargeable.AccountId], ct);
+                }
             }
-            return (chargeable?.AccountId, credited);
+            return (chargeable?.AccountId, credited, settled);
         }, ct);
-        foreach (var accountId in new[] { payer }.OfType<Guid>().Concat(credited).Distinct())
+        foreach (var accountId in new[] { payer }.OfType<Guid>().Concat(credited).Concat(settled).Distinct())
         {
-            await ChargePendingAsync(t.TenantId, accountId, ct);
+            await ChargePendingAsync(t.TenantId, accountId, settled.Contains(accountId), ct);
         }
     }
 
@@ -48,12 +58,20 @@ public sealed class ChargeService(ITransactionRunner tx, IAccountRepository acco
     // (ADR-001, decision 5). No balance puts the fee block on the account; nothing left pending releases it. Answers
     // why the rest waits, or null when nothing does.
     public Task<string?> ChargePendingAsync(Guid tenantId, Guid accountId, CancellationToken ct = default) =>
+        ChargePendingAsync(tenantId, accountId, false, ct);
+
+    // `settle`: a fee of the account was just cancelled, so the fee block may be left with nothing to wait for.
+    private Task<string?> ChargePendingAsync(Guid tenantId, Guid accountId, bool settle, CancellationToken ct) =>
         tx.InTransactionAsync(async () =>
         {
             await usage.LockAccountAsync(accountId, ct);
             var pending = await charges.PendingAsync(tenantId, accountId, ct);
             if (pending.Count == 0)
             {
+                if (settle)
+                {
+                    await core.ReleaseFeeBlocksAsync(tenantId, accountId, ct);
+                }
                 return (string?)null;
             }
             var left = pending.Count;
@@ -124,9 +142,44 @@ public sealed class ChargeService(ITransactionRunner tx, IAccountRepository acco
                 pending.Sum(c => c.AmountCents));
         }, ct);
 
+    // The reversal of a transaction (ADR-001, decision 6): its fee is given back if it was charged, cancelled if it
+    // was not yet, and its place in the quota returns. The accounts are locked first, as the transaction's own
+    // pricing does, so a reversal and its transaction read at the same time do not miss each other. Answers the
+    // accounts whose pending fee was cancelled.
+    private async Task<IReadOnlyList<Guid>> ReverseAsync(Guid tenantId, Guid undone, IEnumerable<Guid> customers,
+        CancellationToken ct)
+    {
+        foreach (var accountId in customers.Order())
+        {
+            await usage.LockAccountAsync(accountId, ct);
+        }
+        var now = clock.GetUtcNow();
+        await usage.MarkReversedAsync(tenantId, undone, now, ct);
+        var settled = new List<Guid>();
+        foreach (var charge in await charges.OfSourceAsync(tenantId, undone, ct))
+        {
+            switch (charge.Status)
+            {
+                case ChargeStatus.CHARGED:
+                    // A failure throws: the reversal is read again, and the core gives the same refund back.
+                    await charges.UpdateAsync(charge.Refunded(await core.RefundAsync(charge, ct), now), ct);
+                    break;
+                case ChargeStatus.PENDING:
+                    await charges.UpdateAsync(charge.Cancelled("REVERSED", now), ct);
+                    settled.Add(charge.AccountId);
+                    break;
+            }
+        }
+        return settled;
+    }
+
     private async Task PriceAsync(PostedTransaction t, Chargeable chargeable, FeeAccount account, CancellationToken ct)
     {
         await usage.LockAccountAsync(account.AccountId, ct);
+        if (await usage.IsReversedAsync(t.TransactionId, ct))
+        {
+            return; // its reversal was read first: it never counts
+        }
         var month = Months.Of(t.OccurredAt);
         if (!await usage.RecordAsync(t.TenantId, account.AccountId, month, chargeable.Operation, t.TransactionId,
                 t.OccurredAt, ct))

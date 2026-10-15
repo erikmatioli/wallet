@@ -11,6 +11,9 @@ using Fees.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<FeesOptions>(builder.Configuration.GetSection("Fees"));
@@ -28,9 +31,11 @@ builder.Services.AddScoped<IAccountRepository, AccountRepository>();
 builder.Services.AddScoped<IProcessedMessages, ProcessedMessages>();
 builder.Services.AddScoped<IUsageRepository, UsageRepository>();
 builder.Services.AddScoped<IChargeRepository, ChargeRepository>();
+builder.Services.AddScoped<IMonthlyRuns, MonthlyRuns>();
 builder.Services.AddScoped<PackageService>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<ChargeService>();
+builder.Services.AddScoped<MonthlyFeeService>();
 
 // The core: its accounts (start-up sync), the charging of fees and its events (SQS).
 builder.Services.AddSingleton<CoreCache>();
@@ -56,6 +61,25 @@ builder.Services.AddSingleton<IAmazonSQS>(sp =>
 builder.Services.AddHostedService<CoreEventsConsumer>();
 builder.Services.AddHostedService<AccountSync>();
 builder.Services.AddHostedService<PendingFeesSweep>();
+builder.Services.AddHostedService<MonthlyFeeJob>();
+
+// OpenTelemetry, to the same collector as the other products (OTLP over HTTP, from the OTEL_* variables). Off when
+// no endpoint is set: the tests and a service run by hand do not export.
+if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
+{
+    builder.Services.AddOpenTelemetry()
+        .ConfigureResource(r => r.AddService("wallet-fees"))
+        .WithTracing(t => t
+            .AddAspNetCoreInstrumentation(o => o.Filter = http => http.Request.Path != "/health")
+            .AddHttpClientInstrumentation()
+            .AddSource(Telemetry.SourceName, "Npgsql")
+            .AddOtlpExporter());
+    builder.Logging.AddOpenTelemetry(o =>
+    {
+        o.IncludeScopes = true;
+        o.AddOtlpExporter();
+    });
+}
 
 builder.Services.AddCoreJwt();
 builder.Services.AddProblemDetails();
@@ -64,8 +88,12 @@ var app = builder.Build();
 
 Migrator.Migrate(app.Services.GetRequiredService<IOptions<FeesOptions>>().Value.Db.OwnerConnection);
 
-// The domain's refusals become problem+json with a stable code, like the core's answers.
-app.UseExceptionHandler(errors => errors.Run(async http =>
+// The domain's refusals become problem+json with a stable code, like the core's answers. They are answers, not
+// failures: only the unexpected ones are logged as errors.
+app.UseExceptionHandler(new ExceptionHandlerOptions
+{
+    SuppressDiagnosticsCallback = c => c.Exception is FeeRuleException or BadHttpRequestException,
+    ExceptionHandler = async http =>
 {
     var error = http.Features.Get<IExceptionHandlerFeature>()?.Error;
     var (status, code) = error switch
@@ -83,7 +111,8 @@ app.UseExceptionHandler(errors => errors.Run(async http =>
         status,
         code,
     }, contentType: "application/problem+json", statusCode: status).ExecuteAsync(http);
-}));
+},
+});
 app.UseAuthentication();
 app.UseAuthorization();
 

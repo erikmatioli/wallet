@@ -68,11 +68,15 @@ public enum ChargeStatus
     REFUNDED,
 }
 
-// A fee to charge, from a transaction (or, in step 4, a month). Charged whole or not at all, by the core.
+// A fee to charge, from a transaction or a month. Charged whole or not at all, by the core.
 public sealed record FeeCharge(Guid Id, Guid TenantId, Guid AccountId, string Operation, Guid? SourceTransactionId,
     string? Reference, long AmountCents, string Description, string IdempotencyKey, ChargeStatus Status,
-    Guid? CoreTransactionId, int Attempts, string? LastError, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt)
+    Guid? CoreTransactionId, int Attempts, string? LastError, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
+    Guid? RefundTransactionId = null)
 {
+    // The operation of the monthly fee, beside the catalogue's (ADR-001, decision 7).
+    public const string MonthlyOperation = "MONTHLY";
+
     public static FeeCharge ForTransaction(Guid tenantId, Guid accountId, Operation operation, Guid sourceTransactionId,
         long amountCents, DateTimeOffset now) =>
         new(Guid.CreateVersion7(), tenantId, accountId, operation.ToString(), sourceTransactionId, null, amountCents,
@@ -80,6 +84,19 @@ public sealed record FeeCharge(Guid Id, Guid TenantId, Guid AccountId, string Op
             // The core's idempotency key: the same fee is never charged twice, whatever is retried.
             $"fee:{sourceTransactionId}:{operation}",
             ChargeStatus.PENDING, null, 0, null, now, now);
+
+    // The monthly fee of a month: one per account and month, whoever creates it.
+    public static FeeCharge Monthly(Guid tenantId, Guid accountId, string month, string packageName, long amountCents,
+        DateTimeOffset now) =>
+        new(Guid.CreateVersion7(), tenantId, accountId, MonthlyOperation, null, month, amountCents,
+            $"Tarifa: mensalidade {packageName} {month[5..]}/{month[..4]}", $"fee:monthly:{accountId}:{month}",
+            ChargeStatus.PENDING, null, 0, null, now, now);
+
+    // What the customer reads on the refund: "Tarifa: saque" -> "Estorno de tarifa: saque".
+    public string RefundDescription =>
+        Description.StartsWith("Tarifa", StringComparison.Ordinal)
+            ? "Estorno de tarifa" + Description["Tarifa".Length..]
+            : "Estorno de " + Description;
 
     public FeeCharge Charged(Guid coreTransactionId, DateTimeOffset now) =>
         this with
@@ -93,10 +110,33 @@ public sealed record FeeCharge(Guid Id, Guid TenantId, Guid AccountId, string Op
 
     public FeeCharge Cancelled(string reason, DateTimeOffset now) =>
         this with { Status = ChargeStatus.CANCELLED, LastError = reason, UpdatedAt = now };
+
+    public FeeCharge Refunded(Guid refundTransactionId, DateTimeOffset now) =>
+        this with { Status = ChargeStatus.REFUNDED, RefundTransactionId = refundTransactionId, UpdatedAt = now };
 }
 
 public static class Months
 {
     // The month of a free quota: Brasília's, as "2026-10".
     public static string Of(DateTimeOffset instant) => Brasilia.DayOf(instant).ToString("yyyy-MM");
+
+    public static DateOnly FirstDay(string month) =>
+        DateOnly.ParseExact(month + "-01", "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+    public static string After(string month) => FirstDay(month).AddMonths(1).ToString("yyyy-MM");
+
+    // The months after `last` up to `current`; just `current` when nothing ran before.
+    public static IReadOnlyList<string> Since(string? last, string current)
+    {
+        if (last is null)
+        {
+            return [current];
+        }
+        var months = new List<string>();
+        for (var m = After(last); string.CompareOrdinal(m, current) <= 0; m = After(m))
+        {
+            months.Add(m);
+        }
+        return months;
+    }
 }
