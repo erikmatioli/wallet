@@ -23,10 +23,15 @@ public interface QueryAccountUseCase {
      * @param activeBlocks  the account's active blocks (ADR-013), newest first
      */
     record AccountDetail(Account account, String customerName, String documentMasked, String customerEmail,
-                         List<AccountBlock> activeBlocks) {
+                         List<AccountBlock> activeBlocks, String documentType) {
 
         public AccountDetail {
             activeBlocks = activeBlocks == null ? List.of() : List.copyOf(activeBlocks);
+        }
+
+        public AccountDetail(Account account, String customerName, String documentMasked, String customerEmail,
+                             List<AccountBlock> activeBlocks) {
+            this(account, customerName, documentMasked, customerEmail, activeBlocks, null);
         }
 
         public AccountDetail(Account account, String customerName, String documentMasked, String customerEmail) {

@@ -155,7 +155,8 @@ public final class ApiModels {
             @Schema(description = "Quando a conta foi encerrada; ausente enquanto ativa") Instant closedAt,
             @Schema(description = "Se a conta pode receber agora (sem bloqueio administrativo)") boolean canReceive,
             @Schema(description = "Se a conta pode pagar agora (sem bloqueio)") boolean canPay,
-            @Schema(description = "Bloqueios ativos, mais novos primeiro") List<AccountControlModels.BlockResponse> blocks) {
+            @Schema(description = "Bloqueios ativos, mais novos primeiro") List<AccountControlModels.BlockResponse> blocks,
+            @Schema(description = "CPF ou CNPJ: só o tipo do documento do titular", example = "CPF") String documentType) {
 
         static AccountDetailResponse from(QueryAccountUseCase.AccountDetail d) {
             Account a = d.account();
@@ -165,7 +166,8 @@ public final class ApiModels {
                     a.balance().toDecimal(), Money.CURRENCY, d.customerName(), d.documentMasked(),
                     a.customerId() == null ? null : a.customerId().value(), d.customerEmail(), a.closedAt(),
                     a.isActive() && a.policy().canReceive(), a.isActive() && a.policy().canPay(),
-                    d.activeBlocks().stream().map(AccountControlModels.BlockResponse::from).toList());
+                    d.activeBlocks().stream().map(AccountControlModels.BlockResponse::from).toList(),
+                    d.documentType());
         }
     }
 
@@ -353,13 +355,14 @@ public final class ApiModels {
             @Schema(description = "Moeda", example = "BRL") String currency,
             @Schema(description = "Data de criação", example = "2026-10-01T10:00:00Z") Instant createdAt,
             @Schema(description = "Se a conta pode receber agora") boolean canReceive,
-            @Schema(description = "Se a conta pode pagar agora") boolean canPay) {
+            @Schema(description = "Se a conta pode pagar agora") boolean canPay,
+            @Schema(description = "CPF ou CNPJ: só o tipo do documento do titular", example = "CPF") String documentType) {
 
         static AccountListItemResponse from(ListAccountsUseCase.Item i) {
             boolean active = "ACTIVE".equals(i.status());
             return new AccountListItemResponse(i.accountId().value(), i.customerName(), i.documentMasked(),
                     i.accountFormatted(), i.accountType(), i.status(), i.balance().toDecimal(), i.currency(),
-                    i.createdAt(), active && i.canReceive(), active && i.canPay());
+                    i.createdAt(), active && i.canReceive(), active && i.canPay(), i.documentType());
         }
     }
 

@@ -28,8 +28,17 @@ public interface AccountRepository {
     /** Same lookup as {@link #findByNumber}, joined with the owning customer. */
     Optional<AccountHolder> findHolderByNumber(TenantId tenantId, String branch, String number, String checkDigit);
 
-    /** Read-model row for the accounts directory: an Account joined with its customer's display name. */
-    record AccountDirectoryItem(Account account, String customerName, String documentMasked, String customerEmail) {
+    /**
+     * Read-model row for the accounts directory: an Account joined with its customer's display name.
+     *
+     * @param documentType CPF or CNPJ: the type only, never the document (wallet-fees prices by it, ADR-014)
+     */
+    record AccountDirectoryItem(Account account, String customerName, String documentMasked, String customerEmail,
+                                String documentType) {
+
+        public AccountDirectoryItem(Account account, String customerName, String documentMasked, String customerEmail) {
+            this(account, customerName, documentMasked, customerEmail, null);
+        }
 
         public AccountDirectoryItem(Account account, String customerName, String documentMasked) {
             this(account, customerName, documentMasked, null);

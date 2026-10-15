@@ -57,7 +57,7 @@ public final class QueryAccountService implements QueryAccountUseCase {
         return tx.readOnly(tenantId, () -> accounts.findByIds(tenantId, Set.of(accountId)).stream()
                 .findFirst()
                 .map(item -> new AccountDetail(item.account(), item.customerName(), item.documentMasked(),
-                        item.customerEmail(), blocks.findByAccount(tenantId, accountId, true)))
+                        item.customerEmail(), blocks.findByAccount(tenantId, accountId, true), item.documentType()))
                 .orElseThrow(() -> new NotFoundException("ACCOUNT_NOT_FOUND", "account not found")));
     }
 

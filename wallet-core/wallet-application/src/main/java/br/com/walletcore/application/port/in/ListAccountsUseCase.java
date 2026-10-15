@@ -15,7 +15,7 @@ public interface ListAccountsUseCase {
     /** {@code canReceive} and {@code canPay}: what the account's active blocks let it do (ADR-013). */
     record Item(AccountId accountId, String customerName, String documentMasked, String accountFormatted,
                String accountType, String status, Money balance, String currency, Instant createdAt,
-               boolean canReceive, boolean canPay) {
+               boolean canReceive, boolean canPay, String documentType) {
     }
 
     /** {@code nextCursor} is null when this was the last page. */
@@ -23,8 +23,12 @@ public interface ListAccountsUseCase {
     }
 
     static Item toItem(Account account, String customerName, String documentMasked) {
+        return toItem(account, customerName, documentMasked, null);
+    }
+
+    static Item toItem(Account account, String customerName, String documentMasked, String documentType) {
         return new Item(account.id(), customerName, documentMasked, account.number().formatted(),
                 account.number().type().bcbCode(), account.status().name(), account.balance(), Money.CURRENCY,
-                account.createdAt(), account.policy().canReceive(), account.policy().canPay());
+                account.createdAt(), account.policy().canReceive(), account.policy().canPay(), documentType);
     }
 }
