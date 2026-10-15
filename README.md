@@ -15,12 +15,12 @@ próprios, e eles só conversam pelas APIs públicas e pelo barramento.
 | [`wallet-otp`](wallet-otp/) | Códigos de uso único por e-mail: cadastro e login do app, aprovações no futuro | Kotlin, Spring Boot 4, Maven | 8085 (Mailpit 8025) |
 | [`wallet-fees`](wallet-fees/) | **Cesta de tarifas**: pacotes PF e PJ, mensalidade e preço por operação com franquia, cobrados para a conta de receitas do tenant | C#, .NET 10, ASP.NET Core | 8088 |
 | [`wallet-console`](wallet-console/) | Tela web **do operador** da fintech | TypeScript, Angular 21 | 4200 |
-| [`wallet-app`](wallet-app/) | App desktop **do cliente final** e o seu backend (`app-api`) | Kotlin, Compose Desktop, Spring Boot 4, Gradle | 8083 / 8084 |
-| [`wallet-mobile`](wallet-mobile/) | **M-Wall**, o app do cliente final para celular (PWA), sobre o mesmo `app-api` | TypeScript, Angular 21, PWA | 8086 / 8087 |
+| [`wallet-app`](wallet-app/) | App desktop **do cliente final** e o seu backend (`app-api`) | Kotlin, Compose Desktop, Spring Boot 4, Gradle | 8083 (8084 opcional) |
+| [`wallet-mobile`](wallet-mobile/) | **M-Wall**, o app do cliente final para celular (PWA), sobre o mesmo `app-api` | TypeScript, Angular 21, PWA | 8086 (8087 opcional) |
 
 Quem chama quem:
 
-- **operador** → `wallet-console` → `wallet-core` e `wallet-scheduler`
+- **operador** → `wallet-console` → `wallet-core`, `wallet-scheduler` e `wallet-fees`
 - **cliente** → app desktop ou M-Wall (PWA) → `app-api` → `wallet-core`, `wallet-pix`, `wallet-scheduler`
   e `wallet-otp`
 - `wallet-pix` → `wallet-core` (débitos e créditos), e conversa com o SPI por filas (SNS/SQS)
@@ -44,18 +44,28 @@ cd ../wallet-pix     && docker compose up -d --build   # Pix: LocalStack, pix-se
 cd ../wallet-scheduler && docker compose up -d --build # agendamentos
 cd ../wallet-otp     && docker compose up -d --build   # códigos por e-mail e o Mailpit
 cd ../wallet-fees    && docker compose up -d --build   # cesta de tarifas (8088)
-cd ../wallet-app     && docker compose up -d --build   # app-api do demo-tenant (8083) e do segundo-tenant (8084)
-cd ../wallet-mobile  && docker compose up -d --build   # M-Wall do demo-tenant (8086) e do segundo-tenant (8087)
+cd ../wallet-app     && docker compose up -d --build   # app-api do demo-tenant (8083)
+cd ../wallet-mobile  && docker compose up -d --build   # M-Wall do demo-tenant (8086)
 cd ../wallet-console && npm ci && npm start            # console em http://localhost:4200
-cd ../wallet-app     && ./gradlew :app-desktop:run     # app do cliente
 ```
+
+Só quando precisar (cada um ocupa memória que faz falta numa máquina com tudo no ar):
+
+```bash
+cd wallet-app    && ./gradlew :app-desktop:run                            # app desktop do cliente
+cd wallet-app    && docker compose --profile segundo-tenant up -d --build # app-api do segundo-tenant (8084)
+cd wallet-mobile && docker compose --profile segundo-tenant up -d --build # M-Wall do segundo-tenant (8087)
+```
+
+O segundo-tenant serve para testar o isolamento entre tenants. `scripts/dev-stack.sh up` sobe a stack na ordem e
+espera cada serviço responder; `scripts/dev-stack.sh up --segundo-tenant` inclui o segundo-tenant.
 
 | O quê | Endereço | Acesso de desenvolvimento |
 |---|---|---|
 | wallet-core | http://localhost:8080 | `demo-tenant` / `demo-secret-change-me-please` e `segundo-tenant` / `segundo-tenant-secret-please` (perfil `dev`) |
 | Console | http://localhost:4200 | as credenciais do tenant |
-| App do cliente | janela desktop | CPF + código que chega por e-mail |
-| M-Wall (PWA) | http://localhost:8086 e http://localhost:8087 | CPF + código que chega por e-mail |
+| App do cliente | janela desktop (só com `./gradlew :app-desktop:run`) | CPF + código que chega por e-mail |
+| M-Wall (PWA) | http://localhost:8086 (e 8087, com o segundo-tenant) | CPF + código que chega por e-mail |
 | Mailpit | http://localhost:8025 | os e-mails com os códigos |
 | Grafana / Jaeger / Prometheus | http://localhost:3000 / 16686 / 9090 | — |
 

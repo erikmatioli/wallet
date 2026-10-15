@@ -10,7 +10,8 @@ backend, o `app-api`:
 - **Pix** para outra instituição e **transferência** entre contas, com confirmação e comprovante;
 - **agendamentos**: lista, detalhe, cancelamento e novo agendamento (transferência ou Pix);
 - **conta bloqueada** (ADR-013 do wallet-core): o início mostra o aviso e só deixa o extrato; uma conta
-  **encerrada** não entra (o login é recusado depois do código).
+  **encerrada** não entra (o login é recusado depois do código). Com só o bloqueio de tarifa (ADR-001 do
+  wallet-fees), o aviso diz que o próximo crédito paga as tarifas e libera a conta.
 
 Decisões: [ADR-001](docs/adr/001-pwa-do-cliente.md).
 
@@ -47,13 +48,14 @@ abra o DevTools e ligue a emulação de dispositivo.
 ### Pela imagem Docker
 
 ```bash
-docker compose up -d --build
+docker compose up -d --build                           # demo-tenant
+docker compose --profile segundo-tenant up -d --build  # e o segundo-tenant (opcional)
 ```
 
 | Endereço | Tenant | `app-api` |
 |---|---|---|
 | http://localhost:8086 | `demo-tenant` | `app-api:8083` |
-| http://localhost:8087 | `segundo-tenant` | `app-api-segundo:8083` |
+| http://localhost:8087 | `segundo-tenant` (só com o perfil) | `app-api-segundo:8083`, que também só sobe com o perfil no `wallet-app` |
 
 A mesma imagem serve os dois: a variável `APP_API_UPSTREAM` diz para qual `app-api` o nginx encaminha
 `/app/v1/**`.

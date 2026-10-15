@@ -199,6 +199,7 @@ scripts/dev-stack.sh console     # Ctrl+B e depois D para sair deixando rodando;
 |---|---|
 | `scripts/dev-stack.sh up` | constrói o que mudou e sobe tudo na ordem, esperando cada serviço responder |
 | `scripts/dev-stack.sh up --fast` | sobe sem reconstruir |
+| `scripts/dev-stack.sh up --segundo-tenant` | sobe também o app-api e o M-Wall do segundo-tenant (opcional) |
 | `scripts/dev-stack.sh down` | para tudo (os dados ficam) |
 | `scripts/dev-stack.sh status` | containers e health |
 
@@ -212,7 +213,7 @@ resolver, use o IP `100.x.y.z` que aparece no app da Tailscale):
 | O quê | Endereço |
 |---|---|
 | Console | http://wallet-dev:4200 |
-| M-Wall (demo-tenant / segundo-tenant) | http://wallet-dev:8086 / http://wallet-dev:8087 |
+| M-Wall (demo-tenant / segundo-tenant, se no ar) | http://wallet-dev:8086 / http://wallet-dev:8087 |
 | Mailpit (os códigos de login) | http://wallet-dev:8025 |
 | wallet-core (Swagger) | http://wallet-dev:8080/swagger-ui.html |
 | Grafana / Jaeger | http://wallet-dev:3000 / http://wallet-dev:16686 |
