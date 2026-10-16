@@ -2,6 +2,7 @@ package br.com.walletapp.api.adapter.out.scheduler
 
 import br.com.walletapp.api.adapter.out.core.CoreTokens
 import br.com.walletapp.api.application.CustomerMessages
+import br.com.walletapp.api.adapter.out.lostAnswer
 import br.com.walletapp.api.application.port.DependencyUnavailableException
 import br.com.walletapp.api.application.port.ScheduleOutcome
 import br.com.walletapp.api.application.port.ScheduleView
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.ResourceAccessException
+import org.springframework.web.client.RestClientException
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.body
 import java.math.BigDecimal
@@ -151,6 +153,10 @@ class SchedulerClient(builder: RestClient.Builder, props: AppProperties, private
     } catch (e: HttpServerErrorException) {
         throw DependencyUnavailableException("wallet-scheduler $operation failed (${e.statusCode.value()})", e)
     } catch (e: ResourceAccessException) {
+        throw DependencyUnavailableException("wallet-scheduler $operation failed: ${e.message}", e)
+    } catch (e: RestClientException) {
+        // A timeout while reading the answer, which the RestClient does not report as ResourceAccessException.
+        if (!lostAnswer(e)) throw e
         throw DependencyUnavailableException("wallet-scheduler $operation failed: ${e.message}", e)
     }
 }

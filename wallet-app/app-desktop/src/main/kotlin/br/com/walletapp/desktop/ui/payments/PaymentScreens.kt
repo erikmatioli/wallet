@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import br.com.walletapp.contract.PixReceipt
 import br.com.walletapp.desktop.ui.Format
@@ -52,7 +53,7 @@ fun TransferScreen(viewModel: TransferViewModel, onFinish: () -> Unit) {
                     "Descrição" to s.form.description.ifBlank { "—" },
                 )
                 Error(s.error)
-                Busy(s.busy) {
+                Busy(s.busy, if (s.confirming) "Confirmando o seu pagamento…" else null) {
                     Button(onClick = { viewModel.confirm() }, Modifier.fillMaxWidth()) { Text("Confirmar transferência") }
                     OutlinedButton(onClick = viewModel::change, Modifier.fillMaxWidth()) { Text("Alterar") }
                 }
@@ -103,7 +104,7 @@ fun PixScreen(viewModel: PixViewModel, onFinish: () -> Unit) {
                     "Agência / conta" to "${p.branch} / ${p.accountNumber}",
                 )
                 Error(s.error)
-                Busy(s.busy) {
+                Busy(s.busy, if (s.confirming) "Confirmando o seu pagamento…" else null) {
                     Button(onClick = { viewModel.confirm() }, Modifier.fillMaxWidth()) { Text("Confirmar Pix") }
                     OutlinedButton(onClick = viewModel::change, Modifier.fillMaxWidth()) { Text("Alterar") }
                 }
@@ -172,8 +173,18 @@ internal fun Error(message: String?) {
     message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 }
 
-/** The buttons, or a spinner while a request is in flight: nothing can be clicked twice meanwhile. */
+/**
+ * The buttons, or a spinner while a request is in flight: nothing can be clicked twice meanwhile. [label] says what
+ * the spinner waits for, when it is worth saying (a payment being confirmed again).
+ */
 @Composable
-internal fun Busy(busy: Boolean, buttons: @Composable () -> Unit) {
-    if (busy) CircularProgressIndicator() else buttons()
+internal fun Busy(busy: Boolean, label: String? = null, buttons: @Composable () -> Unit) {
+    if (!busy) {
+        buttons()
+        return
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        CircularProgressIndicator()
+        label?.let { Text(it) }
+    }
 }

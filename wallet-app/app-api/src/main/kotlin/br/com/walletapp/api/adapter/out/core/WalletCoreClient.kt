@@ -2,6 +2,8 @@ package br.com.walletapp.api.adapter.out.core
 
 import br.com.walletapp.api.application.port.CoreBanking
 import br.com.walletapp.api.application.port.CoreContact
+import br.com.walletapp.api.adapter.out.lostAnswer
+import br.com.walletapp.api.adapter.out.payment
 import br.com.walletapp.api.application.port.DependencyUnavailableException
 import br.com.walletapp.api.application.port.Onboarding
 import br.com.walletapp.api.application.port.PaymentOutcome
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.ResourceAccessException
+import org.springframework.web.client.RestClientException
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.body
 import java.math.BigDecimal
@@ -139,7 +142,7 @@ class WalletCoreClient(builder: RestClient.Builder, props: AppProperties, privat
         }
 
     override fun transfer(from: AccountId, to: TransferDestination, amountCents: Long, description: String?,
-                          idempotencyKey: String): PaymentOutcome = call("transfer") { token ->
+                          idempotencyKey: String): PaymentOutcome = payment { call("transfer") { token ->
         try {
             val t = http.post().uri("/v1/transfers")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
@@ -154,7 +157,7 @@ class WalletCoreClient(builder: RestClient.Builder, props: AppProperties, privat
             val code = runCatching { e.getResponseBodyAs(Problem::class.java)?.code }.getOrNull()
             PaymentOutcome.Refused(code ?: "HTTP_${e.statusCode.value()}")
         }
-    }
+    } }
 
     private fun entry(e: CoreEntry) = StatementEntry(
         transactionId = e.transactionId.toString(),
@@ -200,6 +203,9 @@ class WalletCoreClient(builder: RestClient.Builder, props: AppProperties, privat
     } catch (e: HttpServerErrorException) {
         throw DependencyUnavailableException("wallet-core $operation failed (${e.statusCode.value()})", e)
     } catch (e: ResourceAccessException) {
+        throw DependencyUnavailableException("wallet-core $operation failed: ${e.message}", e)    } catch (e: RestClientException) {
+        // A timeout while reading the answer, which the RestClient does not report as ResourceAccessException.
+        if (!lostAnswer(e)) throw e
         throw DependencyUnavailableException("wallet-core $operation failed: ${e.message}", e)
     }
 

@@ -98,8 +98,10 @@ src/app/
 - **Sessão só em memória.** Nada em `localStorage`, cookie ou IndexedDB; recarregar pede o código de
   novo. Cinco minutos sem uso encerram, também quando o app volta do segundo plano.
 - **Pagamentos em três passos** (formulário, confirmação, comprovante). A `Idempotency-Key` nasce na
-  confirmação e se repete numa nova tentativa. O comprovante do Pix acompanha o status por alguns
-  segundos.
+  confirmação e se repete numa nova tentativa. Sem resposta (`PAYMENT_NOT_CONFIRMED`, serviço fora ou
+  tempo esgotado), o app confirma de novo sozinho, com a mesma chave, mostrando "Confirmando o seu
+  pagamento…" ([ADR-004 do wallet-app](../wallet-app/docs/adr/004-pagamento-sem-confirmacao.md)). O
+  comprovante do Pix acompanha o status por alguns segundos.
 - **Valor digitado como em app de banco:** os dígitos preenchem os centavos da direita para a
   esquerda, no teclado numérico. Inteiros do começo ao fim, nunca ponto flutuante.
 - **CSP restrita:** scripts só da própria origem; estilos inline liberados porque o Angular põe o CSS

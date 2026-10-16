@@ -7,6 +7,7 @@ import br.com.walletapp.contract.TransferDestination
 import br.com.walletapp.contract.TransferReceipt
 import br.com.walletapp.contract.TransferRequest
 import br.com.walletapp.desktop.data.AppApiClient
+import br.com.walletapp.desktop.data.AppApiException
 import br.com.walletapp.desktop.ui.Format
 import br.com.walletapp.desktop.ui.auth.message
 import kotlinx.coroutines.CoroutineScope
@@ -32,7 +33,42 @@ sealed interface Step<out P, out R> {
     data class Done<R>(val receipt: R) : Step<Nothing, R>
 }
 
-class TransferViewModel(private val api: AppApiClient, private val scope: CoroutineScope) {
+/**
+ * How a confirmation whose answer was lost is repeated by itself (ADR-004): same key, a few times, a few seconds
+ * apart. The payment that was made comes back instead of a second one.
+ */
+data class ConfirmRetry(val times: Int = 3, val everyMillis: Long = 3_000)
+
+/**
+ * Whether a payment may have been made although no answer came: app-api says so (PAYMENT_NOT_CONFIRMED), a
+ * dependency did not answer (TEMPORARILY_UNAVAILABLE), or app-api itself did not answer in time.
+ */
+internal fun unconfirmed(e: Exception): Boolean = (e as? AppApiException)?.code
+    ?.let { it == "PAYMENT_NOT_CONFIRMED" || it == "TEMPORARILY_UNAVAILABLE" } ?: true
+
+/** Sends; when the answer is lost, sends again with the same key. [confirming] tells the screen meanwhile. */
+internal suspend fun <T> confirmed(retry: ConfirmRetry, confirming: (Boolean) -> Unit, send: suspend () -> T): T {
+    try {
+        var attempt = 0
+        while (true) {
+            try {
+                return send()
+            } catch (e: Exception) {
+                if (attempt++ >= retry.times || !unconfirmed(e)) throw e
+                confirming(true)
+                delay(retry.everyMillis)
+            }
+        }
+    } finally {
+        confirming(false)
+    }
+}
+
+class TransferViewModel(
+    private val api: AppApiClient,
+    private val scope: CoroutineScope,
+    private val retry: ConfirmRetry = ConfirmRetry(),
+) {
 
     data class Form(val branch: String = "", val number: String = "", val checkDigit: String = "", val amount: String = "",
                     val description: String = "")
@@ -40,8 +76,9 @@ class TransferViewModel(private val api: AppApiClient, private val scope: Corout
     /** What the confirmation shows: who receives (from app-api) and how much. */
     data class Preview(val destination: TransferDestination, val amountCents: Long)
 
+    /** [confirming]: a confirmation whose answer was lost is being repeated. */
     data class State(val form: Form = Form(), val step: Step<Preview, TransferReceipt> = Step.Form,
-                     val busy: Boolean = false, val error: String? = null)
+                     val busy: Boolean = false, val error: String? = null, val confirming: Boolean = false)
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -73,11 +110,13 @@ class TransferViewModel(private val api: AppApiClient, private val scope: Corout
         return scope.launch {
             try {
                 val d = confirm.preview.destination
-                val receipt = api.transfer(
-                    TransferRequest(d.branch, d.number, d.checkDigit, confirm.preview.amountCents,
-                        s.form.description.trim().ifEmpty { null }),
-                    confirm.idempotencyKey,
-                )
+                val receipt = confirmed(retry, { c -> _state.update { it.copy(confirming = c) } }) {
+                    api.transfer(
+                        TransferRequest(d.branch, d.number, d.checkDigit, confirm.preview.amountCents,
+                            s.form.description.trim().ifEmpty { null }),
+                        confirm.idempotencyKey,
+                    )
+                }
                 _state.update { it.copy(busy = false, step = Step.Done(receipt)) }
             } catch (e: Exception) {
                 // Stays on the confirmation with the same key: "Confirmar" again is a retry, not a second transfer.
@@ -99,6 +138,7 @@ class PixViewModel(
     private val scope: CoroutineScope,
     private val pollEveryMillis: Long = 1_000,
     private val pollTimes: Int = 10,
+    private val retry: ConfirmRetry = ConfirmRetry(),
 ) {
 
     data class Form(val name: String = "", val taxId: String = "", val ispb: String = "", val branch: String = "",
@@ -106,8 +146,9 @@ class PixViewModel(
 
     data class Preview(val payee: PixPayee, val amountCents: Long)
 
+    /** [confirming]: a confirmation whose answer was lost is being repeated. */
     data class State(val form: Form = Form(), val step: Step<Preview, PixReceipt> = Step.Form,
-                     val busy: Boolean = false, val error: String? = null)
+                     val busy: Boolean = false, val error: String? = null, val confirming: Boolean = false)
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -142,8 +183,10 @@ class PixViewModel(
         _state.update { it.copy(busy = true, error = null) }
         return scope.launch {
             val sent = try {
-                api.sendPix(PixRequest(confirm.preview.payee, confirm.preview.amountCents,
-                    s.form.description.trim().ifEmpty { null }), confirm.idempotencyKey)
+                confirmed(retry, { c -> _state.update { it.copy(confirming = c) } }) {
+                    api.sendPix(PixRequest(confirm.preview.payee, confirm.preview.amountCents,
+                        s.form.description.trim().ifEmpty { null }), confirm.idempotencyKey)
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(busy = false, error = message(e)) }
                 return@launch

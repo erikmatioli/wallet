@@ -2,6 +2,7 @@ package br.com.walletapp.desktop.ui
 
 import br.com.walletapp.desktop.data.AppApiClient
 import br.com.walletapp.desktop.data.SessionStore
+import br.com.walletapp.desktop.ui.payments.ConfirmRetry
 import br.com.walletapp.desktop.ui.payments.PixViewModel
 import br.com.walletapp.desktop.ui.payments.Step
 import br.com.walletapp.desktop.ui.payments.TransferViewModel
@@ -70,7 +71,7 @@ class PaymentViewModelsTest {
             else if (++attempts == 1) respond("""{"code":"TEMPORARILY_UNAVAILABLE","message":"Serviço indisponível no momento. Tente de novo."}""",
                 HttpStatusCode.ServiceUnavailable, json)
             else ok("""{"transactionId":"tx-1","amountCents":100,"occurredAt":"2026-10-07T13:00:00Z","destination":$destination}""")
-        }, backgroundScope)
+        }, backgroundScope, ConfirmRetry(times = 0))
         vm.edit { it.copy(branch = "0001", number = "200", checkDigit = "2", amount = "1") }
         vm.review()!!.join()
 
@@ -83,6 +84,44 @@ class PaymentViewModelsTest {
         val keys = requests.filter { it.method == HttpMethod.Post }.map { it.headers["Idempotency-Key"] }
         assertEquals(2, keys.size)
         assertEquals(keys[0], keys[1]) // the retry is the same transfer, not a second one
+    }
+
+    @Test
+    fun `a payment whose answer was lost is confirmed again by itself, with the same key (ADR-004)`() = runTest {
+        var attempts = 0
+        val vm = PixViewModel(api {
+            if (it.method == HttpMethod.Get) ok(pix("COMPLETED"))
+            else if (++attempts < 3) respond("""{"code":"PAYMENT_NOT_CONFIRMED","message":"Confirme de novo."}""",
+                HttpStatusCode.ServiceUnavailable, json)
+            else ok(pix("COMPLETED"))
+        }, backgroundScope, retry = ConfirmRetry(times = 3, everyMillis = 1_000))
+        vm.edit { it.copy(name = "Ana", taxId = "52998224725", ispb = "99999999", branch = "0001", account = "123456",
+            amount = "10") }
+        vm.review()
+
+        vm.confirm()!!.join()
+
+        assertIs<Step.Done<*>>(vm.state.value.step)
+        assertEquals(false, vm.state.value.confirming)
+        val keys = requests.filter { it.method == HttpMethod.Post }.map { it.headers["Idempotency-Key"] }
+        assertEquals(3, keys.size)
+        assertEquals(1, keys.toSet().size)
+    }
+
+    @Test
+    fun `a refusal is never confirmed again`() = runTest {
+        val vm = TransferViewModel(api {
+            if (it.method == HttpMethod.Get) ok(destination)
+            else respond("""{"code":"INSUFFICIENT_FUNDS","message":"Saldo insuficiente."}""",
+                HttpStatusCode.UnprocessableEntity, json)
+        }, backgroundScope)
+        vm.edit { it.copy(branch = "0001", number = "200", checkDigit = "2", amount = "1") }
+        vm.review()!!.join()
+
+        vm.confirm()!!.join()
+
+        assertEquals("Saldo insuficiente.", vm.state.value.error)
+        assertEquals(1, requests.count { it.method == HttpMethod.Post })
     }
 
     @Test

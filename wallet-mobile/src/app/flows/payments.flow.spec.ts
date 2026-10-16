@@ -1,7 +1,7 @@
 import { AppApiError } from '../core/api';
 import { TAX_ID_ERROR } from '../core/format';
 import { fakeApi, pix } from '../testing/fake-api';
-import { AMOUNT_ERROR, PixFlow, TransferFlow } from './payments.flow';
+import { AMOUNT_ERROR, PixFlow, TransferFlow, unconfirmed } from './payments.flow';
 
 const destination = {
   holderName: 'João Souza',
@@ -176,5 +176,56 @@ describe('PixFlow', () => {
       'Conta do recebedor inexistente ou inválida.',
     );
     expect(api.pixStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('a confirmation whose answer was lost (wallet-app ADR-004)', () => {
+  const receipt = { transactionId: 't-1', amountCents: 100, occurredAt: '2026-10-15T20:00:00Z', destination };
+  const fast = { times: 3, everyMs: 1 };
+
+  async function confirming(flow: TransferFlow): Promise<string> {
+    await flow.review();
+    const step = flow.step();
+    if (step.kind !== 'confirm') throw new Error('no confirmation');
+    await flow.confirm();
+    return step.idempotencyKey;
+  }
+
+  it('is repeated by itself with the same key until the payment comes back', async () => {
+    const api = fakeApi();
+    api.transferDestination.mockResolvedValue(destination);
+    api.transfer
+      .mockRejectedValueOnce(new AppApiError('PAYMENT_NOT_CONFIRMED', 'Ainda não temos a confirmação.'))
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValueOnce(receipt);
+    const flow = new TransferFlow(api, fast);
+    flow.edit({ branch: '0001', number: '00100161', checkDigit: '0', amountCents: 100 });
+
+    const key = await confirming(flow);
+
+    expect(api.transfer).toHaveBeenCalledTimes(3);
+    expect(new Set(api.transfer.mock.calls.map((c) => c[1]))).toEqual(new Set([key]));
+    expect(flow.step().kind).toBe('done');
+    expect(flow.confirming()).toBe(false);
+  });
+
+  it('gives up after a few tries, on the confirmation, with app-api message', async () => {
+    const api = fakeApi();
+    api.transferDestination.mockResolvedValue(destination);
+    api.transfer.mockRejectedValue(new AppApiError('PAYMENT_NOT_CONFIRMED', 'Confirme de novo.'));
+    const flow = new TransferFlow(api, fast);
+    flow.edit({ branch: '0001', number: '00100161', checkDigit: '0', amountCents: 100 });
+
+    await confirming(flow);
+
+    expect(api.transfer).toHaveBeenCalledTimes(4);
+    expect(flow.step().kind).toBe('confirm');
+    expect(flow.error()).toBe('Confirme de novo.');
+  });
+
+  it('never repeats a refusal', () => {
+    expect(unconfirmed(new AppApiError('INSUFFICIENT_FUNDS', 'Saldo insuficiente.'))).toBe(false);
+    expect(unconfirmed(new AppApiError('TEMPORARILY_UNAVAILABLE', 'Tente de novo.'))).toBe(true);
+    expect(unconfirmed(new Error('network'))).toBe(true);
   });
 });

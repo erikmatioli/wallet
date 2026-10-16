@@ -1,6 +1,8 @@
 package br.com.walletapp.api.adapter.out.pix
 
 import br.com.walletapp.api.adapter.out.core.CoreTokens
+import br.com.walletapp.api.adapter.out.lostAnswer
+import br.com.walletapp.api.adapter.out.payment
 import br.com.walletapp.api.application.port.DependencyUnavailableException
 import br.com.walletapp.api.application.port.PixGateway
 import br.com.walletapp.api.application.port.PixOutcome
@@ -14,6 +16,7 @@ import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.ResourceAccessException
+import org.springframework.web.client.RestClientException
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.body
 import java.math.BigDecimal
@@ -38,7 +41,7 @@ class PixServiceClient(builder: RestClient.Builder, props: AppProperties, privat
     private data class Problem(val code: String?)
 
     override fun send(payer: AccountId, payerCpf: Cpf, payee: PixPayee, amountCents: Long, description: String?,
-                      idempotencyKey: String): PixOutcome = call("send") { token ->
+                      idempotencyKey: String): PixOutcome = payment { call("send") { token ->
         try {
             val p = http.post().uri("/v1/pix/payments")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
@@ -54,7 +57,7 @@ class PixServiceClient(builder: RestClient.Builder, props: AppProperties, privat
             val code = runCatching { e.getResponseBodyAs(Problem::class.java)?.code }.getOrNull()
             PixOutcome.Refused(code ?: "HTTP_${e.statusCode.value()}")
         }
-    }
+    } }
 
     override fun status(endToEndId: String): PixOutcome.Sent? = call("status") { token ->
         try {
@@ -76,6 +79,9 @@ class PixServiceClient(builder: RestClient.Builder, props: AppProperties, privat
     } catch (e: HttpServerErrorException) {
         throw DependencyUnavailableException("wallet-pix $operation failed (${e.statusCode.value()})", e)
     } catch (e: ResourceAccessException) {
+        throw DependencyUnavailableException("wallet-pix $operation failed: ${e.message}", e)    } catch (e: RestClientException) {
+        // A timeout while reading the answer, which the RestClient does not report as ResourceAccessException.
+        if (!lostAnswer(e)) throw e
         throw DependencyUnavailableException("wallet-pix $operation failed: ${e.message}", e)
     }
 

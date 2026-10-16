@@ -121,7 +121,24 @@ sealed interface Onboarding {
 }
 
 /** A dependency did not answer; the customer may try again. */
-class DependencyUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+/**
+ * A dependency did not answer: a network failure, a timeout or a 5xx. The API answers 503 with [code] and
+ * [userMessage], which the app shows as they are.
+ */
+open class DependencyUnavailableException(
+    message: String,
+    cause: Throwable? = null,
+    val code: String = "TEMPORARILY_UNAVAILABLE",
+    val userMessage: String = "Serviço indisponível no momento. Tente de novo.",
+) : RuntimeException(message, cause)
+
+/**
+ * The answer of a payment was lost (ADR-004): it may have been made. Confirming again repeats the same
+ * Idempotency-Key, and the payment that was made comes back instead of a second one.
+ */
+class PaymentNotConfirmedException(message: String, cause: Throwable? = null) : DependencyUnavailableException(
+    message, cause, "PAYMENT_NOT_CONFIRMED",
+    "Ainda não temos a confirmação do pagamento. Confirme de novo: o mesmo pagamento nunca sai duas vezes.")
 
 interface LoginRepository {
     fun find(cpf: Cpf): CustomerLogin?

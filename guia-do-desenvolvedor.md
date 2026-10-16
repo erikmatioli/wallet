@@ -721,6 +721,9 @@ ui/<área>/           uma tela = um @Composable + um ViewModel com StateFlow
 - A `Idempotency-Key` nasce no passo `Confirm`. Se der erro, a tela continua na confirmação com a
   mesma chave: clicar "Confirmar" de novo é uma repetição, não um segundo pagamento. Voltar ao
   formulário para mudar algo gera uma chave nova.
+- Sem resposta do pagamento (o app-api responde 503 `PAYMENT_NOT_CONFIRMED`, ou nada chega em 15
+  segundos), o ViewModel confirma de novo sozinho, com a mesma chave, até 3 vezes (ADR-004 do
+  wallet-app). Uma recusa nunca é repetida.
 
 **Empacotar:** `./gradlew :app-desktop:createDistributable` gera o `Wallet.exe` com a JVM embutida.
 A JVM do pacote só leva os módulos listados em `build.gradle.kts`. Se faltar `java.net.http`, o app

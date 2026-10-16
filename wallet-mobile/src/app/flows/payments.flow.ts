@@ -1,5 +1,5 @@
 import { WritableSignal, signal } from '@angular/core';
-import { WalletApi, message } from '../core/api';
+import { AppApiError, WalletApi, message } from '../core/api';
 import { PixPayee, PixReceipt, TransferDestination, TransferReceipt } from '../core/contract';
 import { TAX_ID_ERROR, isTaxId, uuid } from '../core/format';
 
@@ -15,15 +15,57 @@ export type Step<P, R> =
 
 export const AMOUNT_ERROR = 'Informe um valor maior que zero.';
 
+/**
+ * How a confirmation whose answer was lost is repeated by itself (wallet-app's ADR-004): same key, a few times,
+ * a few seconds apart. The payment that was made comes back instead of a second one.
+ */
+export interface ConfirmRetry {
+  times: number;
+  everyMs: number;
+}
+
+export const CONFIRM_RETRY: ConfirmRetry = { times: 3, everyMs: 3_000 };
+
+/**
+ * Whether a payment may have been made although no answer came: app-api says so (PAYMENT_NOT_CONFIRMED), a
+ * dependency did not answer (TEMPORARILY_UNAVAILABLE), or app-api itself did not answer in time.
+ */
+export function unconfirmed(e: unknown): boolean {
+  if (e instanceof AppApiError) return e.code === 'PAYMENT_NOT_CONFIRMED' || e.code === 'TEMPORARILY_UNAVAILABLE';
+  return true;
+}
+
 /** What every payment flow has: the form, the step, busy and error. */
 abstract class PaymentFlow<F, P, R> {
   readonly form: WritableSignal<F>;
   readonly step = signal<Step<P, R>>({ kind: 'form' });
   readonly busy = signal(false);
+  /** A confirmation is being repeated because its answer was lost: "Confirmando o seu pagamento…". */
+  readonly confirming = signal(false);
   readonly error = signal<string | null>(null);
 
-  protected constructor(private readonly empty: () => F) {
+  protected constructor(
+    private readonly empty: () => F,
+    private readonly retry: ConfirmRetry,
+  ) {
     this.form = signal(empty());
+  }
+
+  /** Sends; when the answer is lost, sends again with the same key, as {@link CONFIRM_RETRY} says. */
+  protected async confirmed<T>(send: () => Promise<T>): Promise<T> {
+    try {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await send();
+        } catch (e) {
+          if (attempt >= this.retry.times || !unconfirmed(e)) throw e;
+          this.confirming.set(true);
+          await new Promise((r) => setTimeout(r, this.retry.everyMs));
+        }
+      }
+    } finally {
+      this.confirming.set(false);
+    }
   }
 
   edit(change: Partial<F>): void {
@@ -65,8 +107,11 @@ export interface TransferPreview {
 }
 
 export class TransferFlow extends PaymentFlow<TransferForm, TransferPreview, TransferReceipt> {
-  constructor(private readonly api: WalletApi) {
-    super(() => ({ branch: '', number: '', checkDigit: '', amountCents: 0, description: '' }));
+  constructor(
+    private readonly api: WalletApi,
+    retry: ConfirmRetry = CONFIRM_RETRY,
+  ) {
+    super(() => ({ branch: '', number: '', checkDigit: '', amountCents: 0, description: '' }), retry);
   }
 
   /** Checks the amount here and the destination at app-api, then shows the confirmation. Nothing moves yet. */
@@ -103,15 +148,17 @@ export class TransferFlow extends PaymentFlow<TransferForm, TransferPreview, Tra
     this.error.set(null);
     try {
       const d = step.preview.destination;
-      const receipt = await this.api.transfer(
-        {
-          branch: d.branch,
-          number: d.number,
-          checkDigit: d.checkDigit,
-          amountCents: step.preview.amountCents,
-          description: this.form().description.trim() || null,
-        },
-        step.idempotencyKey,
+      const receipt = await this.confirmed(() =>
+        this.api.transfer(
+          {
+            branch: d.branch,
+            number: d.number,
+            checkDigit: d.checkDigit,
+            amountCents: step.preview.amountCents,
+            description: this.form().description.trim() || null,
+          },
+          step.idempotencyKey,
+        ),
       );
       this.step.set({ kind: 'done', receipt });
     } catch (e) {
@@ -143,6 +190,7 @@ export class PixFlow extends PaymentFlow<PixForm, PixPreview, PixReceipt> {
     private readonly api: WalletApi,
     private readonly pollEveryMs = 1_000,
     private readonly pollTimes = 10,
+    retry: ConfirmRetry = CONFIRM_RETRY,
   ) {
     super(() => ({
       name: '',
@@ -152,7 +200,7 @@ export class PixFlow extends PaymentFlow<PixForm, PixPreview, PixReceipt> {
       account: '',
       amountCents: 0,
       description: '',
-    }));
+    }), retry);
   }
 
   /** A Pix goes to another institution: nobody to look up, the confirmation repeats what was typed. */
@@ -190,13 +238,15 @@ export class PixFlow extends PaymentFlow<PixForm, PixPreview, PixReceipt> {
     this.error.set(null);
     let receipt: PixReceipt;
     try {
-      receipt = await this.api.sendPix(
-        {
-          payee: step.preview.payee,
-          amountCents: step.preview.amountCents,
-          description: this.form().description.trim() || null,
-        },
-        step.idempotencyKey,
+      receipt = await this.confirmed(() =>
+        this.api.sendPix(
+          {
+            payee: step.preview.payee,
+            amountCents: step.preview.amountCents,
+            description: this.form().description.trim() || null,
+          },
+          step.idempotencyKey,
+        ),
       );
     } catch (e) {
       this.error.set(message(e));
