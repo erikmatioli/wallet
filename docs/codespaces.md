@@ -86,7 +86,7 @@ navegador, abra `https://<nome>-8090.app.github.dev/simulate/messages` e, no Con
 
 ## Os dados
 
-Todos os bancos (core, app, Pix, agendamentos, OTP) ficam no Postgres do core, num volume do Docker que está no disco
+Todos os bancos (core, app, Pix, agendamentos, OTP, tarifas) ficam no Postgres do core, num volume do Docker que está no disco
 do Codespace: **parar e religar o Codespace não perde nada**. Perdem-se só o que fica em memória (os e-mails do
 Mailpit, um Pix em andamento no simulador, a fila do LocalStack naquele instante).
 
@@ -95,7 +95,7 @@ Os dados somem quando o Codespace é **apagado**, à mão ou depois de 30 dias s
 
 ```bash
 mkdir -p /workspaces/backup
-for db in wallet app app_segundo pix scheduler otp; do
+for db in wallet app app_segundo pix scheduler otp fees; do
   docker exec wallet-core-postgres-1 pg_dump -U wallet_owner -d $db -Fc > /workspaces/backup/$db.dump
 done
 ```
@@ -104,6 +104,9 @@ Para guardar fora do Codespace: botão direito na pasta `backup`, no explorador 
 
 ## Trabalhar
 
+- **Ao abrir o Codespace:** o terminal *stack* faz `git pull` na branch atual e reconstrói só os serviços que o pull
+  alterou. Se houver alteração local nos arquivos versionados, o pull não acontece (rode `git pull` quando quiser),
+  e uma branch que só existe no Codespace sobe como está.
 - **Depois de mudar o código de um serviço:** `scripts/dev-stack.sh up` (reconstrói o que mudou).
 - **Console:** o `ng serve` já roda com recarga automática; editar `wallet-console/` atualiza a tela.
 - **Testes:** `cd wallet-core && mvn verify`, `cd wallet-app && ./gradlew build`, como na sua máquina (os testes
